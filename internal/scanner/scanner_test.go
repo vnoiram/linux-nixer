@@ -107,6 +107,35 @@ func TestConfigScannerMarksSecretRiskDevOpsConfig(t *testing.T) {
 	}
 }
 
+func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
+	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[wifi-security]\npsk=secret\n")
+	write(t, root, "/home/alice/project/pyproject.toml", "[project]\nname='demo'\n")
+	write(t, root, "/home/alice/project/.devcontainer/devcontainer.json", "{}")
+
+	report := &model.ScanReport{}
+	if err := (ConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]model.Decision{}
+	for _, item := range report.Items {
+		seen[item.Path] = item.Decision
+	}
+	if seen["/etc/udev/rules.d/99-device.rules"] != model.DecisionCandidate {
+		t.Fatalf("missing udev rule in %+v", report.Items)
+	}
+	if seen["/etc/NetworkManager/system-connections/home.nmconnection"] != model.DecisionMigrationNote {
+		t.Fatalf("network secret should be migration note in %+v", report.Items)
+	}
+	if seen["/home/alice/project/pyproject.toml"] != model.DecisionCandidate {
+		t.Fatalf("missing project config in %+v", report.Items)
+	}
+	if seen["/home/alice/project/.devcontainer/devcontainer.json"] != model.DecisionCandidate {
+		t.Fatalf("missing devcontainer config in %+v", report.Items)
+	}
+}
+
 func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/var/lib/flatpak/app/org.example.App/current/active/files/bin/app", "")
