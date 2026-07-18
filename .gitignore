@@ -1,0 +1,7 @@
+bin/
+dist/
+coverage.out
+scan.json
+reviewed.json
+nix-config/
+.DS_Store

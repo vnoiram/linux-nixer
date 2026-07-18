@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Build release archives
+        run: |
+          set -eu
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" go build -ldflags="-s -w" -o "dist/linux-nixer" ./cmd/linux-nixer
+            tar -C dist -czf "dist/linux-nixer-${GITHUB_REF_NAME}-linux-${arch}.tar.gz" linux-nixer
+            rm "dist/linux-nixer"
+          done
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file CHANGELOG.md \
+            dist/*.tar.gz dist/checksums.txt
