@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +58,37 @@ func TestFilesystemDiffClassifiesSeededRandomLikeApps(t *testing.T) {
 	}
 }
 
+func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
+	root := t.TempDir()
+	writeMode(t, root, "/usr/local/bin/same", []byte("#!/bin/sh\necho same\n"), 0o755)
+	writeMode(t, root, "/usr/local/bin/new", []byte("#!/bin/sh\necho new\n"), 0o755)
+	baseline := filepath.Join(root, "baseline.json")
+	sum := sha256Hex(t, filepath.Join(root, "usr/local/bin/same"))
+	if err := os.WriteFile(baseline, []byte(`{"files":[{"path":"/usr/local/bin/same","type":"script","mode":"-rwxr-xr-x","size":20,"sha256":"`+sum+`"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := &model.ScanReport{}
+	err := (FilesystemDiffScanner{}).Scan(context.Background(), Options{Root: root, BaselineID: baseline, Includes: []string{"/usr/local/bin"}}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.FilesystemDiff {
+		if finding.Path == "/usr/local/bin/same" {
+			t.Fatalf("unchanged baseline file should be skipped: %+v", report.FilesystemDiff)
+		}
+	}
+	foundNew := false
+	for _, finding := range report.FilesystemDiff {
+		if finding.Path == "/usr/local/bin/new" {
+			foundNew = true
+		}
+	}
+	if !foundNew {
+		t.Fatalf("new file missing: %+v", report.FilesystemDiff)
+	}
+}
+
 func TestConfigScannerMarksSecretRiskDevOpsConfig(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/home/alice/.kube/config", "users:\n- token: super-secret\n")
@@ -88,4 +121,14 @@ func writeMode(t *testing.T, root, path string, content []byte, mode os.FileMode
 	if err := os.WriteFile(abs, content, mode); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func sha256Hex(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

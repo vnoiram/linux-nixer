@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ type FilesystemDiffScanner struct{}
 func (FilesystemDiffScanner) Name() string { return "filesystem-diff" }
 
 func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
+	baselineEntries, baselineLoaded := loadBaselineEntries(opts.BaselineID, report)
 	roots := []string{"/etc", "/usr/local", "/opt", "/srv", "/home"}
 	if opts.Deep {
 		roots = []string{"/"}
@@ -43,6 +45,9 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 				return nil
 			}
 			finding := classifyFile(path, disp, info)
+			if baselineLoaded && !changedFromBaseline(finding, baselineEntries[disp]) {
+				return nil
+			}
 			if finding.Category == "stateful-data" {
 				report.StatefulData = append(report.StatefulData, finding)
 				return nil
@@ -54,6 +59,53 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 		})
 	}
 	return nil
+}
+
+type baselineFile struct {
+	Path   string `json:"path"`
+	Type   string `json:"type"`
+	Mode   string `json:"mode,omitempty"`
+	Size   int64  `json:"size,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+type baselineJSON struct {
+	Files []baselineFile `json:"files"`
+}
+
+func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baselineFile, bool) {
+	if id == "" {
+		return nil, false
+	}
+	f, err := os.Open(id)
+	if err != nil {
+		report.Warnings = append(report.Warnings, model.Warning{
+			Source:  "filesystem-diff",
+			Message: "baseline manifest not found locally; treating scan as classification-only: " + id,
+		})
+		return nil, false
+	}
+	defer f.Close()
+	var parsed baselineJSON
+	if err := json.NewDecoder(f).Decode(&parsed); err != nil {
+		report.Warnings = append(report.Warnings, model.Warning{Source: "filesystem-diff", Message: "failed to parse baseline manifest: " + err.Error()})
+		return nil, false
+	}
+	entries := map[string]baselineFile{}
+	for _, file := range parsed.Files {
+		entries[file.Path] = file
+	}
+	return entries, true
+}
+
+func changedFromBaseline(finding model.FileFinding, base baselineFile) bool {
+	if base.Path == "" {
+		return true
+	}
+	if base.SHA256 != "" && finding.SHA256 != "" {
+		return base.SHA256 != finding.SHA256
+	}
+	return base.Size != finding.Size || base.Mode != finding.Mode || base.Type != finding.Type
 }
 
 func classifyFile(abs, disp string, info os.FileInfo) model.FileFinding {
