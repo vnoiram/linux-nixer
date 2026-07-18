@@ -39,3 +39,34 @@ func TestProjectRendersFlakeAndReport(t *testing.T) {
 		t.Fatalf("configuration missing package: %s", cfg)
 	}
 }
+
+func TestProjectUsesPrimaryUserAndSafeHostAttr(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Host: model.Host{Hostname: "123 demo.host"},
+		Users: []model.User{
+			{Name: "daemon", Home: "/usr/sbin", System: true},
+			{Name: "alice", Home: "/home/alice"},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	flake, err := os.ReadFile(filepath.Join(out, "flake.nix"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(flake), "nixosConfigurations.host_123_demo_host") {
+		t.Fatalf("flake missing sanitized host attr: %s", flake)
+	}
+	if !strings.Contains(string(flake), `home-manager.users."alice"`) {
+		t.Fatalf("flake missing primary user: %s", flake)
+	}
+	home, err := os.ReadFile(filepath.Join(out, "users/home.nix"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(home), `home.homeDirectory = "/home/alice";`) {
+		t.Fatalf("home missing primary home: %s", home)
+	}
+}
