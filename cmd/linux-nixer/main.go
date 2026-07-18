@@ -14,6 +14,7 @@ import (
 	"github.com/vnoiram/linux-nixer/internal/doctor"
 	"github.com/vnoiram/linux-nixer/internal/model"
 	"github.com/vnoiram/linux-nixer/internal/render"
+	"github.com/vnoiram/linux-nixer/internal/review"
 	"github.com/vnoiram/linux-nixer/internal/scanner"
 )
 
@@ -58,9 +59,9 @@ func usage(w io.Writer) {
 
 Usage:
   linux-nixer scan --out scan.json [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
-  linux-nixer review --scan scan.json --out reviewed.json
+  linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer generate --scan reviewed.json --out ./nix-config
-  linux-nixer doctor --project ./nix-config [--vm]
+  linux-nixer doctor --project ./nix-config [--vm] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer version`)
 }
@@ -103,6 +104,19 @@ func runReview(args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input scan JSON")
 	out := fs.String("out", "", "output reviewed JSON")
+	autoSafe := fs.Bool("auto-safe", false, "confirm high-confidence safe findings")
+	var confirmKinds multiFlag
+	var excludeKinds multiFlag
+	var todoKinds multiFlag
+	var noteKinds multiFlag
+	var confirmManagers multiFlag
+	var excludePaths multiFlag
+	fs.Var(&confirmKinds, "confirm-kind", "mark findings of kind/category as confirmed")
+	fs.Var(&excludeKinds, "exclude-kind", "mark findings of kind/category as excluded")
+	fs.Var(&todoKinds, "todo-kind", "mark findings of kind/category as todo")
+	fs.Var(&noteKinds, "migration-note-kind", "mark findings of kind/category as migration-note")
+	fs.Var(&confirmManagers, "confirm-manager", "mark packages from manager as confirmed")
+	fs.Var(&excludePaths, "exclude-path", "exclude findings with path prefix")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -113,14 +127,14 @@ func runReview(args []string, stdout io.Writer) error {
 	if err := readJSON(*scanPath, &report); err != nil {
 		return err
 	}
-	for i := range report.Items {
-		if report.Items[i].Decision == "" {
-			report.Items[i].Decision = model.DecisionCandidate
-		}
-	}
-	report.Warnings = append(report.Warnings, model.Warning{
-		Source:  "review",
-		Message: "interactive TUI is not implemented yet; copied scan with default candidate decisions",
+	report = review.Apply(report, review.Options{
+		AutoSafe:            *autoSafe,
+		ConfirmKinds:        confirmKinds,
+		ExcludeKinds:        excludeKinds,
+		TODOKinds:           todoKinds,
+		MigrationNoteKinds:  noteKinds,
+		ConfirmManagers:     confirmManagers,
+		ExcludePathPrefixes: excludePaths,
 	})
 	return writeJSON(*out, &report)
 }
@@ -148,13 +162,14 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	project := fs.String("project", "", "generated flake project")
 	vm := fs.Bool("vm", false, "attempt VM validation")
+	host := fs.String("host", "", "NixOS configuration name for VM validation")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *project == "" {
 		return errors.New("doctor requires --project")
 	}
-	result := doctor.Run(ctx, *project, *vm)
+	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Host: *host})
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(result)

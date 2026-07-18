@@ -13,4 +13,6 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Scanners for apt, language tools, Git sources, containers, common configuration, and filesystem findings.
 - NixOS + Home Manager flake rendering.
 - Baseline manifest creation.
+- Non-interactive review decisions for packages, findings, paths, and managers.
+- VM build validation through `doctor --vm`.
 - CI and tag-based release workflow.

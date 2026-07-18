@@ -12,6 +12,8 @@ This is an early implementation scaffold. It includes:
 - Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, common config files, and filesystem findings
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
+- Non-interactive review rules for confirming, excluding, or deferring findings
+- `doctor --vm` support for building the generated NixOS VM derivation
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
 
@@ -21,7 +23,7 @@ This is an early implementation scaffold. It includes:
 go build -o bin/linux-nixer ./cmd/linux-nixer
 
 bin/linux-nixer scan --out scan.json
-bin/linux-nixer review --scan scan.json --out reviewed.json
+bin/linux-nixer review --scan scan.json --out reviewed.json --auto-safe
 bin/linux-nixer generate --scan reviewed.json --out nix-config
 bin/linux-nixer doctor --project nix-config
 ```
@@ -36,6 +38,24 @@ Create a local baseline manifest:
 
 ```sh
 bin/linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baselines/ubuntu-24.04.json
+```
+
+Review decisions can be adjusted without editing JSON by hand:
+
+```sh
+bin/linux-nixer review \
+  --scan scan.json \
+  --out reviewed.json \
+  --auto-safe \
+  --confirm-manager apt \
+  --confirm-kind service \
+  --exclude-path /home/alice/Downloads
+```
+
+VM validation builds the generated NixOS VM derivation when Nix is available:
+
+```sh
+bin/linux-nixer doctor --project nix-config --vm --host generated
 ```
 
 ## Scanner domains
