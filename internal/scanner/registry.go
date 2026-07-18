@@ -38,6 +38,7 @@ func DefaultRegistry() Registry {
 		HostScanner{},
 		UserScanner{},
 		AptScanner{},
+		PackageEcosystemScanner{},
 		LanguageScanner{},
 		GitScanner{},
 		ContainerScanner{},

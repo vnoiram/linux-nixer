@@ -11,6 +11,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Initial Go CLI scaffold with scan, review, generate, doctor, and baseline commands.
 - Registry-based scanner architecture.
 - Scanners for apt, language tools, Git sources, containers, common configuration, and filesystem findings.
+- Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux.
 - NixOS + Home Manager flake rendering.
 - Baseline manifest creation.
 - Non-interactive review decisions for packages, findings, paths, and managers.

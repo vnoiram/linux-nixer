@@ -107,6 +107,27 @@ func TestConfigScannerMarksSecretRiskDevOpsConfig(t *testing.T) {
 	}
 }
 
+func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/var/lib/flatpak/app/org.example.App/current/active/files/bin/app", "")
+	writeMode(t, root, "/home/alice/Applications/Tool.AppImage", []byte("appimage"), 0o755)
+	write(t, root, "/home/linuxbrew/.linuxbrew/Cellar/hello/1.0/INSTALL_RECEIPT.json", "{}")
+
+	report := &model.ScanReport{}
+	if err := (PackageEcosystemScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, pkg := range report.Packages {
+		seen[pkg.Manager+":"+pkg.Name] = true
+	}
+	for _, want := range []string{"flatpak:org.example.App", "appimage:Tool", "homebrew:hello"} {
+		if !seen[want] {
+			t.Fatalf("missing %s in %+v", want, report.Packages)
+		}
+	}
+}
+
 func write(t *testing.T, root, path, content string) {
 	t.Helper()
 	writeMode(t, root, path, []byte(content), 0o644)

@@ -10,6 +10,7 @@ This is an early implementation scaffold. It includes:
 
 - Go CLI commands: `scan`, `review`, `generate`, `doctor`, `baseline create`
 - Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, common config files, and filesystem findings
+- Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
 - Non-interactive review rules for confirming, excluding, or deferring findings
@@ -61,6 +62,7 @@ bin/linux-nixer doctor --project nix-config --vm --host generated
 ## Scanner domains
 
 - apt/dpkg packages and apt sources
+- snap, flatpak, AppImage, and Homebrew on Linux
 - npm global packages and local node module metadata
 - Python venv and pipx environments
 - version managers such as asdf, nvm, pyenv, rbenv, sdkman, conda
