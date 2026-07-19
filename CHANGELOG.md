@@ -24,4 +24,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - VM build validation through `doctor --vm`.
 - Optional VM boot script validation through `doctor --boot`.
 - Read-only sudo fallback for selected host scan files.
+- Dedicated desktop settings scanner and `reports/desktop.md` output.
 - CI and tag-based release workflow.

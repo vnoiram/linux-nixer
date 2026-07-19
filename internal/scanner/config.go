@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -69,34 +68,9 @@ func (ConfigScanner) Scan(ctx context.Context, opts Options, report *model.ScanR
 			report.Items = append(report.Items, model.Item{Kind: "user-config", Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: model.DecisionCandidate})
 		}
 	}
-	for _, pattern := range []string{"/home/*/.config/autostart/*.desktop"} {
-		for _, path := range glob(opts.Root, pattern) {
-			report.Desktop.Autostart = append(report.Desktop.Autostart, model.FileFinding{Path: displayPath(opts.Root, path), Type: "desktop-entry", Category: "desktop-autostart", Decision: model.DecisionCandidate})
-		}
-	}
-	scanDesktopMarkers(opts, report)
 	scanDevOpsConfigs(opts, report)
 	scanProjectConfigs(opts, report)
 	return nil
-}
-
-func scanDesktopMarkers(opts Options, report *model.ScanReport) {
-	if exists(opts.Root, "/usr/bin/gnome-shell") || exists(opts.Root, "/usr/share/gnome") {
-		report.Desktop.Environment = "gnome"
-	}
-	if exists(opts.Root, "/usr/bin/plasmashell") || exists(opts.Root, "/usr/share/plasma") {
-		report.Desktop.Environment = "kde"
-	}
-	for _, path := range glob(opts.Root, "/usr/share/fonts/*", "/home/*/.local/share/fonts/*") {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			report.Desktop.Fonts = append(report.Desktop.Fonts, displayPath(opts.Root, path))
-		}
-	}
-	for _, path := range glob(opts.Root, "/usr/share/themes/*", "/home/*/.themes/*", "/usr/share/icons/*", "/home/*/.icons/*") {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			report.Desktop.Themes = append(report.Desktop.Themes, displayPath(opts.Root, path))
-		}
-	}
 }
 
 func scanDevOpsConfigs(opts Options, report *model.ScanReport) {

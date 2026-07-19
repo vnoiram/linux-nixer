@@ -227,6 +227,111 @@ func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
 	}
 }
 
+func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/usr/share/gnome/.keep", "")
+	write(t, root, "/home/alice/.local/share/fonts/demo.ttf", "font")
+	write(t, root, "/home/alice/.themes/demo/index.theme", "[Theme]\n")
+	write(t, root, "/home/alice/.config/autostart/tool.desktop", "[Desktop Entry]\n")
+	write(t, root, "/home/alice/.config/kdeglobals", "[KDE]\n")
+	write(t, root, "/home/alice/.config/kwinrc", "[KWin]\n")
+	write(t, root, "/home/alice/.config/i3/config", "bindsym Mod4+Enter exec alacritty\n")
+	write(t, root, "/home/alice/.config/sway/config", "set $mod Mod4\n")
+	write(t, root, "/home/alice/.config/fcitx5/profile", "[Groups]\n")
+	write(t, root, "/home/alice/.config/ibus/bus", "")
+	write(t, root, "/home/alice/.config/alacritty/alacritty.toml", "[window]\n")
+	write(t, root, "/home/alice/.config/kitty/kitty.conf", "font_size 12\n")
+	write(t, root, "/home/alice/.config/Code/User/settings.json", "{}")
+	write(t, root, "/home/alice/.config/nvim/init.lua", "vim.opt.number = true\n")
+	write(t, root, "/home/alice/.vimrc", "set number\n")
+
+	report := &model.ScanReport{}
+	if err := (DesktopScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Desktop.Environment != "gnome" {
+		t.Fatalf("environment=%q, want gnome", report.Desktop.Environment)
+	}
+	if len(report.Desktop.Fonts) != 1 || report.Desktop.Fonts[0] != "/home/alice/.local/share/fonts/demo.ttf" {
+		t.Fatalf("unexpected fonts: %+v", report.Desktop.Fonts)
+	}
+	if len(report.Desktop.Themes) != 1 || report.Desktop.Themes[0] != "/home/alice/.themes/demo" {
+		t.Fatalf("unexpected themes: %+v", report.Desktop.Themes)
+	}
+	if len(report.Desktop.Autostart) != 1 || report.Desktop.Autostart[0].Path != "/home/alice/.config/autostart/tool.desktop" {
+		t.Fatalf("unexpected autostart: %+v", report.Desktop.Autostart)
+	}
+	seen := map[string]bool{}
+	for _, item := range report.Items {
+		if item.Kind == "desktop-config" {
+			seen[item.Path] = true
+			if item.Decision != model.DecisionCandidate {
+				t.Fatalf("desktop config decision=%q, want candidate", item.Decision)
+			}
+		}
+	}
+	for _, want := range []string{
+		"/home/alice/.config/kdeglobals",
+		"/home/alice/.config/kwinrc",
+		"/home/alice/.config/i3/config",
+		"/home/alice/.config/sway/config",
+		"/home/alice/.config/fcitx5/profile",
+		"/home/alice/.config/ibus/bus",
+		"/home/alice/.config/alacritty/alacritty.toml",
+		"/home/alice/.config/kitty/kitty.conf",
+		"/home/alice/.config/Code/User/settings.json",
+		"/home/alice/.config/nvim/init.lua",
+		"/home/alice/.vimrc",
+	} {
+		if !seen[want] {
+			t.Fatalf("missing desktop config %q in %+v", want, report.Items)
+		}
+	}
+}
+
+func TestDesktopScannerDconfUsesRunnerOnHostRoot(t *testing.T) {
+	report := &model.ScanReport{}
+	called := false
+	err := (DesktopScanner{}).Scan(context.Background(), Options{
+		Root: "/",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = true
+			if name != "dconf" || strings.Join(args, " ") != "dump /" {
+				t.Fatalf("unexpected command: %s %v", name, args)
+			}
+			return []byte("[org/gnome/desktop/interface]\ncolor-scheme='prefer-dark'\n"), nil
+		},
+	}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("expected dconf runner to be called")
+	}
+	if len(report.Desktop.Dconf) != 2 || report.Desktop.Dconf[1] != "color-scheme='prefer-dark'" {
+		t.Fatalf("unexpected dconf dump: %+v", report.Desktop.Dconf)
+	}
+}
+
+func TestDesktopScannerDoesNotRunDconfForMountedRoot(t *testing.T) {
+	root := t.TempDir()
+	report := &model.ScanReport{}
+	called := false
+	err := (DesktopScanner{}).Scan(context.Background(), Options{
+		Root: root,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = true
+			return nil, errors.New("should not run")
+		},
+	}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("dconf runner should not be called for mounted root")
+	}
+}
+
 func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/var/lib/flatpak/app/org.example.App/current/active/files/bin/app", "")

@@ -11,11 +11,11 @@ Generated Nix settings only include findings marked `confirmed`. Findings left a
 This is an early implementation scaffold. It includes:
 
 - Go CLI commands: `scan`, `review`, `generate`, `doctor`, `baseline create`
-- Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, common config files, and filesystem findings
+- Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, common config files, desktop settings, and filesystem findings
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
-- Richer generated modules for services, containers, filesystem findings, and development project reports
+- Richer generated modules and reports for services, containers, filesystem findings, desktop settings, and development projects
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings
 - Non-interactive review rules for confirming, excluding, or deferring findings
@@ -87,6 +87,7 @@ Generated projects include:
 - `modules/filesystem-findings.nix`
 - `reports/migration-report.md`
 - `reports/dev-projects.md`
+- `reports/desktop.md`
 
 ## Scanner domains
 
@@ -99,7 +100,7 @@ Generated projects include:
 - Git checkouts under common source locations
 - Docker/Podman containers and compose files
 - systemd, cron, shell/git/ssh/gpg/devops config markers
-- desktop markers, fonts, themes, autostart entries
+- desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, and common terminal/editor settings
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, and stateful data
 
 Package mapping is intentionally conservative. apt and common language CLI tools get static Nix candidates when known; snap, flatpak, AppImage, and Homebrew findings are reported without automatic Nix replacements by default.

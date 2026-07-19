@@ -87,6 +87,16 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
 			{Kind: "os-config", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
+			{Kind: "desktop-config", Name: "settings.json", Path: "/home/alice/.config/Code/User/settings.json", Decision: model.DecisionCandidate, Reason: "desktop environment configuration"},
+		},
+		Desktop: model.Desktop{
+			Environment: "gnome",
+			Fonts:       []string{"/home/alice/.local/share/fonts/demo.ttf"},
+			Themes:      []string{"/home/alice/.themes/demo"},
+			Autostart: []model.FileFinding{
+				{Path: "/home/alice/.config/autostart/tool.desktop", Decision: model.DecisionCandidate},
+			},
+			Dconf: []string{"[org/gnome/desktop/interface]", "color-scheme='prefer-dark'"},
 		},
 		FilesystemDiff: []model.FileFinding{
 			{Path: "/usr/local/bin/tool", Category: "script", Reason: "shebang script", Decision: model.DecisionCandidate},
@@ -133,8 +143,21 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("dev project report missing project:\n%s", dev)
 	}
 	home := readFile(t, out, "users/home.nix")
-	if !strings.Contains(home, "/home/alice/.gitconfig") {
-		t.Fatalf("home module missing user config TODO:\n%s", home)
+	if !strings.Contains(home, "/home/alice/.gitconfig") || !strings.Contains(home, "/home/alice/.config/Code/User/settings.json") {
+		t.Fatalf("home module missing user/desktop config TODO:\n%s", home)
+	}
+	if strings.Contains(home, "color-scheme") {
+		t.Fatalf("home module should not render raw dconf dump:\n%s", home)
+	}
+	desktop := readFile(t, out, "reports/desktop.md")
+	for _, want := range []string{"Environment: gnome", "/home/alice/.local/share/fonts/demo.ttf", "/home/alice/.themes/demo", "/home/alice/.config/autostart/tool.desktop", "/home/alice/.config/Code/User/settings.json", "color-scheme='prefer-dark'"} {
+		if !strings.Contains(desktop, want) {
+			t.Fatalf("desktop report missing %q:\n%s", want, desktop)
+		}
+	}
+	cfg = readFile(t, out, "hosts/generated/configuration.nix")
+	if strings.Contains(cfg, "color-scheme") {
+		t.Fatalf("configuration should not render raw dconf dump:\n%s", cfg)
 	}
 }
 

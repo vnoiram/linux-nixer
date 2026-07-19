@@ -39,6 +39,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/services.nix":              renderServicesModule(report),
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
+		"reports/desktop.md":                renderDesktopReport(report),
 		"reports/migration-report.md":       renderReport(report),
 	}
 	for rel, content := range files {
@@ -259,6 +260,16 @@ func renderReport(report model.ScanReport) string {
 			b.WriteString(fmt.Sprintf(" [%s]\n", printableDecision(container.Decision)))
 		}
 	}
+	b.WriteString("\n## Desktop\n\n")
+	if report.Desktop.Environment != "" {
+		b.WriteString(fmt.Sprintf("- Environment: %s\n", report.Desktop.Environment))
+	}
+	b.WriteString(fmt.Sprintf("- Fonts: %d\n", len(report.Desktop.Fonts)))
+	b.WriteString(fmt.Sprintf("- Themes/icons: %d\n", len(report.Desktop.Themes)))
+	b.WriteString(fmt.Sprintf("- Autostart entries: %d\n", len(report.Desktop.Autostart)))
+	for _, item := range desktopConfigItems(report) {
+		b.WriteString(fmt.Sprintf("- `%s` %s [%s]\n", item.Path, item.Kind, printableDecision(item.Decision)))
+	}
 	b.WriteString("\n## Dev projects\n\n")
 	for _, item := range devProjectItems(report) {
 		b.WriteString(fmt.Sprintf("- `%s` %s\n", item.Path, item.Kind))
@@ -390,10 +401,62 @@ func renderDevProjectsReport(report model.ScanReport) string {
 	return b.String()
 }
 
+func renderDesktopReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Desktop findings\n\n")
+	if report.Desktop.Environment != "" {
+		b.WriteString(fmt.Sprintf("- Environment: %s\n", report.Desktop.Environment))
+	} else {
+		b.WriteString("- Environment: unknown\n")
+	}
+	if len(report.Desktop.Fonts) > 0 {
+		b.WriteString("\n## Fonts\n\n")
+		for _, path := range report.Desktop.Fonts {
+			b.WriteString(fmt.Sprintf("- `%s`\n", path))
+		}
+	}
+	if len(report.Desktop.Themes) > 0 {
+		b.WriteString("\n## Themes and icons\n\n")
+		for _, path := range report.Desktop.Themes {
+			b.WriteString(fmt.Sprintf("- `%s`\n", path))
+		}
+	}
+	if len(report.Desktop.Autostart) > 0 {
+		b.WriteString("\n## Autostart\n\n")
+		for _, finding := range report.Desktop.Autostart {
+			if reportDecision(finding.Decision) {
+				b.WriteString(fmt.Sprintf("- `%s` [%s]\n", finding.Path, printableDecision(finding.Decision)))
+			}
+		}
+	}
+	items := desktopConfigItems(report)
+	if len(items) > 0 {
+		b.WriteString("\n## Config files\n\n")
+		for _, item := range items {
+			b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+			if item.Reason != "" {
+				b.WriteString(": ")
+				b.WriteString(item.Reason)
+			}
+			b.WriteString("\n")
+		}
+	}
+	if len(report.Desktop.Dconf) > 0 {
+		b.WriteString("\n## Dconf dump\n\n")
+		b.WriteString("```ini\n")
+		for _, line := range report.Desktop.Dconf {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n")
+	}
+	return b.String()
+}
+
 func todoComments(report model.ScanReport) []string {
 	var lines []string
 	for _, item := range report.Items {
-		if includeDecision(item.Decision) && (item.Kind == "user-config" || item.Kind == "direnv") {
+		if includeDecision(item.Decision) && (item.Kind == "user-config" || item.Kind == "direnv" || item.Kind == "desktop-config") {
 			lines = append(lines, comment(fmt.Sprintf("%s at %s %s", item.Kind, item.Path, item.Reason)))
 		}
 	}
@@ -419,6 +482,17 @@ func devProjectItems(report model.ScanReport) []model.Item {
 	var items []model.Item
 	for _, item := range report.Items {
 		if reportDecision(item.Decision) && (item.Kind == "dev-project" || item.Kind == "direnv") {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
+}
+
+func desktopConfigItems(report model.ScanReport) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && item.Kind == "desktop-config" {
 			items = append(items, item)
 		}
 	}
