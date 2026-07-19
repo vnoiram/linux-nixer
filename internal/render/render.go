@@ -50,6 +50,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
 		"reports/user-config.md":            renderUserConfigReport(report),
 		"reports/desktop.md":                renderDesktopReport(report),
+		"reports/hardware.md":               renderHardwareReport(report),
 		"reports/migration-report.md":       renderReport(report),
 		"reports/migration-checklist.md":    renderMigrationChecklist(report),
 	}
@@ -466,6 +467,7 @@ func renderMigrationChecklist(report model.ScanReport) string {
 	writeStatefulChecklist(&b, report)
 	writeBackupSyncChecklist(&b, report)
 	writeUserDesktopChecklist(&b, report)
+	writeHardwareChecklist(&b, report)
 	return b.String()
 }
 
@@ -748,6 +750,25 @@ func writeUserDesktopChecklist(b *strings.Builder, report model.ScanReport) {
 		}
 	}
 	writeChecklistSection(b, "Users and desktop config", items)
+}
+
+func writeHardwareChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, item := range hardwareConfigItems(report) {
+		if !manualDecision(item.Decision) {
+			continue
+		}
+		action := fmt.Sprintf("Review hardware/peripheral configuration `%s` and recreate it through NixOS options, hardware support packages, or documented manual setup.", item.Path)
+		details := itemDetails(item)
+		if len(details) > 0 {
+			if len(details) > 4 {
+				details = details[:4]
+			}
+			action += " Review " + strings.Join(details, ", ") + "."
+		}
+		items = append(items, action)
+	}
+	writeChecklistSection(b, "Hardware and peripherals", items)
 }
 
 func userConfigChecklistItem(item model.Item) string {
@@ -1433,6 +1454,72 @@ func renderUserConfigReport(report model.ScanReport) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func renderHardwareReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Hardware and peripheral findings\n\n")
+	sections := []struct {
+		title string
+		match func(model.Item) bool
+	}{
+		{"Printers", func(item model.Item) bool { return item.Details["category"] == "printer" }},
+		{"Bluetooth", func(item model.Item) bool { return item.Details["category"] == "bluetooth" }},
+		{"Scanners", func(item model.Item) bool { return item.Details["category"] == "scanner" }},
+		{"Audio", func(item model.Item) bool { return item.Details["category"] == "audio" }},
+		{"Security devices", func(item model.Item) bool { return item.Details["category"] == "security-device" }},
+		{"Power and firmware", func(item model.Item) bool { return item.Details["category"] == "power-firmware" }},
+		{"Input devices", func(item model.Item) bool { return item.Details["category"] == "input-device" }},
+		{"Other", func(item model.Item) bool { return item.Kind == "hardware-config" }},
+	}
+	written := map[string]bool{}
+	for _, section := range sections {
+		items := hardwareConfigItemsByMatch(report, section.match, written)
+		if len(items) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, item := range items {
+			b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+			if item.Reason != "" {
+				b.WriteString(": ")
+				b.WriteString(item.Reason)
+			}
+			b.WriteString("\n")
+			for _, detail := range itemDetails(item) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
+			written[item.Path] = true
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func hardwareConfigItems(report model.ScanReport) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if item.Kind == "hardware-config" && reportDecision(item.Decision) {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
+}
+
+func hardwareConfigItemsByMatch(report model.ScanReport, match func(model.Item) bool, written map[string]bool) []model.Item {
+	var items []model.Item
+	for _, item := range hardwareConfigItems(report) {
+		if written[item.Path] || !match(item) {
+			continue
+		}
+		items = append(items, item)
+	}
+	return items
 }
 
 func todoComments(report model.ScanReport) []string {

@@ -50,6 +50,7 @@ func CheckProjectFiles(project string) []Check {
 		"reports/system-config.md",
 		"reports/devops-config.md",
 		"reports/backup-sync.md",
+		"reports/hardware.md",
 	}
 	var checks []Check
 	for _, rel := range required {

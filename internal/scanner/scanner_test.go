@@ -661,7 +661,7 @@ func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 		names[scanner.Name()] = true
 		order[scanner.Name()] = i
 	}
-	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "secrets", "stateful-data", "backup-config"} {
+	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "hardware-config", "secrets", "stateful-data", "backup-config"} {
 		if !names[want] {
 			t.Fatalf("default registry missing %q in %+v", want, names)
 		}
@@ -675,8 +675,80 @@ func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 	if order["backup-config"] >= order["filesystem-diff"] || order["stateful-data"] >= order["backup-config"] {
 		t.Fatalf("backup scanner should run after stateful data and before filesystem-diff: %+v", order)
 	}
+	if order["hardware-config"] >= order["filesystem-diff"] {
+		t.Fatalf("hardware scanner should run before filesystem-diff: %+v", order)
+	}
 	if names["config"] {
 		t.Fatalf("default registry should not include legacy config scanner: %+v", names)
+	}
+}
+
+func TestHardwareConfigScannerFindsPeripheralConfigsSafely(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/etc/cups/printers.conf", "<Printer Office>\nDeviceURI ipp://user:secret@example.test/printers/office\n</Printer>\nDefaultPrinter Office\n")
+	write(t, root, "/etc/cups/ppd/Office.ppd", "*NickName: Office Raw Secret\n")
+	write(t, root, "/etc/bluetooth/main.conf", "[General]\nDiscoverableTimeout = 60\n")
+	write(t, root, "/var/lib/bluetooth/AA:BB:CC:DD:EE:FF/11:22:33:44:55:66/info", "[General]\nName=Keyboard\nClass=0x002540\nTrusted=true\nPaired=true\nKey=raw-pairing-secret\n")
+	write(t, root, "/etc/sane.d/dll.conf", "net\nepson2\n# disabled\n")
+	write(t, root, "/etc/pipewire/pipewire.conf", "[context.properties]\ndefault.clock.rate = 48000\n")
+	write(t, root, "/home/alice/.asoundrc", "pcm.!default { type hw card 0 }\n")
+	write(t, root, "/etc/fprintd.conf", "[net.reactivated.Fprint]\n")
+	write(t, root, "/etc/u2f_mappings", "alice:secret-u2f-mapping\n")
+	write(t, root, "/etc/pcsc/reader.conf", "FRIENDLYNAME reader\n")
+	write(t, root, "/etc/fwupd/daemon.conf", "[fwupd]\nDisabledDevices=secret-device\n")
+	write(t, root, "/etc/tlp.conf", "TLP_ENABLE=1\n")
+	write(t, root, "/etc/keyd/default.conf", "[ids]\n*\n[main]\ncapslock = esc\n")
+	write(t, root, "/home/alice/.config/xremap/config.yml", "modmap:\n  - name: demo\n")
+
+	report := &model.ScanReport{}
+	if err := (HardwareConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+
+	items := map[string]model.Item{}
+	for _, item := range report.Items {
+		items[item.Path] = item
+		if item.Kind != "hardware-config" {
+			t.Fatalf("unexpected item kind: %+v", item)
+		}
+		if item.Decision != model.DecisionMigrationNote {
+			t.Fatalf("hardware item should be migration note: %+v", item)
+		}
+	}
+	for _, path := range []string{
+		"/etc/cups/printers.conf",
+		"/etc/cups/ppd/Office.ppd",
+		"/var/lib/bluetooth/AA:BB:CC:DD:EE:FF/11:22:33:44:55:66/info",
+		"/etc/sane.d/dll.conf",
+		"/etc/pipewire/pipewire.conf",
+		"/etc/u2f_mappings",
+		"/etc/tlp.conf",
+		"/etc/keyd/default.conf",
+	} {
+		if _, ok := items[path]; !ok {
+			t.Fatalf("missing hardware item %s in %+v", path, report.Items)
+		}
+	}
+	if got := items["/etc/cups/printers.conf"].Details["device-uri-schemes"]; got != "ipp" {
+		t.Fatalf("device-uri-schemes=%q, want ipp in %+v", got, items["/etc/cups/printers.conf"])
+	}
+	if items["/etc/cups/printers.conf"].Details["printers"] != "1" || items["/etc/cups/printers.conf"].Details["defaults"] != "1" {
+		t.Fatalf("unexpected cups details: %+v", items["/etc/cups/printers.conf"])
+	}
+	if items["/etc/sane.d/dll.conf"].Details["enabled-backends"] != "2" || items["/etc/sane.d/dll.conf"].Details["network-backend"] != "present" {
+		t.Fatalf("unexpected sane details: %+v", items["/etc/sane.d/dll.conf"])
+	}
+	if items["/etc/u2f_mappings"].Details["mappings"] != "1" || items["/etc/u2f_mappings"].Details["manual-enrollment"] != "recommended" {
+		t.Fatalf("unexpected u2f details: %+v", items["/etc/u2f_mappings"])
+	}
+	for _, item := range report.Items {
+		for _, value := range item.Details {
+			for _, leaked := range []string{"user:secret", "raw-pairing-secret", "secret-u2f-mapping", "AA:BB:CC", "11:22:33"} {
+				if strings.Contains(value, leaked) {
+					t.Fatalf("hardware scanner leaked %q in %+v", leaked, item)
+				}
+			}
+		}
 	}
 }
 

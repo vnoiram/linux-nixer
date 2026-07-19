@@ -173,6 +173,13 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "browser-profile", Name: "alice.default-release", Path: "/home/alice/.mozilla/firefox/alice.default-release", Decision: model.DecisionMigrationNote, Reason: "browser profile may contain cookies, history, saved sessions, and credentials"},
 			{Kind: "browser-extension", Name: "addon@example.xpi", Path: "/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi", Decision: model.DecisionMigrationNote, Reason: "browser extension marker; review sync/export strategy manually"},
 			{Kind: "editor-profile", Name: "publisher.tool-1.0.0", Path: "/home/alice/.vscode/extensions/publisher.tool-1.0.0", Decision: model.DecisionCandidate, Reason: "editor settings, extensions, or IDE profile"},
+			{Kind: "hardware-config", Name: "cups", Path: "/etc/cups/printers.conf", Decision: model.DecisionMigrationNote, Reason: "printer configuration", Details: map[string]string{"category": "printer", "tool": "cups", "printers": "1", "device-uri-schemes": "ipp"}},
+			{Kind: "hardware-config", Name: "bluetooth", Path: "/var/lib/bluetooth/AA:BB:CC:DD:EE:FF/11:22:33:44:55:66/info", Decision: model.DecisionMigrationNote, Reason: "bluetooth controller or paired device marker", Details: map[string]string{"category": "bluetooth", "tool": "bluez", "paired-device": "present", "paired": "true"}},
+			{Kind: "hardware-config", Name: "sane", Path: "/etc/sane.d/dll.conf", Decision: model.DecisionMigrationNote, Reason: "scanner backend configuration", Details: map[string]string{"category": "scanner", "tool": "sane", "enabled-backends": "2", "network-backend": "present"}},
+			{Kind: "hardware-config", Name: "pipewire", Path: "/etc/pipewire/pipewire.conf", Decision: model.DecisionMigrationNote, Reason: "audio profile or server configuration", Details: map[string]string{"category": "audio", "tool": "pipewire", "settings": "1"}},
+			{Kind: "hardware-config", Name: "u2f", Path: "/etc/u2f_mappings", Decision: model.DecisionMigrationNote, Reason: "security device or biometric configuration", Details: map[string]string{"category": "security-device", "tool": "u2f", "mappings": "1", "manual-enrollment": "recommended"}},
+			{Kind: "hardware-config", Name: "tlp", Path: "/etc/tlp.conf", Decision: model.DecisionMigrationNote, Reason: "power management or firmware configuration", Details: map[string]string{"category": "power-firmware", "tool": "tlp", "settings": "1"}},
+			{Kind: "hardware-config", Name: "keyd", Path: "/etc/keyd/default.conf", Decision: model.DecisionMigrationNote, Reason: "input device remapping or peripheral configuration", Details: map[string]string{"category": "input-device", "tool": "keyd", "sections": "2", "settings": "1"}},
 		},
 		Desktop: model.Desktop{
 			Environment: "gnome",
@@ -240,6 +247,17 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if strings.Contains(backupSync, "super-secret") || strings.Contains(backupSync, "raw-secret") {
 		t.Fatalf("backup sync report leaked raw secret:\n%s", backupSync)
+	}
+	hardware := readFile(t, out, "reports/hardware.md")
+	for _, want := range []string{"# Hardware and peripheral findings", "Printers", "/etc/cups/printers.conf", "device-uri-schemes `ipp`", "Bluetooth", "/var/lib/bluetooth/AA:BB:CC:DD:EE:FF/11:22:33:44:55:66/info", "paired-device `present`", "Scanners", "/etc/sane.d/dll.conf", "enabled-backends `2`", "Audio", "/etc/pipewire/pipewire.conf", "Security devices", "/etc/u2f_mappings", "manual-enrollment `recommended`", "Power and firmware", "/etc/tlp.conf", "Input devices", "/etc/keyd/default.conf"} {
+		if !strings.Contains(hardware, want) {
+			t.Fatalf("hardware report missing %q:\n%s", want, hardware)
+		}
+	}
+	for _, unwanted := range []string{"user:secret", "raw-pairing-secret", "secret-u2f-mapping"} {
+		if strings.Contains(hardware, unwanted) {
+			t.Fatalf("hardware report leaked raw detail %q:\n%s", unwanted, hardware)
+		}
 	}
 	usersReport := readFile(t, out, "reports/users.md")
 	for _, want := range []string{"# User account findings", "Primary Home Manager user: `alice`", "Human users", "`alice` uid `1000`", "groups `alice, docker, sudo, video`", "Privileged and group-sensitive users", "System users", "`daemon` uid `1`", "`root` uid `0`"} {
@@ -343,6 +361,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Back up or sync browser profile `/home/alice/.mozilla/firefox/alice.default-release` manually",
 		"Review browser extension marker `/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi`",
 		"Review editor profile `/home/alice/.vscode/extensions/publisher.tool-1.0.0`",
+		"Review hardware/peripheral configuration `/etc/cups/printers.conf`",
+		"Review category `printer`, device-uri-schemes `ipp`, printers `1`, tool `cups`",
+		"Review hardware/peripheral configuration `/etc/u2f_mappings`",
+		"Review category `security-device`, manual-enrollment `recommended`, mappings `1`, tool `u2f`",
 	} {
 		if !strings.Contains(checklist, want) {
 			t.Fatalf("migration checklist missing %q:\n%s", want, checklist)

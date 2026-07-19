@@ -150,6 +150,7 @@ func writeGeneratedProject(t *testing.T, host string) string {
 		"reports/system-config.md",
 		"reports/devops-config.md",
 		"reports/backup-sync.md",
+		"reports/hardware.md",
 	}
 	for _, rel := range files {
 		path := filepath.Join(project, rel)
