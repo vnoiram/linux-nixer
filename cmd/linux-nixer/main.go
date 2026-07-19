@@ -19,7 +19,7 @@ import (
 	"github.com/vnoiram/linux-nixer/internal/scanner"
 )
 
-const version = "0.1.0-dev"
+var version = "0.1.0-dev"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {

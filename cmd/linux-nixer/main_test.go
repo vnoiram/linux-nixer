@@ -42,6 +42,34 @@ func TestRunReviewInteractiveWritesReviewedJSON(t *testing.T) {
 	}
 }
 
+func TestRunVersionWritesBuildVersion(t *testing.T) {
+	oldVersion := version
+	version = "v9.8.7"
+	t.Cleanup(func() { version = oldVersion })
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"version"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "v9.8.7" {
+		t.Fatalf("version=%q, want v9.8.7", got)
+	}
+}
+
+func TestRunHelpIncludesSummaryAndVersion(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"help"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"linux-nixer summary --scan reviewed.json", "linux-nixer version"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	project := t.TempDir()
 	root := filepath.Join(project, "root")

@@ -147,8 +147,10 @@ In restricted environments, `GOCACHE` may need to point at a writable directory.
 Versions use SemVer and annotated tags:
 
 ```sh
+make build VERSION=v0.1.0
+bin/linux-nixer version
 git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-Pushing a `v*` tag runs the release workflow, builds Linux `amd64` and `arm64` tarballs, creates checksums, and uploads them to a GitHub Release.
+Pushing a `v*` tag runs the release workflow. Tags must match `vMAJOR.MINOR.PATCH` or a SemVer prerelease such as `v0.1.0-rc.1`. The workflow injects the tag into `linux-nixer version`, builds Linux `amd64` and `arm64` tarballs, smoke-tests the archives, creates checksums, and uploads them to a GitHub Release.

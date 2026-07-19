@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 
 ### Added
 
+- Build-time version injection for release binaries.
+- Release tag validation and archive smoke tests in the GitHub Actions release workflow.
+
+## [0.1.0] - 2026-07-19
+
+### Added
+
 - Initial Go CLI scaffold with scan, review, generate, doctor, and baseline commands.
 - Registry-based scanner architecture.
 - Scanners for apt, language tools, Git sources, containers, common configuration, and filesystem findings.
