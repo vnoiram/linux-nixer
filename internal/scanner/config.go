@@ -30,7 +30,7 @@ func (ConfigScanner) Scan(ctx context.Context, opts Options, report *model.ScanR
 		"/etc/resolv.conf",
 		"/etc/systemd/resolved.conf",
 	} {
-		if exists(opts.Root, path) {
+		if existsWithSudo(ctx, opts, report, "config", path) {
 			report.Items = append(report.Items, model.Item{Kind: "os-config", Name: filepath.Base(path), Path: path, Decision: model.DecisionCandidate})
 		}
 	}

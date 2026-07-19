@@ -2,8 +2,8 @@ package scanner
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -16,12 +16,10 @@ type AptScanner struct{}
 func (AptScanner) Name() string { return "apt" }
 
 func (AptScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
-	status := rootPath(opts.Root, "/var/lib/dpkg/status")
-	f, err := os.Open(status)
+	status, err := readFile(ctx, opts, report, "apt", "/var/lib/dpkg/status")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	var name, version string
 	installed := false
 	flush := func() {
@@ -36,7 +34,7 @@ func (AptScanner) Scan(ctx context.Context, opts Options, report *model.ScanRepo
 		}
 		name, version, installed = "", "", false
 	}
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(status))
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {

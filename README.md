@@ -23,6 +23,7 @@ This is an early implementation scaffold. It includes:
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Optional `doctor --boot` check for starting the generated VM script with a timeout
 - Baseline IDs such as `ubuntu:24.04` resolved from local `baselines/` or user cache
+- Read-only `scan --sudo` fallback for selected host files
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
 
@@ -32,6 +33,7 @@ This is an early implementation scaffold. It includes:
 go build -o bin/linux-nixer ./cmd/linux-nixer
 
 bin/linux-nixer scan --out scan.json
+bin/linux-nixer scan --sudo --out scan.json
 bin/linux-nixer review --scan scan.json --out reviewed.json --auto-safe
 bin/linux-nixer generate --scan reviewed.json --out nix-config
 bin/linux-nixer doctor --project nix-config

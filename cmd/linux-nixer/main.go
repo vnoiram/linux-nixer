@@ -72,7 +72,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output scan JSON path")
 	root := fs.String("root", "/", "root filesystem to scan")
-	useSudo := fs.Bool("sudo", false, "allow scanners to use sudo when implemented")
+	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
 	deep := fs.Bool("deep", false, "scan broader filesystem paths")
 	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
 	var includes multiFlag

@@ -23,4 +23,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Interactive review mode with safe handling for secret-like and stateful findings.
 - VM build validation through `doctor --vm`.
 - Optional VM boot script validation through `doctor --boot`.
+- Read-only sudo fallback for selected host scan files.
 - CI and tag-based release workflow.

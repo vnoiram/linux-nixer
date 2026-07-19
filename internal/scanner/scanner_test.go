@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,59 @@ Version: 1.0
 	}
 	if report.Packages[0].Name != "curl" || report.Packages[0].NixNames[0] != "curl" {
 		t.Fatalf("unexpected package: %+v", report.Packages[0])
+	}
+}
+
+func TestAptScannerUsesSudoFallbackForStatus(t *testing.T) {
+	if _, err := os.Stat("/var/lib/dpkg/status"); err == nil {
+		t.Skip("host dpkg status is readable; apt sudo fallback path cannot be forced deterministically")
+	}
+	report := &model.ScanReport{}
+	called := false
+	err := (AptScanner{}).Scan(context.Background(), Options{
+		Root:    "/",
+		UseSudo: true,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = true
+			if name != "sudo" || strings.Join(args, " ") != "cat /var/lib/dpkg/status" {
+				t.Fatalf("unexpected command: %s %v", name, args)
+			}
+			return []byte("Package: curl\nStatus: install ok installed\nVersion: 8.0\n\n"), nil
+		},
+	}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("sudo fallback runner was not called")
+	}
+	if len(report.Packages) != 1 || report.Packages[0].Name != "curl" {
+		t.Fatalf("unexpected packages: %+v", report.Packages)
+	}
+	if len(report.Warnings) == 0 || !strings.Contains(report.Warnings[0].Message, "sudo fallback used") {
+		t.Fatalf("missing sudo warning: %+v", report.Warnings)
+	}
+}
+
+func TestReadFileUsesSudoFallback(t *testing.T) {
+	report := &model.ScanReport{}
+	called := false
+	got, err := readFile(context.Background(), Options{
+		Root:    "/",
+		UseSudo: true,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = true
+			if name != "sudo" || strings.Join(args, " ") != "cat /definitely-missing-linux-nixer-test" {
+				t.Fatalf("unexpected command: %s %v", name, args)
+			}
+			return []byte("fallback"), nil
+		},
+	}, report, "test", "/definitely-missing-linux-nixer-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "fallback" || !called {
+		t.Fatalf("fallback got=%q called=%v", got, called)
 	}
 }
 
@@ -104,6 +158,43 @@ func TestConfigScannerMarksSecretRiskDevOpsConfig(t *testing.T) {
 	}
 	if len(report.Warnings) == 0 || !strings.Contains(report.Warnings[0].Message, "secret-risk") {
 		t.Fatalf("expected secret warning, got %+v", report.Warnings)
+	}
+}
+
+func TestExistsWithSudoUsesSudoFallback(t *testing.T) {
+	report := &model.ScanReport{}
+	got := existsWithSudo(context.Background(), Options{
+		Root:    "/",
+		UseSudo: true,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "sudo" && strings.Join(args, " ") == "test -e /definitely-missing-linux-nixer-test" {
+				return []byte{}, nil
+			}
+			return nil, errors.New("not found")
+		},
+	}, report, "test", "/definitely-missing-linux-nixer-test")
+	if !got {
+		t.Fatal("expected sudo fallback existence check to succeed")
+	}
+}
+
+func TestSudoFallbackDisabledForMountedRootfs(t *testing.T) {
+	root := t.TempDir()
+	report := &model.ScanReport{}
+	called := false
+	_, err := readFile(context.Background(), Options{
+		Root:    root,
+		UseSudo: true,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = true
+			return []byte("secret"), nil
+		},
+	}, report, "test", "/missing")
+	if err == nil {
+		t.Fatal("expected normal read error")
+	}
+	if called {
+		t.Fatal("sudo runner should not be called for mounted rootfs")
 	}
 }
 

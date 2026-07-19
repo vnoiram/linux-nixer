@@ -18,7 +18,10 @@ type Options struct {
 	BaselineID string
 	Includes   []string
 	Excludes   []string
+	Runner     CommandRunner
 }
+
+type CommandRunner func(context.Context, string, ...string) ([]byte, error)
 
 type Scanner interface {
 	Name() string
@@ -96,8 +99,8 @@ func runCommand(ctx context.Context, root string, name string, args ...string) (
 	return string(out), nil
 }
 
-func readText(root, path string) (string, error) {
-	b, err := os.ReadFile(rootPath(root, path))
+func readText(ctx context.Context, opts Options, report *model.ScanReport, source, path string) (string, error) {
+	b, err := readFile(ctx, opts, report, source, path)
 	if err != nil {
 		return "", err
 	}
@@ -107,4 +110,54 @@ func readText(root, path string) (string, error) {
 func exists(root, path string) bool {
 	_, err := os.Stat(rootPath(root, path))
 	return err == nil
+}
+
+func existsWithSudo(ctx context.Context, opts Options, report *model.ScanReport, source, path string) bool {
+	if exists(opts.Root, path) {
+		return true
+	}
+	if !canUseSudo(opts) {
+		return false
+	}
+	if opts.Runner == nil && !commandAvailable("sudo") {
+		report.Warnings = append(report.Warnings, model.Warning{Source: source, Message: "sudo unavailable; could not check " + path})
+		return false
+	}
+	if _, err := runWithOptions(ctx, opts, "sudo", "test", "-e", path); err != nil {
+		return false
+	}
+	report.Warnings = append(report.Warnings, model.Warning{Source: source, Message: "sudo fallback used to check " + path})
+	return true
+}
+
+func readFile(ctx context.Context, opts Options, report *model.ScanReport, source, path string) ([]byte, error) {
+	b, err := os.ReadFile(rootPath(opts.Root, path))
+	if err == nil {
+		return b, nil
+	}
+	if !canUseSudo(opts) {
+		return nil, err
+	}
+	if opts.Runner == nil && !commandAvailable("sudo") {
+		report.Warnings = append(report.Warnings, model.Warning{Source: source, Message: "sudo unavailable; could not read " + path})
+		return nil, err
+	}
+	out, sudoErr := runWithOptions(ctx, opts, "sudo", "cat", path)
+	if sudoErr != nil {
+		return nil, err
+	}
+	report.Warnings = append(report.Warnings, model.Warning{Source: source, Message: "sudo fallback used to read " + path})
+	return out, nil
+}
+
+func runWithOptions(ctx context.Context, opts Options, name string, args ...string) ([]byte, error) {
+	if opts.Runner != nil {
+		return opts.Runner(ctx, name, args...)
+	}
+	cmd := exec.CommandContext(ctx, name, args...)
+	return cmd.Output()
+}
+
+func canUseSudo(opts Options) bool {
+	return opts.UseSudo && opts.Root == "/"
 }
