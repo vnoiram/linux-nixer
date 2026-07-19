@@ -272,6 +272,31 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if strings.Contains(filesystemReport, "/tmp/excluded") || strings.Contains(filesystemReport, "/var/lib/mysql/excluded") || strings.Contains(filesystemReport, "PRIVATE KEY") {
 		t.Fatalf("filesystem report included excluded finding or raw secret content:\n%s", filesystemReport)
 	}
+	checklist := readFile(t, out, "reports/migration-checklist.md")
+	for _, want := range []string{
+		"# Manual migration checklist",
+		"## Before applying Nix",
+		"Confirm whether `curl` via apt should be promoted to `confirmed`",
+		"Find or package a Nix equivalent for `hello` via snap",
+		"Recreate apt repository `/etc/apt/sources.list`",
+		"Confirm `prettier` from pnpm as a Home Manager package",
+		"Translate systemd service `custom.service`",
+		"Translate compose `/srv/app/compose.yml`",
+		"backup dirty changes before migration",
+		"Decide how to recreate `/usr/local/bin/tool`",
+		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",
+		"Back up stateful data `/var/lib/postgresql/data/PG_VERSION`",
+		"Confirm user `alice` home `/home/alice`",
+	} {
+		if !strings.Contains(checklist, want) {
+			t.Fatalf("migration checklist missing %q:\n%s", want, checklist)
+		}
+	}
+	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY"} {
+		if strings.Contains(checklist, unwanted) {
+			t.Fatalf("migration checklist included unwanted %q:\n%s", unwanted, checklist)
+		}
+	}
 	dev := readFile(t, out, "reports/dev-projects.md")
 	if !strings.Contains(dev, "/home/alice/app/pyproject.toml") || !strings.Contains(dev, "/home/alice/app/.envrc") {
 		t.Fatalf("dev project report missing project:\n%s", dev)

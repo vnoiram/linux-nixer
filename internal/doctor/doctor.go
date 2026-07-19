@@ -46,6 +46,7 @@ func CheckProjectFiles(project string) []Check {
 		"reports/git-sources.md",
 		"reports/languages.md",
 		"reports/migration-report.md",
+		"reports/migration-checklist.md",
 		"reports/system-config.md",
 		"reports/devops-config.md",
 	}

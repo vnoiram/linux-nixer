@@ -146,6 +146,7 @@ func writeGeneratedProject(t *testing.T, host string) string {
 		"reports/git-sources.md",
 		"reports/languages.md",
 		"reports/migration-report.md",
+		"reports/migration-checklist.md",
 		"reports/system-config.md",
 		"reports/devops-config.md",
 	}

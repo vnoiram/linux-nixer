@@ -50,6 +50,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/user-config.md":            renderUserConfigReport(report),
 		"reports/desktop.md":                renderDesktopReport(report),
 		"reports/migration-report.md":       renderReport(report),
+		"reports/migration-checklist.md":    renderMigrationChecklist(report),
 	}
 	for rel, content := range files {
 		if err := os.WriteFile(filepath.Join(out, rel), []byte(content), 0o644); err != nil {
@@ -249,6 +250,10 @@ func reportDecision(decision model.Decision) bool {
 	return decision == "" || decision == model.DecisionConfirmed || decision == model.DecisionCandidate || decision == model.DecisionTODO || decision == model.DecisionMigrationNote
 }
 
+func manualDecision(decision model.Decision) bool {
+	return decision == "" || decision == model.DecisionCandidate || decision == model.DecisionTODO || decision == model.DecisionMigrationNote
+}
+
 func primaryUser(report model.ScanReport) model.User {
 	for _, user := range report.Users {
 		if !user.System && user.Name != "root" && strings.HasPrefix(user.Home, "/home/") {
@@ -437,6 +442,219 @@ func writeGeneratedNixSummary(b *strings.Builder, report model.ScanReport) {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+}
+
+func renderMigrationChecklist(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Manual migration checklist\n\n")
+	b.WriteString("Use this checklist after reviewing `reviewed.json` and before applying generated Nix. Do not commit raw secrets, credentials, or stateful data.\n\n")
+	writeChecklistSection(&b, "Before applying Nix", []string{
+		"Run `linux-nixer validate --scan reviewed.json --strict` and resolve validation errors.",
+		"Run `linux-nixer summary --scan reviewed.json --fail-on-pending` when you want to enforce that all candidates and TODOs are reviewed.",
+		"Review generated Nix files and reports before switching the target host.",
+	})
+	writePackageChecklist(&b, report)
+	writeAptSourceChecklist(&b, report)
+	writeLanguageChecklist(&b, report)
+	writeServiceChecklist(&b, report)
+	writeContainerChecklist(&b, report)
+	writeGitChecklist(&b, report)
+	writeFilesystemChecklist(&b, report)
+	writeSecretChecklist(&b, report)
+	writeStatefulChecklist(&b, report)
+	writeUserDesktopChecklist(&b, report)
+	return b.String()
+}
+
+func writeChecklistSection(b *strings.Builder, title string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString("## ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+	for _, item := range items {
+		b.WriteString("- [ ] ")
+		b.WriteString(item)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
+func writePackageChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, pkg := range report.Packages {
+		if !manualDecision(pkg.Decision) {
+			continue
+		}
+		if len(pkg.NixNames) > 0 {
+			items = append(items, fmt.Sprintf("Confirm whether `%s` via %s should be promoted to `confirmed` and rendered as `%s`.", pkg.Name, pkg.Manager, pkg.NixNames[0]))
+		} else {
+			items = append(items, fmt.Sprintf("Find or package a Nix equivalent for `%s` via %s, or keep it as a documented manual install.", pkg.Name, pkg.Manager))
+		}
+	}
+	writeChecklistSection(b, "Packages", items)
+}
+
+func writeAptSourceChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, item := range packageSourceItems(report) {
+		if !manualDecision(item.Decision) {
+			continue
+		}
+		switch item.Kind {
+		case "apt-source":
+			items = append(items, fmt.Sprintf("Recreate apt repository `%s` manually or replace it with nixpkgs/flakes inputs.", item.Path))
+		case "apt-keyring":
+			items = append(items, fmt.Sprintf("Recreate apt keyring `%s` only if the repository is still needed; do not embed trust keys blindly.", item.Path))
+		case "apt-preference":
+			items = append(items, fmt.Sprintf("Translate apt pinning/preference `%s` into an explicit Nix package source decision.", item.Path))
+		case "apt-config":
+			items = append(items, fmt.Sprintf("Review apt client configuration `%s` and decide whether it is still relevant on NixOS.", item.Path))
+		}
+	}
+	writeChecklistSection(b, "Apt sources", items)
+}
+
+func writeLanguageChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	add := func(pkg model.Package) {
+		if !manualDecision(pkg.Decision) {
+			return
+		}
+		if len(pkg.NixNames) > 0 {
+			items = append(items, fmt.Sprintf("Confirm `%s` from %s as a Home Manager package `%s`, or leave it project-local.", pkg.Name, pkg.Manager, pkg.NixNames[0]))
+		} else {
+			items = append(items, fmt.Sprintf("Decide how to recreate `%s` from %s: nixpkgs package, project dev shell, or manual installer.", pkg.Name, pkg.Manager))
+		}
+	}
+	for _, pkgs := range [][]model.Package{report.Languages.NPM, report.Languages.Conda, report.Languages.Cargo, report.Languages.Gem, report.Languages.Go} {
+		for _, pkg := range pkgs {
+			add(pkg)
+		}
+	}
+	for _, env := range report.Languages.Python {
+		for _, pkg := range env.Packages {
+			add(pkg)
+		}
+		if len(env.Packages) == 0 {
+			items = append(items, fmt.Sprintf("Inspect Python %s environment `%s` and decide whether to recreate it with a dev shell, venv, uv, Poetry, or pipx.", env.Kind, env.Path))
+		}
+	}
+	for _, item := range languageProjectItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Review project dependency file `%s` and decide whether it needs a dev shell or project-specific flake.", item.Path))
+		}
+	}
+	writeChecklistSection(b, "Language ecosystems", items)
+}
+
+func writeServiceChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, service := range systemServices(report) {
+		if !manualDecision(service.Decision) {
+			continue
+		}
+		items = append(items, fmt.Sprintf("Translate %s service `%s` from `%s` into a NixOS service/module or document manual setup.", service.Manager, service.Name, service.Path))
+	}
+	for _, item := range systemConfigItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Translate system configuration `%s` (%s) into NixOS options or keep it as a manual note.", item.Path, item.Reason))
+		}
+	}
+	writeChecklistSection(b, "Services", items)
+}
+
+func writeContainerChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, container := range report.Containers {
+		if !manualDecision(container.Decision) {
+			continue
+		}
+		items = append(items, fmt.Sprintf("Translate %s into Nix/container config, including image, ports, mounts, volumes, and redacted env keys.", containerSummary(container)))
+	}
+	writeChecklistSection(b, "Containers", items)
+}
+
+func writeGitChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, source := range gitSources(report) {
+		if !manualDecision(source.Decision) {
+			continue
+		}
+		action := fmt.Sprintf("Decide clone/build strategy for Git source `%s`", source.Path)
+		if source.Remote != "" {
+			action += fmt.Sprintf(" from `%s`", source.Remote)
+		}
+		if source.Commit != "" {
+			action += fmt.Sprintf(" at commit `%s`", source.Commit)
+		}
+		if source.Dirty {
+			action += "; backup dirty changes before migration"
+		}
+		if len(source.Build) > 0 {
+			action += fmt.Sprintf("; review build hints `%s`", strings.Join(source.Build, ", "))
+		}
+		items = append(items, action+".")
+	}
+	writeChecklistSection(b, "Git sources", items)
+}
+
+func writeFilesystemChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, finding := range filesystemFindings(report) {
+		if finding.SecretRisk || !manualDecision(finding.Decision) {
+			continue
+		}
+		items = append(items, fmt.Sprintf("Decide how to recreate `%s` (%s/%s): package it, copy it manually, or replace it with a NixOS/Home Manager option.", finding.Path, finding.Category, finding.Type))
+	}
+	writeChecklistSection(b, "Filesystem", items)
+}
+
+func writeSecretChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, finding := range filesystemFindings(report) {
+		if finding.SecretRisk {
+			items = append(items, fmt.Sprintf("Back up and restore secret-risk file `%s` manually; do not commit raw contents to Nix or Git.", finding.Path))
+		}
+	}
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && (item.Decision == model.DecisionMigrationNote || secretLikeReason(item.Reason)) && item.Path != "" {
+			items = append(items, fmt.Sprintf("Recreate credential-bearing config `%s` manually or through a secrets manager; do not commit raw contents.", item.Path))
+		}
+	}
+	writeChecklistSection(b, "Secrets and credentials", items)
+}
+
+func writeStatefulChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, finding := range statefulFindings(report) {
+		items = append(items, fmt.Sprintf("Back up stateful data `%s` and define a restore procedure before switching systems.", finding.Path))
+	}
+	writeChecklistSection(b, "Stateful data", items)
+}
+
+func writeUserDesktopChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, user := range humanUsers(report) {
+		items = append(items, fmt.Sprintf("Confirm user `%s` home `%s`, shell `%s`, and required groups before applying user options.", user.Name, user.Home, user.Shell))
+	}
+	for _, item := range userConfigItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Review user configuration `%s` (%s) and decide whether to translate it to Home Manager.", item.Path, item.Kind))
+		}
+	}
+	for _, item := range desktopConfigItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Review desktop configuration `%s` and decide whether to translate it to Home Manager or keep it manual.", item.Path))
+		}
+	}
+	for _, finding := range report.Desktop.Autostart {
+		if reportDecision(finding.Decision) {
+			items = append(items, fmt.Sprintf("Review desktop autostart entry `%s` and decide whether to translate it to Home Manager.", finding.Path))
+		}
+	}
+	writeChecklistSection(b, "Users and desktop config", items)
 }
 
 func writeLanguagePackages(b *strings.Builder, report model.ScanReport) {
@@ -1456,6 +1674,14 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func secretLikeReason(reason string) bool {
+	text := strings.ToLower(reason)
+	return strings.Contains(text, "credential") ||
+		strings.Contains(text, "secret") ||
+		strings.Contains(text, "token") ||
+		strings.Contains(text, "password")
 }
 
 func isServiceLikeItem(item model.Item) bool {

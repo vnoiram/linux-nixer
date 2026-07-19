@@ -207,6 +207,7 @@ Version: 1.0
 		filepath.Join(out, "reviewed.json"),
 		filepath.Join(out, "summary.md"),
 		filepath.Join(out, "nix-config", "flake.nix"),
+		filepath.Join(out, "nix-config", "reports", "migration-checklist.md"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected artifact %s: %v", path, err)
@@ -269,6 +270,7 @@ Version: 1.0
 		filepath.Join(out, "reviewed.json"),
 		filepath.Join(out, "summary.md"),
 		filepath.Join(out, "nix-config", "flake.nix"),
+		filepath.Join(out, "nix-config", "reports", "migration-checklist.md"),
 	} {
 		if _, statErr := os.Stat(path); statErr != nil {
 			t.Fatalf("expected artifact after failed gate %s: %v", path, statErr)
