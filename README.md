@@ -159,7 +159,7 @@ Generated projects include:
 - Git checkouts under common source locations with remote, commit, branch, dirty, submodule, and build hints
 - Docker/Podman containers, inspect metadata, and compose files
 - stateful data markers for databases, queues, search, monitoring, container runtimes, VM images, and `/srv` application data
-- systemd, cron, network/firewall/SSH safe summaries, sudo/PAM/polkit/AppArmor/fail2ban/auditd markers, web server, and kernel/device tuning markers
+- systemd, cron, network/firewall/SSH safe summaries, sudo/PAM/polkit/AppArmor/fail2ban/auditd markers, web server, CI/CD automation, and kernel/device tuning markers
 - DevOps config markers such as Kubernetes, Docker client config, Helm, Terraform, AWS, GCP, and Azure
 - shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh, gpg, tmux, starship, shell plugin trees, and `.local/bin` executables
 - desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, browser profiles/extensions, and common terminal/editor settings

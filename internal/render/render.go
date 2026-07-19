@@ -458,6 +458,7 @@ func renderMigrationChecklist(report model.ScanReport) string {
 	writeLanguageChecklist(&b, report)
 	writeServiceChecklist(&b, report)
 	writeContainerChecklist(&b, report)
+	writeDevOpsChecklist(&b, report)
 	writeGitChecklist(&b, report)
 	writeFilesystemChecklist(&b, report)
 	writeSecretChecklist(&b, report)
@@ -607,6 +608,25 @@ func writeContainerChecklist(b *strings.Builder, report model.ScanReport) {
 		items = append(items, fmt.Sprintf("Translate %s into Nix/container config, including image, ports, mounts, volumes, and redacted env keys.", containerSummary(container)))
 	}
 	writeChecklistSection(b, "Containers", items)
+}
+
+func writeDevOpsChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, item := range devOpsConfigItems(report) {
+		if !manualDecision(item.Decision) || item.Kind != "cicd-config" {
+			continue
+		}
+		action := fmt.Sprintf("Review CI/CD configuration `%s` and decide whether to recreate it as GitHub Actions, a flake app, a dev shell command, or documented manual automation.", item.Path)
+		details := itemDetails(item)
+		if len(details) > 0 {
+			if len(details) > 4 {
+				details = details[:4]
+			}
+			action += " Review " + strings.Join(details, ", ") + "."
+		}
+		items = append(items, action)
+	}
+	writeChecklistSection(b, "DevOps and CI/CD", items)
 }
 
 func writeGitChecklist(b *strings.Builder, report model.ScanReport) {
@@ -1188,6 +1208,7 @@ func renderDevOpsConfigReport(report model.ScanReport) string {
 		{"AWS", func(item model.Item) bool { return strings.Contains(item.Path, "/.aws/") }},
 		{"GCP", func(item model.Item) bool { return strings.Contains(item.Path, "/gcloud/") }},
 		{"Azure", func(item model.Item) bool { return strings.Contains(item.Path, "/.azure/") }},
+		{"CI/CD", func(item model.Item) bool { return item.Kind == "cicd-config" }},
 		{"Other", func(item model.Item) bool { return item.Kind == "devops-config" }},
 	}
 	written := map[string]bool{}
@@ -1206,6 +1227,11 @@ func renderDevOpsConfigReport(report model.ScanReport) string {
 				b.WriteString(item.Reason)
 			}
 			b.WriteString("\n")
+			for _, detail := range itemDetails(item) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
 			written[item.Path] = true
 		}
 		b.WriteString("\n")
@@ -1804,7 +1830,7 @@ func envKeys(env map[string]string) []string {
 func devOpsConfigItems(report model.ScanReport) []model.Item {
 	var items []model.Item
 	for _, item := range report.Items {
-		if reportDecision(item.Decision) && item.Kind == "devops-config" {
+		if reportDecision(item.Decision) && (item.Kind == "devops-config" || item.Kind == "cicd-config") {
 			items = append(items, item)
 		}
 	}

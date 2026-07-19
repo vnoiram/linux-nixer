@@ -155,6 +155,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "devops-config", Name: "config_default", Path: "/home/alice/.config/gcloud/configurations/config_default", Decision: model.DecisionMigrationNote, Reason: "gcloud configuration may contain credentials"},
 			{Kind: "devops-config", Name: "config", Path: "/home/alice/.azure/config", Decision: model.DecisionMigrationNote, Reason: "azure CLI configuration may contain credentials"},
 			{Kind: "devops-config", Name: "excluded", Path: "/home/alice/.kube/excluded", Decision: model.DecisionExcluded, Reason: "kubernetes configuration may contain credentials"},
+			{Kind: "cicd-config", Name: "ci.yml", Path: "/home/alice/app/.github/workflows/ci.yml", Decision: model.DecisionCandidate, Reason: "github actions workflow", Details: map[string]string{"jobs": "1", "secret-refs": "1", "triggers": "push,workflow_dispatch"}},
+			{Kind: "cicd-config", Name: "deploy-prod.sh", Path: "/srv/app/scripts/deploy-prod.sh", Decision: model.DecisionCandidate, Reason: "deploy or release script", Details: map[string]string{"shebang": "/bin/sh", "targets": "deploy,release"}},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionCandidate, Reason: "shell or login environment configuration"},
 			{Kind: "shell-plugin", Name: ".oh-my-zsh", Path: "/home/alice/.oh-my-zsh", Decision: model.DecisionCandidate, Reason: "shell plugin manager or plugin tree"},
@@ -215,7 +217,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("system config report included excluded entries or raw secret:\n%s", systemConfig)
 	}
 	devopsConfig := readFile(t, out, "reports/devops-config.md")
-	for _, want := range []string{"Kubernetes", "/home/alice/.kube/config", "Docker", "/home/alice/.docker/config.json", "Helm", "/home/alice/.config/helm/repositories.yaml", "Terraform", "/home/alice/.terraformrc", "AWS", "/home/alice/.aws/config", "GCP", "/home/alice/.config/gcloud/configurations/config_default", "Azure", "/home/alice/.azure/config"} {
+	for _, want := range []string{"Kubernetes", "/home/alice/.kube/config", "Docker", "/home/alice/.docker/config.json", "Helm", "/home/alice/.config/helm/repositories.yaml", "Terraform", "/home/alice/.terraformrc", "AWS", "/home/alice/.aws/config", "GCP", "/home/alice/.config/gcloud/configurations/config_default", "Azure", "/home/alice/.azure/config", "CI/CD", "/home/alice/app/.github/workflows/ci.yml", "triggers `push,workflow_dispatch`", "/srv/app/scripts/deploy-prod.sh", "targets `deploy,release`"} {
 		if !strings.Contains(devopsConfig, want) {
 			t.Fatalf("devops config report missing %q:\n%s", want, devopsConfig)
 		}
@@ -308,6 +310,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Translate system configuration `/etc/sudoers`",
 		"Review group-rules `1`, nopasswd-rules `1`",
 		"Translate compose `/srv/app/compose.yml`",
+		"Review CI/CD configuration `/home/alice/app/.github/workflows/ci.yml`",
+		"Review jobs `1`, secret-refs `1`, triggers `push,workflow_dispatch`",
 		"backup dirty changes before migration",
 		"Decide how to recreate `/usr/local/bin/tool`",
 		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",

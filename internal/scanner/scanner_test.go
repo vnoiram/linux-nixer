@@ -541,14 +541,19 @@ func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 	write(t, root, "/home/alice/.aws/config", "[default]\nregion=us-east-1\n")
 	write(t, root, "/home/alice/.config/gcloud/configurations/config_default", "[core]\n")
 	write(t, root, "/home/alice/.azure/config", "[cloud]\n")
+	write(t, root, "/home/alice/app/.github/workflows/ci.yml", "on: [push, pull_request]\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: echo ${{ secrets.DEPLOY_TOKEN }}\n")
+	write(t, root, "/home/alice/app/.gitlab-ci.yml", "stages:\n  - test\ntest:\n  stage: test\n  script: echo $DEPLOY_TOKEN\n")
+	write(t, root, "/srv/app/Jenkinsfile", "pipeline { agent any stages { stage('Deploy') { steps { sh 'deploy' } } } environment { TOKEN='secret-value' } }\n")
+	write(t, root, "/srv/app/scripts/deploy-prod.sh", "#!/bin/sh\nrelease_app --token=secret-value\n")
+	write(t, root, "/srv/app/Makefile", "build:\n\tgo build ./...\ndeploy:\n\t./scripts/deploy-prod.sh\n")
 
 	report := &model.ScanReport{}
 	if err := (DevOpsConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]model.Decision{}
+	seen := map[string]model.Item{}
 	for _, item := range report.Items {
-		seen[item.Path] = item.Decision
+		seen[item.Path] = item
 	}
 	for _, path := range []string{
 		"/home/alice/.kube/config",
@@ -558,12 +563,39 @@ func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 		"/home/alice/.config/gcloud/configurations/config_default",
 		"/home/alice/.azure/config",
 	} {
-		if seen[path] != model.DecisionMigrationNote {
-			t.Fatalf("path %s decision=%q, want migration-note in %+v", path, seen[path], report.Items)
+		if seen[path].Decision != model.DecisionMigrationNote {
+			t.Fatalf("path %s decision=%q, want migration-note in %+v", path, seen[path].Decision, report.Items)
 		}
 	}
-	if seen["/home/alice/.aws/config"] != model.DecisionCandidate {
+	if seen["/home/alice/.aws/config"].Decision != model.DecisionCandidate {
 		t.Fatalf("aws config should remain candidate in %+v", report.Items)
+	}
+	gha := seen["/home/alice/app/.github/workflows/ci.yml"]
+	if gha.Kind != "cicd-config" || gha.Reason != "github actions workflow" || gha.Details["jobs"] != "1" || gha.Details["uses"] != "1" || gha.Details["secret-refs"] != "1" || gha.Details["triggers"] != "pull_request,push" {
+		t.Fatalf("github actions details missing: %+v", gha)
+	}
+	gitlab := seen["/home/alice/app/.gitlab-ci.yml"]
+	if gitlab.Kind != "cicd-config" || gitlab.Reason != "gitlab ci pipeline" || gitlab.Details["stages"] == "" || gitlab.Details["secret-refs"] != "1" {
+		t.Fatalf("gitlab ci details missing: %+v", gitlab)
+	}
+	jenkins := seen["/srv/app/Jenkinsfile"]
+	if jenkins.Kind != "cicd-config" || jenkins.Details["stages"] != "1" || jenkins.Details["agents"] != "1" || jenkins.Details["secret-refs"] != "1" {
+		t.Fatalf("jenkins details missing: %+v", jenkins)
+	}
+	deploy := seen["/srv/app/scripts/deploy-prod.sh"]
+	if deploy.Kind != "cicd-config" || deploy.Details["shebang"] != "/bin/sh" || !strings.Contains(deploy.Details["targets"], "release") || deploy.Details["secret-refs"] != "1" {
+		t.Fatalf("deploy script details missing: %+v", deploy)
+	}
+	makefile := seen["/srv/app/Makefile"]
+	if makefile.Kind != "cicd-config" || !strings.Contains(makefile.Details["targets"], "deploy") || !strings.Contains(makefile.Details["targets"], "build") {
+		t.Fatalf("makefile automation details missing: %+v", makefile)
+	}
+	for _, item := range []model.Item{gha, gitlab, jenkins, deploy, makefile} {
+		for _, value := range item.Details {
+			if strings.Contains(value, "secret-value") || strings.Contains(value, "DEPLOY_TOKEN") {
+				t.Fatalf("cicd details leaked secret value in %+v", item)
+			}
+		}
 	}
 	if len(report.Warnings) == 0 {
 		t.Fatalf("expected secret-risk warnings, got %+v", report.Warnings)
