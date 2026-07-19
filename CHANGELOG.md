@@ -17,6 +17,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Dedicated secrets scanner for common credential files and token-bearing configs.
 - Service detail reporting for systemd units, timers, and cron schedules.
 - GUI profile inventory for browser profiles, browser extensions, and editor profiles.
+- Expanded stateful data inventory for common databases, queues, monitoring stores, container state, VM images, and `/srv` app data.
 
 ## [0.1.0] - 2026-07-19
 

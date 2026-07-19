@@ -282,8 +282,72 @@ func TestFilesystemDiffAddsMigrationHintsForCommonLocations(t *testing.T) {
 	if findings["/home/alice/.ssh/id_ed25519"].Decision != model.DecisionMigrationNote || !findings["/home/alice/.ssh/id_ed25519"].SecretRisk {
 		t.Fatalf("secret should be migration note with secret risk: %+v", findings["/home/alice/.ssh/id_ed25519"])
 	}
-	if len(report.StatefulData) != 1 || report.StatefulData[0].Path != "/var/lib/postgresql/data/PG_VERSION" || report.StatefulData[0].Reason == "" {
+	if len(report.StatefulData) != 1 || report.StatefulData[0].Path != "/var/lib/postgresql" || report.StatefulData[0].Reason == "" {
 		t.Fatalf("unexpected stateful data: %+v", report.StatefulData)
+	}
+}
+
+func TestStatefulDataScannerFindsCommonRuntimeState(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/var/lib/redis/dump.rdb", "redis-secret-content")
+	write(t, root, "/var/lib/mongodb/WiredTiger", "mongo-data")
+	write(t, root, "/var/lib/rabbitmq/mnesia/.keep", "")
+	write(t, root, "/var/lib/prometheus/chunks_head/.keep", "")
+	write(t, root, "/var/lib/grafana/grafana.db", "grafana")
+	write(t, root, "/var/lib/docker/volumes/pgdata/_data/.keep", "")
+	write(t, root, "/var/lib/libvirt/images/vm.qcow2", "vm")
+	write(t, root, "/srv/app/uploads/avatar.png", "image")
+
+	report := &model.ScanReport{}
+	if err := (StatefulDataScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	findings := map[string]model.FileFinding{}
+	for _, finding := range report.StatefulData {
+		findings[finding.Path] = finding
+	}
+	for _, path := range []string{
+		"/var/lib/redis",
+		"/var/lib/mongodb",
+		"/var/lib/rabbitmq",
+		"/var/lib/prometheus",
+		"/var/lib/grafana",
+		"/var/lib/docker",
+		"/var/lib/libvirt/images",
+		"/srv/app/uploads",
+	} {
+		finding := findings[path]
+		if finding.Path == "" {
+			t.Fatalf("missing stateful finding %s in %+v", path, report.StatefulData)
+		}
+		if finding.Category != "stateful-data" || finding.Type != "directory" || finding.Decision != model.DecisionMigrationNote || finding.Reason == "" {
+			t.Fatalf("stateful finding not protected: %+v", finding)
+		}
+		if strings.Contains(finding.Reason, "redis-secret-content") || strings.Contains(finding.Reason, "mongo-data") {
+			t.Fatalf("stateful finding leaked raw content: %+v", finding)
+		}
+	}
+}
+
+func TestStatefulDataScannerDeduplicatesFilesystemFindings(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/var/lib/redis/dump.rdb", "redis")
+
+	report := &model.ScanReport{}
+	if err := (StatefulDataScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if err := (FilesystemDiffScanner{}).Scan(context.Background(), Options{Root: root, Includes: []string{"/var/lib/redis"}}, report); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, finding := range report.StatefulData {
+		if finding.Path == "/var/lib/redis" && finding.Category == "stateful-data" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("redis stateful finding count=%d, want 1 in %+v", count, report.StatefulData)
 	}
 }
 
@@ -565,13 +629,16 @@ func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 		names[scanner.Name()] = true
 		order[scanner.Name()] = i
 	}
-	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "secrets"} {
+	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "secrets", "stateful-data"} {
 		if !names[want] {
 			t.Fatalf("default registry missing %q in %+v", want, names)
 		}
 	}
 	if order["secrets"] >= order["filesystem-diff"] {
 		t.Fatalf("secrets scanner should run before filesystem-diff: %+v", order)
+	}
+	if order["stateful-data"] >= order["filesystem-diff"] {
+		t.Fatalf("stateful scanner should run before filesystem-diff: %+v", order)
 	}
 	if names["config"] {
 		t.Fatalf("default registry should not include legacy config scanner: %+v", names)

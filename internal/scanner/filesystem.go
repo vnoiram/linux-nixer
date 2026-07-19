@@ -49,7 +49,7 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 				return nil
 			}
 			if finding.Category == "stateful-data" {
-				report.StatefulData = append(report.StatefulData, finding)
+				appendStatefulFindingUnique(report, finding)
 				return nil
 			}
 			if finding.Category != "" {
@@ -144,8 +144,12 @@ func classifyFile(abs, disp string, info os.FileInfo) model.FileFinding {
 		f.Reason = filesystemReason(disp, "secret-like file excluded from generated Nix")
 	case isStatefulPath(disp):
 		f.Category = "stateful-data"
+		f.Path = normalizeStatefulPath(disp)
+		f.Type = "directory"
+		f.Size = 0
+		f.SHA256 = ""
 		f.Decision = model.DecisionMigrationNote
-		f.Reason = filesystemReason(disp, "stateful data requires manual backup or migration")
+		f.Reason = statefulDataReason(disp)
 	default:
 		if strings.HasPrefix(disp, "/etc/") || strings.Contains(disp, "/.config/") {
 			f.Category = "config"
@@ -279,4 +283,13 @@ func appendFileFindingUnique(report *model.ScanReport, finding model.FileFinding
 		}
 	}
 	report.FilesystemDiff = append(report.FilesystemDiff, finding)
+}
+
+func appendStatefulFindingUnique(report *model.ScanReport, finding model.FileFinding) {
+	for _, existing := range report.StatefulData {
+		if existing.Path == finding.Path && existing.Category == finding.Category {
+			return
+		}
+	}
+	report.StatefulData = append(report.StatefulData, finding)
 }

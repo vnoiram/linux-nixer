@@ -650,7 +650,11 @@ func writeSecretChecklist(b *strings.Builder, report model.ScanReport) {
 func writeStatefulChecklist(b *strings.Builder, report model.ScanReport) {
 	var items []string
 	for _, finding := range statefulFindings(report) {
-		items = append(items, fmt.Sprintf("Back up stateful data `%s` and define a restore procedure before switching systems.", finding.Path))
+		reason := ""
+		if finding.Reason != "" {
+			reason = fmt.Sprintf(" (%s)", finding.Reason)
+		}
+		items = append(items, fmt.Sprintf("Back up stateful data `%s`%s and define a restore procedure before switching systems.", finding.Path, reason))
 	}
 	writeChecklistSection(b, "Stateful data", items)
 }

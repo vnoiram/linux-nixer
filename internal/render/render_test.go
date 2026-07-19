@@ -181,7 +181,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Path: "/tmp/excluded", Category: "script", Decision: model.DecisionExcluded},
 		},
 		StatefulData: []model.FileFinding{
-			{Path: "/var/lib/postgresql/data/PG_VERSION", Type: "file", Mode: "-rw-------", Size: 3, SHA256: "statesha", Category: "stateful-data", Reason: "stateful data requires manual backup or migration", Decision: model.DecisionMigrationNote},
+			{Path: "/var/lib/postgresql", Type: "directory", Mode: "drwx------", Category: "stateful-data", Reason: "postgresql data directory", Decision: model.DecisionMigrationNote},
+			{Path: "/var/lib/redis", Type: "directory", Mode: "drwxr-x---", Category: "stateful-data", Reason: "redis data directory", Decision: model.DecisionMigrationNote},
 			{Path: "/var/lib/mysql/excluded", Category: "stateful-data", Decision: model.DecisionExcluded},
 		},
 	}
@@ -280,7 +281,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("filesystem module leaked secret/excluded finding:\n%s", fs)
 	}
 	filesystemReport := readFile(t, out, "reports/filesystem.md")
-	for _, want := range []string{"# Filesystem migration findings", "Executable files", "/opt/vendor/bin/app", "sha256 `abc123`", "Scripts", "/usr/local/bin/tool", "Service and desktop entries", "/srv/app/app.service", "Config files", "/home/alice/.config/tool/config.toml", "Secret-risk files", "/home/alice/.ssh/id_ed25519", "secret-risk", "Stateful data", "/var/lib/postgresql/data/PG_VERSION", "statesha"} {
+	for _, want := range []string{"# Filesystem migration findings", "Executable files", "/opt/vendor/bin/app", "sha256 `abc123`", "Scripts", "/usr/local/bin/tool", "Service and desktop entries", "/srv/app/app.service", "Config files", "/home/alice/.config/tool/config.toml", "Secret-risk files", "/home/alice/.ssh/id_ed25519", "secret-risk", "Stateful data", "/var/lib/postgresql", "postgresql data directory", "/var/lib/redis", "redis data directory"} {
 		if !strings.Contains(filesystemReport, want) {
 			t.Fatalf("filesystem report missing %q:\n%s", want, filesystemReport)
 		}
@@ -304,7 +305,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"backup dirty changes before migration",
 		"Decide how to recreate `/usr/local/bin/tool`",
 		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",
-		"Back up stateful data `/var/lib/postgresql/data/PG_VERSION`",
+		"Back up stateful data `/var/lib/postgresql` (postgresql data directory)",
+		"Back up stateful data `/var/lib/redis` (redis data directory)",
 		"Confirm user `alice` home `/home/alice`",
 		"Back up or sync browser profile `/home/alice/.mozilla/firefox/alice.default-release` manually",
 		"Review browser extension marker `/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi`",
@@ -375,7 +377,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if !strings.Contains(reportMD, "## Language packages") || !strings.Contains(reportMD, "`prettier` via pnpm") || !strings.Contains(reportMD, "version manager `mise`") || !strings.Contains(reportMD, "/home/alice/app/package.json") {
 		t.Fatalf("migration report missing language section:\n%s", reportMD)
 	}
-	if !strings.Contains(reportMD, "/opt/vendor/bin/app") || !strings.Contains(reportMD, "sha256 `abc123`") || !strings.Contains(reportMD, "/var/lib/postgresql/data/PG_VERSION") {
+	if !strings.Contains(reportMD, "/opt/vendor/bin/app") || !strings.Contains(reportMD, "sha256 `abc123`") || !strings.Contains(reportMD, "/var/lib/postgresql") || !strings.Contains(reportMD, "postgresql data directory") {
 		t.Fatalf("migration report missing filesystem metadata:\n%s", reportMD)
 	}
 }

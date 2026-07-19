@@ -51,6 +51,7 @@ func DefaultRegistry() Registry {
 		UserConfigScanner{},
 		DesktopScanner{},
 		SecretScanner{},
+		StatefulDataScanner{},
 		FilesystemDiffScanner{},
 	)
 }
