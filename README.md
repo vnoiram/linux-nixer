@@ -48,6 +48,7 @@ bin/linux-nixer summary --scan reviewed.json
 bin/linux-nixer summary --scan reviewed.json --fail-on-pending
 bin/linux-nixer generate --scan reviewed.json --out nix-config
 bin/linux-nixer doctor --project nix-config
+bin/linux-nixer help capture
 ```
 
 For fixture or mounted rootfs scans:

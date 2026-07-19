@@ -64,10 +64,131 @@ func TestRunHelpIncludesCaptureSummaryAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"linux-nixer capture --out DIR", "linux-nixer validate --scan reviewed.json", "linux-nixer summary --scan reviewed.json", "linux-nixer version"} {
+	for _, want := range []string{"linux-nixer capture --out DIR", "linux-nixer validate --scan reviewed.json", "linux-nixer summary --scan reviewed.json", "linux-nixer help <command>", "linux-nixer version"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestRunCommandHelpTopics(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		wants []string
+	}{
+		{
+			name: "help scan",
+			args: []string{"help", "scan"},
+			wants: []string{
+				"linux-nixer scan",
+				"Examples:",
+				"--baseline ID",
+				"Policy include/exclude lists are merged",
+			},
+		},
+		{
+			name: "capture flag help",
+			args: []string{"capture", "--help"},
+			wants: []string{
+				"linux-nixer capture",
+				"Artifacts:",
+				"DIR/scan.json",
+				"DIR/nix-config/",
+				"--fail-on-pending",
+				"Explicit CLI boolean and string flags override policy values",
+			},
+		},
+		{
+			name: "policy init flag help",
+			args: []string{"policy", "init", "--help"},
+			wants: []string{
+				"linux-nixer policy init",
+				"schemaVersion",
+				"linux-nixer.policy.v1",
+				"--out PATH",
+			},
+		},
+		{
+			name: "validate short help",
+			args: []string{"validate", "-h"},
+			wants: []string{
+				"linux-nixer validate",
+				"--strict",
+				"Reject unknown JSON fields",
+			},
+		},
+		{
+			name: "baseline create help",
+			args: []string{"help", "baseline", "create"},
+			wants: []string{
+				"linux-nixer baseline create",
+				"--distro NAME",
+				"filesystem differences",
+			},
+		},
+		{
+			name: "review help",
+			args: []string{"review", "-h"},
+			wants: []string{
+				"linux-nixer review",
+				"c/k/t/m/x/s/q",
+				"Policy decisions are applied first",
+			},
+		},
+		{
+			name: "summary help",
+			args: []string{"summary", "--help"},
+			wants: []string{
+				"linux-nixer summary",
+				"--fail-on-pending",
+				"candidate or todo findings remain",
+			},
+		},
+		{
+			name: "generate help",
+			args: []string{"generate", "--help"},
+			wants: []string{
+				"linux-nixer generate",
+				"--scan PATH",
+				"--out DIR",
+			},
+		},
+		{
+			name: "doctor help",
+			args: []string{"doctor", "--help"},
+			wants: []string{
+				"linux-nixer doctor",
+				"--vm",
+				"--boot",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			err := run(context.Background(), tt.args, strings.NewReader(""), &stdout, &stdout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.wants {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("help missing %q:\n%s", want, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+func TestRunCommandHelpUnknownTopicFails(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"help", "unknown"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected unknown help topic to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown help topic") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

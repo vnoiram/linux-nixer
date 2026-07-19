@@ -57,7 +57,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, version)
 		return nil
-	case "help", "--help", "-h":
+	case "help":
+		return commandHelp(stdout, args[1:])
+	case "--help", "-h":
 		usage(stdout)
 		return nil
 	default:
@@ -78,10 +80,249 @@ Usage:
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer policy init --out linux-nixer-policy.json
+  linux-nixer help <command>
   linux-nixer version`)
 }
 
+func commandHelp(w io.Writer, topic []string) error {
+	if len(topic) == 0 {
+		usage(w)
+		return nil
+	}
+	switch topic[0] {
+	case "scan":
+		fmt.Fprint(w, scanHelp)
+	case "capture":
+		fmt.Fprint(w, captureHelp)
+	case "review":
+		fmt.Fprint(w, reviewHelp)
+	case "summary":
+		fmt.Fprint(w, summaryHelp)
+	case "validate":
+		fmt.Fprint(w, validateHelp)
+	case "generate":
+		fmt.Fprint(w, generateHelp)
+	case "doctor":
+		fmt.Fprint(w, doctorHelp)
+	case "baseline":
+		if len(topic) == 1 || topic[1] == "create" {
+			fmt.Fprint(w, baselineCreateHelp)
+			return nil
+		}
+		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
+	case "policy":
+		if len(topic) == 1 || topic[1] == "init" {
+			fmt.Fprint(w, policyInitHelp)
+			return nil
+		}
+		return fmt.Errorf("unknown help topic %q", "policy "+topic[1])
+	default:
+		return fmt.Errorf("unknown help topic %q", topic[0])
+	}
+	return nil
+}
+
+func hasHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+const scanHelp = `linux-nixer scan
+Scan a Debian/Ubuntu-like root filesystem and write scan JSON.
+
+Usage:
+  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
+
+Examples:
+  linux-nixer scan --out scan.json
+  linux-nixer scan --sudo --deep --out scan.json
+  linux-nixer scan --root /mnt/ubuntu --include /opt --baseline ubuntu:24.04 --out scan.json
+
+Flags:
+  --out PATH       Write scan JSON to PATH.
+  --policy PATH    Load repeatable scan and review policy from PATH.
+  --root PATH      Scan PATH as the root filesystem. Defaults to /.
+  --sudo           Allow read-only sudo fallback for selected host files.
+  --deep           Scan broader filesystem paths for manual installs and config.
+  --baseline ID    Compare filesystem findings against a baseline id or JSON path.
+  --include PATH   Add a path to filesystem-diff scanning. Repeatable.
+  --exclude PATH   Exclude a path prefix from scanning. Repeatable.
+
+Policy:
+  Policy include/exclude lists are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
+`
+
+const captureHelp = `linux-nixer capture
+Run scan, auto-safe review, summary, and Nix generation in one workflow.
+
+Usage:
+  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--auto-safe=false] [--fail-on-pending]
+
+Examples:
+  linux-nixer capture --out linux-nixer-output
+  linux-nixer capture --sudo --deep --out linux-nixer-output
+  linux-nixer capture --policy linux-nixer-policy.json --root /mnt/ubuntu --include /opt --out linux-nixer-output
+
+Artifacts:
+  DIR/scan.json
+  DIR/reviewed.json
+  DIR/summary.md
+  DIR/nix-config/
+
+Flags:
+  --out DIR            Write capture artifacts under DIR.
+  --policy PATH        Load repeatable scan and review policy from PATH.
+  --root PATH          Scan PATH as the root filesystem. Defaults to /.
+  --sudo               Allow read-only sudo fallback for selected host files.
+  --deep               Scan broader filesystem paths for manual installs and config.
+  --baseline ID        Compare filesystem findings against a baseline id or JSON path.
+  --include PATH       Add a path to filesystem-diff scanning. Repeatable.
+  --exclude PATH       Exclude a path prefix from scanning. Repeatable.
+  --auto-safe=false    Disable high-confidence automatic confirmations.
+  --fail-on-pending    Return an error if candidate or todo findings remain.
+
+Policy:
+  Policy scan and review defaults are applied first. Explicit CLI boolean and string flags override policy values; CLI list flags are merged with policy lists.
+`
+
+const reviewHelp = `linux-nixer review
+Apply repeatable review decisions or run an interactive review over scan JSON.
+
+Usage:
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH]
+
+Examples:
+  linux-nixer review --scan scan.json --out reviewed.json --auto-safe
+  linux-nixer review --scan scan.json --out reviewed.json --interactive
+  linux-nixer review --policy linux-nixer-policy.json --scan scan.json --out reviewed.json
+
+Flags:
+  --scan PATH                  Read input scan JSON.
+  --out PATH                   Write reviewed scan JSON.
+  --policy PATH                Load repeatable review policy from PATH.
+  --auto-safe                  Confirm high-confidence safe findings.
+  --interactive                Prompt for each finding with c/k/t/m/x/s/q choices.
+  --confirm-kind KIND          Mark findings of kind/category as confirmed. Repeatable.
+  --exclude-kind KIND          Mark findings of kind/category as excluded. Repeatable.
+  --todo-kind KIND             Mark findings of kind/category as todo. Repeatable.
+  --migration-note-kind KIND   Mark findings of kind/category as migration-note. Repeatable.
+  --confirm-manager MANAGER    Confirm packages from a package manager. Repeatable.
+  --exclude-path PATH          Exclude findings with a path prefix. Repeatable.
+
+Policy:
+  Policy decisions are applied first. Explicit CLI --auto-safe overrides policy autoSafe; CLI list flags are merged with policy lists.
+`
+
+const summaryHelp = `linux-nixer summary
+Summarize reviewed scan decisions for humans or automation.
+
+Usage:
+  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
+
+Examples:
+  linux-nixer summary --scan reviewed.json
+  linux-nixer summary --scan reviewed.json --json
+  linux-nixer summary --scan reviewed.json --fail-on-pending
+
+Flags:
+  --scan PATH          Read reviewed scan JSON.
+  --json               Write machine-readable JSON summary.
+  --fail-on-pending    Return an error if candidate or todo findings remain.
+`
+
+const validateHelp = `linux-nixer validate
+Validate scan or reviewed scan JSON before using it for generation or CI gates.
+
+Usage:
+  linux-nixer validate --scan reviewed.json [--json] [--strict]
+
+Examples:
+  linux-nixer validate --scan reviewed.json
+  linux-nixer validate --scan reviewed.json --json
+  linux-nixer validate --scan reviewed.json --strict
+
+Flags:
+  --scan PATH    Read scan JSON.
+  --json         Write machine-readable JSON validation result.
+  --strict       Reject unknown JSON fields in addition to semantic validation.
+`
+
+const generateHelp = `linux-nixer generate
+Render a conservative NixOS + Home Manager flake from reviewed scan JSON.
+
+Usage:
+  linux-nixer generate --scan reviewed.json --out ./nix-config
+
+Examples:
+  linux-nixer generate --scan reviewed.json --out nix-config
+
+Flags:
+  --scan PATH    Read reviewed scan JSON.
+  --out DIR      Write generated flake project to DIR.
+`
+
+const doctorHelp = `linux-nixer doctor
+Validate generated Nix files and optionally build or boot a NixOS VM.
+
+Usage:
+  linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
+
+Examples:
+  linux-nixer doctor --project nix-config
+  linux-nixer doctor --project nix-config --vm --host generated
+  linux-nixer doctor --project nix-config --vm --boot --timeout 30s
+
+Flags:
+  --project DIR      Generated flake project to check.
+  --vm               Attempt NixOS VM build validation.
+  --boot             Attempt to start the generated VM script.
+  --timeout VALUE    VM boot validation timeout. Defaults to 15s.
+  --host NAME        NixOS configuration name for VM validation.
+`
+
+const baselineCreateHelp = `linux-nixer baseline create
+Create a baseline manifest for a distro rootfs so later scans can report only local filesystem differences.
+
+Usage:
+  linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
+
+Examples:
+  linux-nixer baseline create --distro ubuntu --release 24.04 --root /mnt/base --out baselines/ubuntu-24.04.json
+  linux-nixer scan --baseline ubuntu:24.04 --include /opt --out scan.json
+
+Flags:
+  --distro NAME      Distro name for the baseline id.
+  --release VALUE    Distro release version for the baseline id.
+  --root PATH        Rootfs path to manifest. Defaults to /.
+  --out PATH         Write baseline JSON to PATH.
+`
+
+const policyInitHelp = `linux-nixer policy init
+Write a reusable policy template for scan paths, baselines, and review decisions.
+
+Usage:
+  linux-nixer policy init --out linux-nixer-policy.json
+
+Examples:
+  linux-nixer policy init --out linux-nixer-policy.json
+  linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-output
+
+Flags:
+  --out PATH    Write policy JSON template to PATH. Use - for stdout.
+
+Policy:
+  The template uses schemaVersion "linux-nixer.policy.v1". Policy values supply defaults; explicit CLI boolean and string flags override them, and CLI list flags are merged with policy lists.
+`
+
 func runScan(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, scanHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output scan JSON path")
@@ -117,6 +358,10 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, captureHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output directory")
@@ -187,6 +432,10 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, reviewHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("review", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input scan JSON")
@@ -230,6 +479,10 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 }
 
 func runSummary(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, summaryHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("summary", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input reviewed scan JSON")
@@ -262,6 +515,10 @@ func runSummary(args []string, stdout io.Writer) error {
 }
 
 func runValidate(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, validateHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input scan JSON")
@@ -311,6 +568,10 @@ func runValidate(args []string, stdout io.Writer) error {
 }
 
 func runGenerate(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, generateHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input reviewed scan JSON")
@@ -329,6 +590,10 @@ func runGenerate(args []string, stdout io.Writer) error {
 }
 
 func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, doctorHelp)
+		return nil
+	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	project := fs.String("project", "", "generated flake project")
@@ -349,8 +614,16 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
+	if len(args) == 1 && hasHelp(args) {
+		fmt.Fprint(stdout, baselineCreateHelp)
+		return nil
+	}
 	if len(args) == 0 || args[0] != "create" {
 		return errors.New("baseline supports only: baseline create")
+	}
+	if hasHelp(args[1:]) {
+		fmt.Fprint(stdout, baselineCreateHelp)
+		return nil
 	}
 	fs := flag.NewFlagSet("baseline create", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -372,8 +645,16 @@ func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
 }
 
 func runPolicy(args []string, stdout io.Writer) error {
+	if len(args) == 1 && hasHelp(args) {
+		fmt.Fprint(stdout, policyInitHelp)
+		return nil
+	}
 	if len(args) == 0 || args[0] != "init" {
 		return errors.New("policy supports only: policy init")
+	}
+	if hasHelp(args[1:]) {
+		fmt.Fprint(stdout, policyInitHelp)
+		return nil
 	}
 	fs := flag.NewFlagSet("policy init", flag.ContinueOnError)
 	fs.SetOutput(stdout)
