@@ -21,6 +21,7 @@ This is an early implementation scaffold. It includes:
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - `doctor --vm` support for building the generated NixOS VM derivation
+- Baseline IDs such as `ubuntu:24.04` resolved from local `baselines/` or user cache
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
 
@@ -44,8 +45,12 @@ bin/linux-nixer scan --root /path/to/rootfs --include /random-seed-42 --out scan
 Create a local baseline manifest:
 
 ```sh
+mkdir -p baselines
 bin/linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baselines/ubuntu-24.04.json
+bin/linux-nixer scan --root /path/to/current-root --baseline ubuntu:24.04 --out scan.json
 ```
+
+`--baseline` accepts either a JSON path or an ID such as `ubuntu:24.04`. IDs resolve to `baselines/ubuntu-24.04.json` in the current project first, then to the user cache under `linux-nixer/baselines/`.
 
 Review decisions can be adjusted without editing JSON by hand:
 

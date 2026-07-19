@@ -79,9 +79,13 @@ func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baseli
 	}
 	f, err := os.Open(id)
 	if err != nil {
+		message := "baseline manifest path not found; treating scan as classification-only: " + id
+		if strings.Contains(id, ":") {
+			message = "baseline id could not be resolved; treating scan as classification-only: " + id
+		}
 		report.Warnings = append(report.Warnings, model.Warning{
 			Source:  "filesystem-diff",
-			Message: "baseline manifest not found locally; treating scan as classification-only: " + id,
+			Message: message,
 		})
 		return nil, false
 	}

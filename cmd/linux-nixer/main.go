@@ -84,12 +84,22 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if *out == "" {
 		return errors.New("scan requires --out")
 	}
+	resolvedBaseline := *baselineID
+	if *baselineID != "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if resolution := baseline.Resolve(*baselineID, cwd); resolution.OK {
+			resolvedBaseline = resolution.Path
+		}
+	}
 	reg := scanner.DefaultRegistry()
 	report, err := reg.Scan(ctx, scanner.Options{
 		Root:       *root,
 		UseSudo:    *useSudo,
 		Deep:       *deep,
-		BaselineID: *baselineID,
+		BaselineID: resolvedBaseline,
 		Includes:   includes,
 		Excludes:   excludes,
 	})

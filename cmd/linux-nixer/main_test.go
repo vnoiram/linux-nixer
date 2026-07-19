@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +39,44 @@ func TestRunReviewInteractiveWritesReviewedJSON(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "choose c=confirmed") {
 		t.Fatalf("stdout missing prompt: %s", stdout.String())
+	}
+}
+
+func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
+	project := t.TempDir()
+	root := filepath.Join(project, "root")
+	script := filepath.Join(root, "usr/local/bin/tool")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("#!/bin/sh\necho same\n")
+	if err := os.WriteFile(script, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(content)
+	baselineDir := filepath.Join(project, "baselines")
+	if err := os.MkdirAll(baselineDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baselineJSON := fmt.Sprintf(`{"files":[{"path":"/usr/local/bin/tool","type":"script","mode":"-rwxr-xr-x","size":%d,"sha256":"%x"}]}`, len(content), sum)
+	if err := os.WriteFile(filepath.Join(baselineDir, "ubuntu-24.04.json"), []byte(baselineJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(project)
+
+	outPath := filepath.Join(project, "scan.json")
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--include", "/usr/local/bin", "--baseline", "ubuntu:24.04", "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	for _, finding := range got.FilesystemDiff {
+		if finding.Path == "/usr/local/bin/tool" {
+			t.Fatalf("baseline-matched file should not be reported: %+v", got.FilesystemDiff)
+		}
 	}
 }
 
