@@ -5,6 +5,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -39,12 +41,14 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/systemd/resolved.conf",
 	} {
 		if existsWithSudo(ctx, opts, report, "system-config", path) {
+			details := readSystemConfigDetails(ctx, opts, report, path)
 			report.Items = append(report.Items, model.Item{
 				Kind:     "os-config",
 				Name:     filepath.Base(path),
 				Path:     path,
 				Decision: model.DecisionCandidate,
 				Reason:   systemConfigReason(path),
+				Details:  details,
 			})
 		}
 	}
@@ -69,15 +73,322 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 				decision = model.DecisionMigrationNote
 				reason = "network connection profile may contain credentials"
 			}
+			details := systemConfigDetails(display, readLocalFile(path))
 			report.Items = append(report.Items, model.Item{
 				Kind:     "os-config",
 				Name:     filepath.Base(path),
 				Path:     display,
 				Decision: decision,
 				Reason:   reason,
+				Details:  details,
 			})
 		}
 	}
+}
+
+func readSystemConfigDetails(ctx context.Context, opts Options, report *model.ScanReport, displayPath string) map[string]string {
+	b, err := readFile(ctx, opts, report, "system-config", displayPath)
+	if err != nil {
+		return nil
+	}
+	return systemConfigDetails(displayPath, string(b))
+}
+
+func readLocalFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func systemConfigDetails(path, content string) map[string]string {
+	if content == "" {
+		return nil
+	}
+	switch {
+	case strings.HasSuffix(path, "/etc/hosts"):
+		return hostsDetails(content)
+	case strings.HasSuffix(path, "/etc/resolv.conf"):
+		return resolvDetails(content)
+	case strings.HasSuffix(path, "/etc/systemd/resolved.conf"):
+		return keyValueDetails(content, []string{"DNS", "FallbackDNS", "Domains", "DNSSEC", "DNSOverTLS", "MulticastDNS"})
+	case strings.Contains(path, "/netplan/") && strings.HasSuffix(path, ".yaml"):
+		return netplanDetails(content)
+	case strings.Contains(path, "/NetworkManager/system-connections/"):
+		return networkManagerConnectionDetails(content)
+	case strings.HasSuffix(path, "/etc/NetworkManager/NetworkManager.conf"):
+		return keyValueDetails(content, []string{"plugins", "dns", "managed", "rc-manager"})
+	case strings.HasSuffix(path, "/etc/ufw/ufw.conf") || strings.HasSuffix(path, "/etc/default/ufw"):
+		return keyValueDetails(content, []string{"ENABLED", "IPV6", "DEFAULT_INPUT_POLICY", "DEFAULT_OUTPUT_POLICY", "DEFAULT_FORWARD_POLICY"})
+	case strings.HasSuffix(path, "/etc/nftables.conf"):
+		return nftablesDetails(content)
+	case strings.HasSuffix(path, "/etc/ssh/sshd_config"):
+		return sshdDetails(content)
+	default:
+		return nil
+	}
+}
+
+func hostsDetails(content string) map[string]string {
+	entries := 0
+	names := map[string]bool{}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := stripInlineComment(sc.Text())
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		entries++
+		for _, name := range fields[1:] {
+			names[name] = true
+		}
+	}
+	return countDetails("entries", entries, "hostnames", len(names))
+}
+
+func resolvDetails(content string) map[string]string {
+	details := map[string]string{}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		fields := strings.Fields(stripInlineComment(sc.Text()))
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "nameserver":
+			appendDetail(details, "nameservers", fields[1])
+		case "search":
+			appendDetail(details, "search", strings.Join(fields[1:], " "))
+		case "domain":
+			appendDetail(details, "domain", fields[1])
+		}
+	}
+	return emptyNil(details)
+}
+
+func netplanDetails(content string) map[string]string {
+	details := map[string]string{}
+	interfaceTypes := map[string]bool{}
+	for _, line := range linesWithoutComments(content) {
+		trimmed := strings.TrimSpace(line)
+		key, value, ok := strings.Cut(trimmed, ":")
+		if ok {
+			key = strings.TrimSpace(key)
+			value = strings.TrimSpace(value)
+			switch key {
+			case "renderer":
+				setDetail(details, "renderer", value)
+			case "ethernets", "wifis", "bonds", "bridges", "vlans", "tunnels":
+				interfaceTypes[key] = true
+			case "dhcp4", "dhcp6":
+				setDetail(details, key, value)
+			case "addresses", "routes", "nameservers":
+				setDetail(details, key, "present")
+			}
+		}
+	}
+	if len(interfaceTypes) > 0 {
+		details["interface-types"] = strings.Join(sortedKeys(interfaceTypes), ",")
+	}
+	return emptyNil(details)
+}
+
+func networkManagerConnectionDetails(content string) map[string]string {
+	details := map[string]string{}
+	allowed := map[string]string{
+		"id":             "id",
+		"type":           "type",
+		"interface-name": "interface-name",
+		"autoconnect":    "autoconnect",
+		"method":         "method",
+	}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if isSecretConfigKey(key) {
+			continue
+		}
+		if outKey, ok := allowed[key]; ok {
+			setDetail(details, outKey, value)
+		}
+	}
+	return emptyNil(details)
+}
+
+func keyValueDetails(content string, keys []string) map[string]string {
+	allowed := map[string]bool{}
+	for _, key := range keys {
+		allowed[strings.ToLower(key)] = true
+	}
+	details := map[string]string{}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripInlineComment(sc.Text()))
+		if line == "" || strings.HasPrefix(line, "[") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if value == "" || isSecretConfigKey(key) || !allowed[strings.ToLower(key)] {
+			continue
+		}
+		setDetail(details, key, value)
+	}
+	return emptyNil(details)
+}
+
+func nftablesDetails(content string) map[string]string {
+	tables, chains, rules := 0, 0, 0
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "table":
+			tables++
+		case "chain":
+			chains++
+		default:
+			if strings.Contains(line, " accept") || strings.Contains(line, " drop") || strings.Contains(line, " reject") || strings.Contains(line, " dnat ") || strings.Contains(line, " snat ") {
+				rules++
+			}
+		}
+	}
+	return countDetails("tables", tables, "chains", chains, "rules", rules)
+}
+
+func sshdDetails(content string) map[string]string {
+	details := map[string]string{}
+	allowed := map[string]bool{
+		"port":                   true,
+		"permitrootlogin":        true,
+		"passwordauthentication": true,
+		"pubkeyauthentication":   true,
+		"allowusers":             true,
+		"allowgroups":            true,
+		"denyusers":              true,
+		"denygroups":             true,
+		"x11forwarding":          true,
+	}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripInlineComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		key := fields[0]
+		if !allowed[strings.ToLower(key)] || isSecretConfigKey(key) {
+			if strings.ToLower(key) != "passwordauthentication" {
+				continue
+			}
+		}
+		value := strings.TrimSpace(strings.Join(fields[1:], " "))
+		if value != "" {
+			details[key] = value
+		}
+	}
+	return emptyNil(details)
+}
+
+func countDetails(pairs ...any) map[string]string {
+	details := map[string]string{}
+	for i := 0; i+1 < len(pairs); i += 2 {
+		key, _ := pairs[i].(string)
+		value, _ := pairs[i+1].(int)
+		if key != "" && value > 0 {
+			details[key] = strconv.Itoa(value)
+		}
+	}
+	return emptyNil(details)
+}
+
+func linesWithoutComments(content string) []string {
+	var lines []string
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := stripInlineComment(sc.Text())
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func stripInlineComment(line string) string {
+	if before, _, ok := strings.Cut(line, "#"); ok {
+		return before
+	}
+	return line
+}
+
+func setDetail(details map[string]string, key, value string) {
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	if key == "" || value == "" || isSecretConfigKey(key) {
+		return
+	}
+	details[key] = value
+}
+
+func appendDetail(details map[string]string, key, value string) {
+	value = strings.TrimSpace(value)
+	if key == "" || value == "" || isSecretConfigKey(key) {
+		return
+	}
+	if existing := details[key]; existing != "" {
+		if !strings.Contains(","+existing+",", ","+value+",") {
+			details[key] = existing + "," + value
+		}
+		return
+	}
+	details[key] = value
+}
+
+func sortedKeys(values map[string]bool) []string {
+	var keys []string
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func isSecretConfigKey(key string) bool {
+	lower := strings.ToLower(key)
+	return strings.Contains(lower, "password") ||
+		strings.Contains(lower, "passwd") ||
+		strings.Contains(lower, "psk") ||
+		strings.Contains(lower, "secret") ||
+		strings.Contains(lower, "token") ||
+		strings.Contains(lower, "private-key") ||
+		strings.Contains(lower, "identity") ||
+		strings.Contains(lower, "credential")
+}
+
+func emptyNil(details map[string]string) map[string]string {
+	if len(details) == 0 {
+		return nil
+	}
+	return details
 }
 
 func scanSystemServices(opts Options, report *model.ScanReport) {

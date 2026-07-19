@@ -133,12 +133,13 @@ type FileFinding struct {
 }
 
 type Item struct {
-	Kind     string   `json:"kind"`
-	Name     string   `json:"name"`
-	Path     string   `json:"path,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	Decision Decision `json:"decision"`
-	Reason   string   `json:"reason,omitempty"`
+	Kind     string            `json:"kind"`
+	Name     string            `json:"name"`
+	Path     string            `json:"path,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	Decision Decision          `json:"decision"`
+	Reason   string            `json:"reason,omitempty"`
+	Details  map[string]string `json:"details,omitempty"`
 }
 
 type Warning struct {

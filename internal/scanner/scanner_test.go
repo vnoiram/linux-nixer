@@ -705,16 +705,16 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/sudoers", "root ALL=(ALL) ALL\n")
 	write(t, root, "/etc/locale.conf", "LANG=en_US.UTF-8\n")
 	write(t, root, "/etc/timezone", "UTC\n")
-	write(t, root, "/etc/ssh/sshd_config", "PermitRootLogin no\n")
+	write(t, root, "/etc/ssh/sshd_config", "Port 2222\nPermitRootLogin no\nPasswordAuthentication no\n")
 	write(t, root, "/etc/sysctl.conf", "vm.swappiness=10\n")
-	write(t, root, "/etc/nftables.conf", "flush ruleset\n")
+	write(t, root, "/etc/nftables.conf", "table inet filter {\nchain input {\n tcp dport 22 accept\n}\n}\n")
 	write(t, root, "/etc/ufw/ufw.conf", "ENABLED=yes\n")
-	write(t, root, "/etc/default/ufw", "IPV6=yes\n")
-	write(t, root, "/etc/netplan/01-net.yaml", "network: {}\n")
+	write(t, root, "/etc/default/ufw", "IPV6=yes\nDEFAULT_INPUT_POLICY=\"DROP\"\n")
+	write(t, root, "/etc/netplan/01-net.yaml", "network:\n  renderer: NetworkManager\n  ethernets:\n    enp1s0:\n      dhcp4: true\n      nameservers:\n        addresses: [1.1.1.1]\n")
 	write(t, root, "/etc/NetworkManager/NetworkManager.conf", "[main]\n")
-	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[wifi-security]\npsk=secret\n")
-	write(t, root, "/etc/resolv.conf", "nameserver 1.1.1.1\n")
-	write(t, root, "/etc/systemd/resolved.conf", "[Resolve]\n")
+	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[connection]\nid=home\ntype=wifi\ninterface-name=wlp1s0\nautoconnect=true\n[wifi-security]\npsk=secret\n")
+	write(t, root, "/etc/resolv.conf", "nameserver 1.1.1.1\nsearch lan example.test\n")
+	write(t, root, "/etc/systemd/resolved.conf", "[Resolve]\nDNS=9.9.9.9\nDomains=~corp.example\n")
 	write(t, root, "/etc/sysctl.d/99-local.conf", "fs.inotify.max_user_watches=1\n")
 	write(t, root, "/etc/modprobe.d/local.conf", "options test value=1\n")
 	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
@@ -778,6 +778,25 @@ WantedBy=multi-user.target
 	}
 	if seen["/etc/NetworkManager/system-connections/home.nmconnection"].Decision != model.DecisionMigrationNote {
 		t.Fatalf("network secret should be migration note in %+v", report.Items)
+	}
+	if seen["/etc/ssh/sshd_config"].Details["Port"] != "2222" || seen["/etc/ssh/sshd_config"].Details["PasswordAuthentication"] != "no" {
+		t.Fatalf("sshd details missing: %+v", seen["/etc/ssh/sshd_config"])
+	}
+	if seen["/etc/resolv.conf"].Details["nameservers"] != "1.1.1.1" || seen["/etc/resolv.conf"].Details["search"] != "lan example.test" {
+		t.Fatalf("resolv details missing: %+v", seen["/etc/resolv.conf"])
+	}
+	if seen["/etc/netplan/01-net.yaml"].Details["renderer"] != "NetworkManager" || seen["/etc/netplan/01-net.yaml"].Details["dhcp4"] != "true" || seen["/etc/netplan/01-net.yaml"].Details["nameservers"] != "present" {
+		t.Fatalf("netplan details missing: %+v", seen["/etc/netplan/01-net.yaml"])
+	}
+	nm := seen["/etc/NetworkManager/system-connections/home.nmconnection"]
+	if nm.Details["id"] != "home" || nm.Details["type"] != "wifi" || nm.Details["interface-name"] != "wlp1s0" || nm.Details["psk"] != "" {
+		t.Fatalf("network manager details unsafe or missing: %+v", nm)
+	}
+	if seen["/etc/ufw/ufw.conf"].Details["ENABLED"] != "yes" || seen["/etc/default/ufw"].Details["DEFAULT_INPUT_POLICY"] != "DROP" {
+		t.Fatalf("ufw details missing: %+v %+v", seen["/etc/ufw/ufw.conf"], seen["/etc/default/ufw"])
+	}
+	if seen["/etc/nftables.conf"].Details["tables"] != "1" || seen["/etc/nftables.conf"].Details["chains"] != "1" || seen["/etc/nftables.conf"].Details["rules"] != "1" {
+		t.Fatalf("nftables details missing: %+v", seen["/etc/nftables.conf"])
 	}
 	services := map[string]model.Service{}
 	for _, service := range report.Services {

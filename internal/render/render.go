@@ -559,10 +559,22 @@ func writeServiceChecklist(b *strings.Builder, report model.ScanReport) {
 	}
 	for _, item := range systemConfigItems(report) {
 		if manualDecision(item.Decision) {
-			items = append(items, fmt.Sprintf("Translate system configuration `%s` (%s) into NixOS options or keep it as a manual note.", item.Path, item.Reason))
+			items = append(items, systemConfigChecklistItem(item))
 		}
 	}
 	writeChecklistSection(b, "Services", items)
+}
+
+func systemConfigChecklistItem(item model.Item) string {
+	action := fmt.Sprintf("Translate system configuration `%s` (%s) into NixOS options or keep it as a manual note.", item.Path, item.Reason)
+	details := itemDetails(item)
+	if len(details) == 0 {
+		return action
+	}
+	if len(details) > 4 {
+		details = details[:4]
+	}
+	return strings.TrimSuffix(action, ".") + ". Review " + strings.Join(details, ", ") + "."
 }
 
 func serviceChecklistItem(service model.Service) string {
@@ -1088,6 +1100,11 @@ func renderSystemConfigReport(report model.ScanReport) string {
 				b.WriteString(item.Reason)
 			}
 			b.WriteString("\n")
+			for _, detail := range itemDetails(item) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
 			written[item.Path] = true
 		}
 		b.WriteString("\n")
@@ -1130,6 +1147,26 @@ func serviceDetails(service model.Service) []string {
 	}
 	if service.Schedule != "" {
 		details = append(details, fmt.Sprintf("schedule `%s`", service.Schedule))
+	}
+	return details
+}
+
+func itemDetails(item model.Item) []string {
+	if len(item.Details) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(item.Details))
+	for key := range item.Details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	details := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := redactSecretLikeText(item.Details[key])
+		if value == "" {
+			continue
+		}
+		details = append(details, fmt.Sprintf("%s `%s`", key, value))
 	}
 	return details
 }
