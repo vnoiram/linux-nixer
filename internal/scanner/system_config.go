@@ -34,6 +34,7 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/locale.conf",
 		"/etc/timezone",
 		"/etc/ssh/sshd_config",
+		"/etc/ssh/ssh_config",
 		"/etc/sysctl.conf",
 		"/etc/nftables.conf",
 		"/etc/ufw/ufw.conf",
@@ -44,6 +45,10 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/systemd/resolved.conf",
 		"/etc/fail2ban/jail.local",
 		"/etc/audit/auditd.conf",
+		"/var/lib/tailscale",
+		"/var/lib/zerotier-one",
+		"/etc/tailscale",
+		"/etc/zerotier-one",
 	} {
 		if existsWithSudo(ctx, opts, report, "system-config", path) {
 			details := readSystemConfigDetails(ctx, opts, report, path)
@@ -75,6 +80,11 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 		"/etc/audit/rules.d/*.rules",
 		"/etc/apparmor.d/*",
 		"/etc/apparmor.d/local/*",
+		"/etc/ssh/ssh_config.d/*.conf",
+		"/etc/wireguard/*.conf",
+		"/etc/openvpn/*.conf",
+		"/etc/openvpn/*/*.conf",
+		"/home/*/.config/wireguard/*.conf",
 		"/etc/netplan/*.yaml",
 		"/etc/NetworkManager/system-connections/*",
 		"/etc/nginx/sites-enabled/*",
@@ -140,6 +150,12 @@ func systemConfigDetails(path, content string) map[string]string {
 		return nftablesDetails(content)
 	case strings.HasSuffix(path, "/etc/ssh/sshd_config"):
 		return sshdDetails(content)
+	case strings.HasSuffix(path, "/etc/ssh/ssh_config") || strings.Contains(path, "/etc/ssh/ssh_config.d/"):
+		return sshClientConfigDetails(content)
+	case strings.Contains(path, "/wireguard/") && strings.HasSuffix(path, ".conf"):
+		return wireGuardDetails(content)
+	case strings.Contains(path, "/openvpn/") && strings.HasSuffix(path, ".conf"):
+		return openVPNDetails(content)
 	case strings.HasSuffix(path, "/etc/sudoers") || strings.Contains(path, "/etc/sudoers.d/"):
 		return sudoersDetails(content)
 	case strings.HasSuffix(path, "/etc/login.defs"):
@@ -340,6 +356,82 @@ func sshdDetails(content string) map[string]string {
 			details[key] = value
 		}
 	}
+	return emptyNil(details)
+}
+
+func wireGuardDetails(content string) map[string]string {
+	details := map[string]string{}
+	peers := 0
+	endpoints := 0
+	allowedIPs := 0
+	secretRefs := 0
+	hasDNS := false
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripInlineComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		switch strings.ToLower(key) {
+		case "privatekey", "presharedkey":
+			secretRefs++
+		case "publickey":
+			peers++
+		case "endpoint":
+			if value != "" {
+				endpoints++
+			}
+		case "allowedips":
+			if value != "" {
+				allowedIPs += len(strings.Split(value, ","))
+			}
+		case "dns":
+			hasDNS = value != ""
+		}
+	}
+	setBackupPositiveDetail(details, "peers", peers)
+	setBackupPositiveDetail(details, "endpoints", endpoints)
+	setBackupPositiveDetail(details, "allowed-ips", allowedIPs)
+	setBackupPositiveDetail(details, "secret-refs", secretRefs)
+	if hasDNS {
+		details["dns"] = "present"
+	}
+	return emptyNil(details)
+}
+
+func openVPNDetails(content string) map[string]string {
+	details := map[string]string{}
+	remotes := 0
+	routes := 0
+	secretRefs := 0
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripInlineComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "remote":
+			remotes++
+		case "route", "redirect-gateway":
+			routes++
+		case "auth-user-pass", "tls-auth", "tls-crypt", "secret", "pkcs12", "key":
+			secretRefs++
+		}
+	}
+	setBackupPositiveDetail(details, "remotes", remotes)
+	setBackupPositiveDetail(details, "routes", routes)
+	setBackupPositiveDetail(details, "secret-refs", secretRefs)
 	return emptyNil(details)
 }
 
@@ -800,7 +892,11 @@ func systemConfigReason(path string) string {
 	case strings.Contains(path, "/netplan") ||
 		strings.Contains(path, "/NetworkManager/") ||
 		strings.HasSuffix(path, "/resolv.conf") ||
-		strings.Contains(path, "resolved.conf"):
+		strings.Contains(path, "resolved.conf") ||
+		strings.Contains(path, "/wireguard/") ||
+		strings.Contains(path, "/openvpn/") ||
+		strings.Contains(path, "tailscale") ||
+		strings.Contains(path, "zerotier"):
 		return "network configuration"
 	case strings.Contains(path, "nftables") ||
 		strings.Contains(path, "/ufw/") ||
@@ -828,6 +924,8 @@ func systemConfigReason(path string) string {
 		return "log rotation configuration"
 	case strings.Contains(path, "ssh/sshd_config"):
 		return "ssh daemon configuration"
+	case strings.Contains(path, "ssh/ssh_config"):
+		return "ssh client configuration"
 	case strings.Contains(path, "fstab"):
 		return "filesystem mount configuration"
 	case strings.Contains(path, "locale") || strings.Contains(path, "timezone"):

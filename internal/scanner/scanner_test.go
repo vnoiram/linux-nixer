@@ -795,6 +795,7 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/locale.conf", "LANG=en_US.UTF-8\n")
 	write(t, root, "/etc/timezone", "UTC\n")
 	write(t, root, "/etc/ssh/sshd_config", "Port 2222\nPermitRootLogin no\nPasswordAuthentication no\n")
+	write(t, root, "/etc/ssh/ssh_config", "Host *\n  ForwardAgent no\n  ProxyJump bastion\n")
 	write(t, root, "/etc/sysctl.conf", "vm.swappiness=10\n")
 	write(t, root, "/etc/nftables.conf", "table inet filter {\nchain input {\n tcp dport 22 accept\n}\n}\n")
 	write(t, root, "/etc/ufw/ufw.conf", "ENABLED=yes\n")
@@ -817,6 +818,8 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/audit/rules.d/hardening.rules", "-w /etc/passwd -p wa -k identity\n-a always,exit -F arch=b64 -S execve -k exec\n")
 	write(t, root, "/etc/apparmor.d/usr.bin.demo", "#include <tunables/global>\nprofile demo /usr/bin/demo {\n  capability net_bind_service,\n}\n")
 	write(t, root, "/etc/apparmor.d/local/usr.bin.demo", "capability dac_override,\n")
+	write(t, root, "/etc/wireguard/wg0.conf", "[Interface]\nPrivateKey = raw-private\nDNS = 1.1.1.1\n[Peer]\nPublicKey = peer\nPresharedKey = raw-psk\nEndpoint = vpn.example:51820\nAllowedIPs = 10.0.0.0/24, ::/0\n")
+	write(t, root, "/etc/openvpn/client.conf", "client\nremote vpn.example 1194\nredirect-gateway def1\nauth-user-pass /etc/openvpn/secret\n")
 	write(t, root, "/etc/logrotate.d/app", "/var/log/app/*.log {}\n")
 	write(t, root, "/etc/nginx/sites-enabled/app", "server {}\n")
 	write(t, root, "/etc/apache2/sites-enabled/app.conf", "<VirtualHost *:80>\n")
@@ -854,6 +857,7 @@ WantedBy=multi-user.target
 		"/etc/locale.conf":                                         "localization configuration",
 		"/etc/timezone":                                            "localization configuration",
 		"/etc/ssh/sshd_config":                                     "ssh daemon configuration",
+		"/etc/ssh/ssh_config":                                      "ssh client configuration",
 		"/etc/sysctl.conf":                                         "kernel or device tuning",
 		"/etc/nftables.conf":                                       "firewall configuration",
 		"/etc/ufw/ufw.conf":                                        "firewall configuration",
@@ -875,6 +879,8 @@ WantedBy=multi-user.target
 		"/etc/audit/rules.d/hardening.rules":                       "auth and security configuration",
 		"/etc/apparmor.d/usr.bin.demo":                             "auth and security configuration",
 		"/etc/apparmor.d/local/usr.bin.demo":                       "auth and security configuration",
+		"/etc/wireguard/wg0.conf":                                  "network configuration",
+		"/etc/openvpn/client.conf":                                 "network configuration",
 		"/etc/logrotate.d/app":                                     "log rotation configuration",
 		"/etc/netplan/01-net.yaml":                                 "network configuration",
 		"/etc/nginx/sites-enabled/app":                             "web server configuration",
@@ -894,6 +900,15 @@ WantedBy=multi-user.target
 	}
 	if seen["/etc/ssh/sshd_config"].Details["Port"] != "2222" || seen["/etc/ssh/sshd_config"].Details["PasswordAuthentication"] != "no" {
 		t.Fatalf("sshd details missing: %+v", seen["/etc/ssh/sshd_config"])
+	}
+	if seen["/etc/ssh/ssh_config"].Details["hosts"] != "1" || !strings.Contains(seen["/etc/ssh/ssh_config"].Details["markers"], "proxyjump") {
+		t.Fatalf("ssh client details missing: %+v", seen["/etc/ssh/ssh_config"])
+	}
+	if seen["/etc/wireguard/wg0.conf"].Details["peers"] != "1" || seen["/etc/wireguard/wg0.conf"].Details["secret-refs"] != "2" || seen["/etc/wireguard/wg0.conf"].Details["dns"] != "present" {
+		t.Fatalf("wireguard details missing or unsafe: %+v", seen["/etc/wireguard/wg0.conf"])
+	}
+	if seen["/etc/openvpn/client.conf"].Details["remotes"] != "1" || seen["/etc/openvpn/client.conf"].Details["routes"] != "1" || seen["/etc/openvpn/client.conf"].Details["secret-refs"] != "1" {
+		t.Fatalf("openvpn details missing: %+v", seen["/etc/openvpn/client.conf"])
 	}
 	if seen["/etc/resolv.conf"].Details["nameservers"] != "1.1.1.1" || seen["/etc/resolv.conf"].Details["search"] != "lan example.test" {
 		t.Fatalf("resolv details missing: %+v", seen["/etc/resolv.conf"])
@@ -994,8 +1009,12 @@ func TestUserConfigScannerFindsShellAndUserConfigs(t *testing.T) {
 	write(t, root, "/home/alice/project/.envrc", "use flake\n")
 	write(t, root, "/home/alice/.gitconfig", "[user]\nname = Alice\n")
 	write(t, root, "/home/alice/.gitignore_global", "*.swp\n")
-	write(t, root, "/home/alice/.ssh/config", "Host example\n  HostName example.com\n")
+	write(t, root, "/home/alice/.ssh/config", "Host example\n  HostName example.com\n  IdentityFile ~/.ssh/id_ed25519\n  ProxyJump bastion\n")
+	write(t, root, "/home/alice/.ssh/authorized_keys", "command=\"/usr/local/bin/check\" ssh-ed25519 AAAA demo\nssh-rsa BBBB legacy\n")
+	write(t, root, "/home/alice/.ssh/known_hosts", "|1|hash|salt ssh-ed25519 AAAA\nexample.com ssh-rsa BBBB\n")
 	write(t, root, "/home/alice/.gnupg/gpg.conf", "use-agent\n")
+	write(t, root, "/home/alice/.password-store/.keep", "")
+	write(t, root, "/home/alice/.local/share/keyrings/login.keyring", "raw-secret")
 	write(t, root, "/home/alice/.tmux.conf", "set -g mouse on\n")
 	write(t, root, "/home/alice/.config/starship.toml", "[character]\n")
 
@@ -1006,7 +1025,7 @@ func TestUserConfigScannerFindsShellAndUserConfigs(t *testing.T) {
 	seen := map[string]string{}
 	for _, item := range report.Items {
 		seen[item.Path] = item.Kind
-		if item.Decision != model.DecisionCandidate {
+		if item.Kind != "credential-store" && item.Decision != model.DecisionCandidate {
 			t.Fatalf("user config decision=%q, want candidate", item.Decision)
 		}
 	}
@@ -1030,13 +1049,33 @@ func TestUserConfigScannerFindsShellAndUserConfigs(t *testing.T) {
 		"/home/alice/.gitconfig":                        "user-config",
 		"/home/alice/.gitignore_global":                 "user-config",
 		"/home/alice/.ssh/config":                       "user-config",
+		"/home/alice/.ssh/authorized_keys":              "user-config",
+		"/home/alice/.ssh/known_hosts":                  "user-config",
 		"/home/alice/.gnupg/gpg.conf":                   "user-config",
+		"/home/alice/.password-store":                   "credential-store",
+		"/home/alice/.local/share/keyrings":             "credential-store",
 		"/home/alice/.tmux.conf":                        "user-config",
 		"/home/alice/.config/starship.toml":             "user-config",
 	} {
 		if seen[path] != kind {
 			t.Fatalf("path %s kind=%q, want %q in %+v", path, seen[path], kind, report.Items)
 		}
+	}
+	details := map[string]model.Item{}
+	for _, item := range report.Items {
+		details[item.Path] = item
+	}
+	if details["/home/alice/.ssh/config"].Details["hosts"] != "1" || details["/home/alice/.ssh/config"].Details["identity-files"] != "1" || !strings.Contains(details["/home/alice/.ssh/config"].Details["markers"], "proxyjump") {
+		t.Fatalf("ssh config details missing: %+v", details["/home/alice/.ssh/config"])
+	}
+	if details["/home/alice/.ssh/authorized_keys"].Details["keys"] != "2" || details["/home/alice/.ssh/authorized_keys"].Details["restricted-keys"] != "1" || !strings.Contains(details["/home/alice/.ssh/authorized_keys"].Details["key-types"], "ssh-ed25519") {
+		t.Fatalf("authorized_keys details missing: %+v", details["/home/alice/.ssh/authorized_keys"])
+	}
+	if details["/home/alice/.ssh/known_hosts"].Details["entries"] != "2" || details["/home/alice/.ssh/known_hosts"].Details["hashed-hosts"] != "1" {
+		t.Fatalf("known_hosts details missing: %+v", details["/home/alice/.ssh/known_hosts"])
+	}
+	if details["/home/alice/.password-store"].Decision != model.DecisionMigrationNote || details["/home/alice/.local/share/keyrings"].Details["store"] != "keyrings" {
+		t.Fatalf("credential store details missing: %+v %+v", details["/home/alice/.password-store"], details["/home/alice/.local/share/keyrings"])
 	}
 }
 

@@ -161,9 +161,9 @@ Generated projects include:
 - Docker/Podman containers, inspect metadata, and compose files
 - stateful data markers for databases, queues, search, monitoring, container runtimes, VM images, and `/srv` application data
 - backup/sync config and job markers for restic, borg, kopia, rclone, rsync, syncthing, Timeshift, and Duplicati
-- systemd, cron, network/firewall/SSH safe summaries, sudo/PAM/polkit/AppArmor/fail2ban/auditd markers, web server, CI/CD automation, and kernel/device tuning markers
+- systemd, cron, network/firewall/SSH/VPN safe summaries, sudo/PAM/polkit/AppArmor/fail2ban/auditd markers, web server, CI/CD automation, and kernel/device tuning markers
 - DevOps config markers such as Kubernetes, Docker client config, Helm, Terraform, AWS, GCP, and Azure
-- shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh, gpg, tmux, starship, shell plugin trees, and `.local/bin` executables
+- shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh keys/known hosts, gpg/key stores, tmux, starship, shell plugin trees, and `.local/bin` executables
 - desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, browser profiles/extensions, and common terminal/editor settings
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, stateful data, and location hints for `/opt`, `/usr/local`, `/srv`, and user-local paths
 

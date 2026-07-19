@@ -145,6 +145,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "os-config", Name: "home.nmconnection", Path: "/etc/NetworkManager/system-connections/home.nmconnection", Decision: model.DecisionMigrationNote, Reason: "network connection profile may contain credentials", Details: map[string]string{"id": "home", "type": "wifi", "interface-name": "wlp1s0"}},
 			{Kind: "os-config", Name: "sudoers", Path: "/etc/sudoers", Decision: model.DecisionCandidate, Reason: "auth and security configuration", Details: map[string]string{"group-rules": "1", "nopasswd-rules": "1"}},
 			{Kind: "os-config", Name: "sshd", Path: "/etc/pam.d/sshd", Decision: model.DecisionCandidate, Reason: "auth and security configuration", Details: map[string]string{"important-modules": "pam_faillock.so,pam_u2f.so", "rules": "2"}},
+			{Kind: "os-config", Name: "wg0.conf", Path: "/etc/wireguard/wg0.conf", Decision: model.DecisionCandidate, Reason: "network configuration", Details: map[string]string{"peers": "1", "secret-refs": "2", "dns": "present"}},
+			{Kind: "os-config", Name: "client.conf", Path: "/etc/openvpn/client.conf", Decision: model.DecisionCandidate, Reason: "network configuration", Details: map[string]string{"remotes": "1", "routes": "1", "secret-refs": "1"}},
 			{Kind: "os-config", Name: "app", Path: "/etc/nginx/sites-enabled/app", Decision: model.DecisionCandidate, Reason: "web server configuration"},
 			{Kind: "os-config", Name: "ufw.conf", Path: "/etc/ufw/ufw.conf", Decision: model.DecisionExcluded, Reason: "firewall configuration"},
 			{Kind: "devops-config", Name: "config", Path: "/home/alice/.kube/config", Decision: model.DecisionMigrationNote, Reason: "kubernetes configuration may contain credentials"},
@@ -160,6 +162,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "backup-config", Name: "rclone", Path: "/home/alice/.config/rclone/rclone.conf", Decision: model.DecisionMigrationNote, Reason: "rclone backup or sync configuration", Details: map[string]string{"tool": "rclone", "remote-types": "s3", "secret-refs": "2"}},
 			{Kind: "backup-config", Name: "restic", Path: "/etc/systemd/system/restic-backup.service", Decision: model.DecisionMigrationNote, Reason: "backup or sync job", Details: map[string]string{"tools": "restic", "schedule": "OnCalendar=daily"}},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
+			{Kind: "user-config", Name: "ssh/config", Path: "/home/alice/.ssh/config", Decision: model.DecisionCandidate, Reason: "user tool configuration", Details: map[string]string{"hosts": "2", "identity-files": "1", "markers": "proxyjump,user"}},
+			{Kind: "user-config", Name: "authorized_keys", Path: "/home/alice/.ssh/authorized_keys", Decision: model.DecisionCandidate, Reason: "user tool configuration", Details: map[string]string{"keys": "2", "restricted-keys": "1", "key-types": "ssh-ed25519,ssh-rsa"}},
+			{Kind: "credential-store", Name: ".password-store", Path: "/home/alice/.password-store", Decision: model.DecisionMigrationNote, Reason: "credential or key store marker; migrate manually", Details: map[string]string{"store": "password-store"}},
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionCandidate, Reason: "shell or login environment configuration"},
 			{Kind: "shell-plugin", Name: ".oh-my-zsh", Path: "/home/alice/.oh-my-zsh", Decision: model.DecisionCandidate, Reason: "shell plugin manager or plugin tree"},
 			{Kind: "user-bin", Name: "tool", Path: "/home/alice/.local/bin/tool", Decision: model.DecisionCandidate, Reason: "user-local executable"},
@@ -210,7 +215,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("services module included excluded service:\n%s", services)
 	}
 	systemConfig := readFile(t, out, "reports/system-config.md")
-	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "id `home`", "interface-name `wlp1s0`", "type `wifi`", "Auth and security", "/etc/sudoers", "nopasswd-rules `1`", "/etc/pam.d/sshd", "important-modules `pam_faillock.so,pam_u2f.so`", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service", "Custom app", "user `app`", "working directory `/srv/app`", "exec `/opt/vendor/bin/app --token=<redacted>`", "environment files `/etc/default/custom`", "wanted by `multi-user.target`", "custom.timer", "schedule `OnCalendar=daily`", "job", "schedule `15 2 * * *`"} {
+	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "id `home`", "interface-name `wlp1s0`", "type `wifi`", "/etc/wireguard/wg0.conf", "dns `present`", "/etc/openvpn/client.conf", "remotes `1`", "Auth and security", "/etc/sudoers", "nopasswd-rules `1`", "/etc/pam.d/sshd", "important-modules `pam_faillock.so,pam_u2f.so`", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service", "Custom app", "user `app`", "working directory `/srv/app`", "exec `/opt/vendor/bin/app --token=<redacted>`", "environment files `/etc/default/custom`", "wanted by `multi-user.target`", "custom.timer", "schedule `OnCalendar=daily`", "job", "schedule `15 2 * * *`"} {
 		if !strings.Contains(systemConfig, want) {
 			t.Fatalf("system config report missing %q:\n%s", want, systemConfig)
 		}
@@ -318,6 +323,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"schedule `15 2 * * *`",
 		"Translate system configuration `/etc/NetworkManager/system-connections/home.nmconnection`",
 		"Review id `home`, interface-name `wlp1s0`, type `wifi`",
+		"Translate system configuration `/etc/wireguard/wg0.conf`",
+		"Review dns `present`, peers `1`, secret-refs `2`",
 		"Translate system configuration `/etc/sudoers`",
 		"Review group-rules `1`, nopasswd-rules `1`",
 		"Translate compose `/srv/app/compose.yml`",
@@ -331,6 +338,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Review backup/sync configuration `/home/alice/.config/rclone/rclone.conf`",
 		"Review remote-types `s3`, secret-refs `2`, tool `rclone`",
 		"Confirm user `alice` home `/home/alice`",
+		"Migrate credential store `/home/alice/.password-store` manually",
+		"Review store `password-store`",
 		"Back up or sync browser profile `/home/alice/.mozilla/firefox/alice.default-release` manually",
 		"Review browser extension marker `/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi`",
 		"Review editor profile `/home/alice/.vscode/extensions/publisher.tool-1.0.0`",
@@ -358,7 +367,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("home module should not render raw config content:\n%s", home)
 	}
 	userConfig := readFile(t, out, "reports/user-config.md")
-	for _, want := range []string{"Shell configuration", "/home/alice/.zshrc", "Shell plugins", "/home/alice/.oh-my-zsh", "User-local executables", "/home/alice/.local/bin/tool", "User tool configuration", "/home/alice/.gitconfig", "Direnv", "/home/alice/app/.envrc"} {
+	for _, want := range []string{"Shell configuration", "/home/alice/.zshrc", "Shell plugins", "/home/alice/.oh-my-zsh", "User-local executables", "/home/alice/.local/bin/tool", "User tool configuration", "/home/alice/.gitconfig", "/home/alice/.ssh/config", "identity-files `1`", "/home/alice/.ssh/authorized_keys", "restricted-keys `1`", "Credential stores", "/home/alice/.password-store", "store `password-store`", "Direnv", "/home/alice/app/.envrc"} {
 		if !strings.Contains(userConfig, want) {
 			t.Fatalf("user config report missing %q:\n%s", want, userConfig)
 		}

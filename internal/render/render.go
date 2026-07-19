@@ -719,7 +719,7 @@ func writeUserDesktopChecklist(b *strings.Builder, report model.ScanReport) {
 	}
 	for _, item := range userConfigItems(report) {
 		if manualDecision(item.Decision) {
-			items = append(items, fmt.Sprintf("Review user configuration `%s` (%s) and decide whether to translate it to Home Manager.", item.Path, item.Kind))
+			items = append(items, userConfigChecklistItem(item))
 		}
 	}
 	for _, item := range desktopConfigItems(report) {
@@ -748,6 +748,24 @@ func writeUserDesktopChecklist(b *strings.Builder, report model.ScanReport) {
 		}
 	}
 	writeChecklistSection(b, "Users and desktop config", items)
+}
+
+func userConfigChecklistItem(item model.Item) string {
+	if item.Kind == "credential-store" {
+		action := fmt.Sprintf("Migrate credential store `%s` manually through a secrets manager, keyring export, or tool-specific restore flow.", item.Path)
+		if details := itemDetails(item); len(details) > 0 {
+			action += " Review " + strings.Join(details, ", ") + "."
+		}
+		return action
+	}
+	action := fmt.Sprintf("Review user configuration `%s` (%s) and decide whether to translate it to Home Manager.", item.Path, item.Kind)
+	if details := itemDetails(item); len(details) > 0 {
+		if len(details) > 4 {
+			details = details[:4]
+		}
+		action += " Review " + strings.Join(details, ", ") + "."
+	}
+	return action
 }
 
 func writeLanguagePackages(b *strings.Builder, report model.ScanReport) {
@@ -1388,6 +1406,7 @@ func renderUserConfigReport(report model.ScanReport) string {
 		{"Shell plugins", []string{"shell-plugin"}},
 		{"User-local executables", []string{"user-bin"}},
 		{"User tool configuration", []string{"user-config"}},
+		{"Credential stores", []string{"credential-store"}},
 		{"Direnv", []string{"direnv"}},
 	}
 	for _, section := range sections {
@@ -1405,6 +1424,11 @@ func renderUserConfigReport(report model.ScanReport) string {
 				b.WriteString(item.Reason)
 			}
 			b.WriteString("\n")
+			for _, detail := range itemDetails(item) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -1944,7 +1968,7 @@ func backupItemToolMatch(item model.Item, tool string) bool {
 }
 
 func userConfigItems(report model.ScanReport) []model.Item {
-	return userConfigItemsByKind(report, "user-config", "shell-config", "shell-plugin", "user-bin", "direnv")
+	return userConfigItemsByKind(report, "user-config", "shell-config", "shell-plugin", "user-bin", "direnv", "credential-store")
 }
 
 func userConfigItemsByKind(report model.ScanReport, kinds ...string) []model.Item {
@@ -1962,6 +1986,7 @@ func isHomeTODOItem(item model.Item) bool {
 	return item.Kind == "user-config" ||
 		item.Kind == "shell-config" ||
 		item.Kind == "shell-plugin" ||
+		item.Kind == "credential-store" ||
 		item.Kind == "user-bin" ||
 		item.Kind == "direnv" ||
 		item.Kind == "desktop-config"
