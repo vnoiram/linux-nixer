@@ -22,6 +22,7 @@ This is an early implementation scaffold. It includes:
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - Review summary output and pending-finding gates before generating Nix
+- One-shot capture workflow for scan, auto-safe review, summary, and Nix generation
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Optional `doctor --boot` check for starting the generated VM script with a timeout
 - Baseline IDs such as `ubuntu:24.04` resolved from local `baselines/` or user cache
@@ -36,6 +37,7 @@ go build -o bin/linux-nixer ./cmd/linux-nixer
 
 bin/linux-nixer scan --out scan.json
 bin/linux-nixer scan --sudo --out scan.json
+bin/linux-nixer capture --out linux-nixer-output --sudo --deep
 bin/linux-nixer review --scan scan.json --out reviewed.json --auto-safe
 bin/linux-nixer summary --scan reviewed.json
 bin/linux-nixer summary --scan reviewed.json --fail-on-pending
@@ -47,7 +49,10 @@ For fixture or mounted rootfs scans:
 
 ```sh
 bin/linux-nixer scan --root /path/to/rootfs --include /random-seed-42 --out scan.json
+bin/linux-nixer capture --root /path/to/rootfs --include /random-seed-42 --out linux-nixer-output
 ```
+
+`capture` writes `scan.json`, `reviewed.json`, `summary.md`, and `nix-config/` under the output directory. It applies the same conservative auto-safe review as `review --auto-safe`; use the split `scan` and `review --interactive` flow when you want to approve findings manually before generating Nix.
 
 Create a local baseline manifest:
 

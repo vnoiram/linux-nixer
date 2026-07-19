@@ -230,11 +230,11 @@ func decidePackage(pkg model.Package, opts Options) model.Decision {
 	if contains(opts.ConfirmManagers, pkg.Manager) {
 		return model.DecisionConfirmed
 	}
+	if opts.AutoSafe && len(pkg.NixNames) > 0 && (pkg.Decision == "" || pkg.Decision == model.DecisionCandidate) {
+		return model.DecisionConfirmed
+	}
 	if pkg.Decision != "" {
 		return pkg.Decision
-	}
-	if opts.AutoSafe && len(pkg.NixNames) > 0 {
-		return model.DecisionConfirmed
 	}
 	return model.DecisionCandidate
 }

@@ -36,6 +36,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch args[0] {
 	case "scan":
 		return runScan(ctx, args[1:], stdout)
+	case "capture":
+		return runCapture(ctx, args[1:], stdout)
 	case "review":
 		return runReview(args[1:], stdin, stdout)
 	case "summary":
@@ -62,6 +64,7 @@ func usage(w io.Writer) {
 
 Usage:
   linux-nixer scan --out scan.json [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
+  linux-nixer capture --out DIR [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
   linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
   linux-nixer generate --scan reviewed.json --out ./nix-config
@@ -111,6 +114,83 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	return writeJSON(*out, report)
+}
+
+func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	out := fs.String("out", "", "output directory")
+	root := fs.String("root", "/", "root filesystem to scan")
+	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
+	deep := fs.Bool("deep", false, "scan broader filesystem paths")
+	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
+	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain after capture")
+	var includes multiFlag
+	var excludes multiFlag
+	fs.Var(&includes, "include", "additional path to scan")
+	fs.Var(&excludes, "exclude", "path prefix to exclude")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *out == "" {
+		return errors.New("capture requires --out")
+	}
+
+	resolvedBaseline := *baselineID
+	if *baselineID != "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if resolution := baseline.Resolve(*baselineID, cwd); resolution.OK {
+			resolvedBaseline = resolution.Path
+		}
+	}
+
+	reg := scanner.DefaultRegistry()
+	report, err := reg.Scan(ctx, scanner.Options{
+		Root:       *root,
+		UseSudo:    *useSudo,
+		Deep:       *deep,
+		BaselineID: resolvedBaseline,
+		Includes:   includes,
+		Excludes:   excludes,
+	})
+	if err != nil {
+		return err
+	}
+
+	scanPath := filepath.Join(*out, "scan.json")
+	reviewedPath := filepath.Join(*out, "reviewed.json")
+	summaryPath := filepath.Join(*out, "summary.md")
+	nixConfigPath := filepath.Join(*out, "nix-config")
+
+	if err := writeJSON(scanPath, report); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote scan: %s\n", scanPath)
+
+	reviewed := review.Apply(*report, review.Options{AutoSafe: true})
+	if err := writeJSON(reviewedPath, reviewed); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote reviewed scan: %s\n", reviewedPath)
+
+	summary := review.Summarize(reviewed)
+	if err := writeText(summaryPath, review.FormatSummaryMarkdown(summary)); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote summary: %s\n", summaryPath)
+
+	if err := render.Project(nixConfigPath, reviewed); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote nix config: %s\n", nixConfigPath)
+
+	if *failOnPending && summary.Pending > 0 {
+		return fmt.Errorf("capture summary has %d pending findings", summary.Pending)
+	}
+	return nil
 }
 
 func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
@@ -272,6 +352,13 @@ func writeJSON(path string, value any) error {
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+func writeText(path string, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(text), 0o644)
 }
 
 func readJSON(path string, value any) error {

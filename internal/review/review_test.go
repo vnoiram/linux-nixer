@@ -24,6 +24,24 @@ func TestApplyConfirmsSafeMappedPackages(t *testing.T) {
 	}
 }
 
+func TestApplyAutoSafePromotesCandidateMappedPackages(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionCandidate},
+			{Manager: "apt", Name: "vim", NixNames: []string{"vim"}, Decision: model.DecisionTODO},
+		},
+	}
+
+	got := Apply(report, Options{AutoSafe: true})
+
+	if got.Packages[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("candidate mapped package decision=%q, want confirmed", got.Packages[0].Decision)
+	}
+	if got.Packages[1].Decision != model.DecisionTODO {
+		t.Fatalf("todo mapped package decision=%q, want todo", got.Packages[1].Decision)
+	}
+}
+
 func TestApplyExcludesPathPrefixAndKeepsSecretsAsMigrationNotes(t *testing.T) {
 	report := model.ScanReport{
 		FilesystemDiff: []model.FileFinding{

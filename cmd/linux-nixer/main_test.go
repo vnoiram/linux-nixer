@@ -57,13 +57,13 @@ func TestRunVersionWritesBuildVersion(t *testing.T) {
 	}
 }
 
-func TestRunHelpIncludesSummaryAndVersion(t *testing.T) {
+func TestRunHelpIncludesCaptureSummaryAndVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"help"}, strings.NewReader(""), &stdout, &stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"linux-nixer summary --scan reviewed.json", "linux-nixer version"} {
+	for _, want := range []string{"linux-nixer capture --out DIR", "linux-nixer summary --scan reviewed.json", "linux-nixer version"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help missing %q:\n%s", want, stdout.String())
 		}
@@ -104,6 +104,98 @@ func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	for _, finding := range got.FilesystemDiff {
 		if finding.Path == "/usr/local/bin/tool" {
 			t.Fatalf("baseline-matched file should not be reported: %+v", got.FilesystemDiff)
+		}
+	}
+}
+
+func TestRunCaptureWritesWorkflowArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	out := filepath.Join(dir, "capture")
+	writeFile(t, root, "/var/lib/dpkg/status", `Package: curl
+Status: install ok installed
+Version: 8.0
+
+Package: unknown-tool
+Status: install ok installed
+Version: 1.0
+
+`)
+	writeFile(t, root, "/usr/local/bin/manual-tool", "#!/bin/sh\necho manual\n")
+	if err := os.Chmod(filepath.Join(root, "usr/local/bin/manual-tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"capture", "--root", root, "--include", "/usr/local/bin", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(out, "scan.json"),
+		filepath.Join(out, "reviewed.json"),
+		filepath.Join(out, "summary.md"),
+		filepath.Join(out, "nix-config", "flake.nix"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected artifact %s: %v", path, err)
+		}
+	}
+	for _, want := range []string{"wrote scan:", "wrote reviewed scan:", "wrote summary:", "wrote nix config:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("capture stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	var reviewed model.ScanReport
+	readScan(t, filepath.Join(out, "reviewed.json"), &reviewed)
+	decisions := map[string]model.Decision{}
+	for _, pkg := range reviewed.Packages {
+		decisions[pkg.Name] = pkg.Decision
+	}
+	if decisions["curl"] != model.DecisionConfirmed {
+		t.Fatalf("curl decision=%q, want confirmed in %+v", decisions["curl"], reviewed.Packages)
+	}
+	if decisions["unknown-tool"] != model.DecisionCandidate {
+		t.Fatalf("unknown-tool decision=%q, want candidate in %+v", decisions["unknown-tool"], reviewed.Packages)
+	}
+
+	summary, err := os.ReadFile(filepath.Join(out, "summary.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(summary), "Pending findings:") {
+		t.Fatalf("summary missing pending count:\n%s", string(summary))
+	}
+}
+
+func TestRunCaptureFailOnPendingLeavesArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	out := filepath.Join(dir, "capture")
+	writeFile(t, root, "/var/lib/dpkg/status", `Package: unknown-tool
+Status: install ok installed
+Version: 1.0
+
+`)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"capture", "--root", root, "--out", out, "--fail-on-pending"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected capture to fail on pending findings")
+	}
+	if !strings.Contains(err.Error(), "pending findings") {
+		t.Fatalf("unexpected capture error: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(out, "scan.json"),
+		filepath.Join(out, "reviewed.json"),
+		filepath.Join(out, "summary.md"),
+		filepath.Join(out, "nix-config", "flake.nix"),
+	} {
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Fatalf("expected artifact after failed gate %s: %v", path, statErr)
 		}
 	}
 }
@@ -217,6 +309,17 @@ func readScan(t *testing.T, path string, report *model.ScanReport) {
 	}
 	defer f.Close()
 	if err := json.NewDecoder(f).Decode(report); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeFile(t *testing.T, root, path, content string) {
+	t.Helper()
+	target := filepath.Join(root, strings.TrimPrefix(path, "/"))
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
