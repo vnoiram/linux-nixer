@@ -80,6 +80,95 @@ func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	}
 }
 
+func TestRunSummaryWritesMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+			{Manager: "apt", Name: "git", NixNames: []string{"git"}, Decision: model.DecisionCandidate},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"summary", "--scan", scanPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	for _, want := range []string{"# Review summary", "Total findings: 2", "Pending findings: 1", "system packages: 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunSummaryWritesJSON(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"summary", "--scan", scanPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got struct {
+		Total     int `json:"total"`
+		NixImpact struct {
+			SystemPackages int `json:"systemPackages"`
+		} `json:"nixImpact"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid json summary: %v\n%s", err, stdout.String())
+	}
+	if got.Total != 1 || got.NixImpact.SystemPackages != 1 {
+		t.Fatalf("unexpected json summary: %+v", got)
+	}
+}
+
+func TestRunSummaryFailOnPending(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "git", NixNames: []string{"git"}, Decision: model.DecisionCandidate},
+		},
+		StatefulData: []model.FileFinding{
+			{Path: "/var/lib/postgresql/data", Category: "stateful-data", Decision: model.DecisionMigrationNote},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"summary", "--scan", scanPath, "--fail-on-pending"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected pending summary to fail")
+	}
+	if !strings.Contains(err.Error(), "1 pending findings") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	report.Packages[0].Decision = model.DecisionConfirmed
+	writeScan(t, scanPath, report)
+	stdout.Reset()
+	err = run(context.Background(), []string{"summary", "--scan", scanPath, "--fail-on-pending"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeScan(t *testing.T, path string, report model.ScanReport) {
 	t.Helper()
 	f, err := os.Create(path)

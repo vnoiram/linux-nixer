@@ -116,3 +116,100 @@ func TestInteractiveQuitKeepsRemainingDecisions(t *testing.T) {
 		t.Fatalf("second package decision=%q, want candidate", got.Packages[1].Decision)
 	}
 }
+
+func TestSummarizeCountsDecisionsDomainsProtectedFindingsAndNixImpact(t *testing.T) {
+	report := model.ScanReport{
+		Users: []model.User{
+			{Name: "root", Home: "/root", System: true},
+			{Name: "alice", Home: "/home/alice", Shell: "/bin/zsh"},
+		},
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+			{Manager: "apt", Name: "unknown", Decision: model.DecisionCandidate},
+		},
+		Languages: model.Languages{
+			NPM: []model.Package{
+				{Manager: "npm", Name: "typescript", NixNames: []string{"nodePackages.typescript"}, Decision: model.DecisionConfirmed},
+			},
+			Python: []model.PythonEnv{{
+				Path: "/home/alice/.local/pipx/venvs/ruff",
+				Kind: "pipx",
+				Packages: []model.Package{
+					{Manager: "pipx", Name: "ruff", NixNames: []string{"ruff"}, Decision: model.DecisionTODO},
+				},
+			}},
+		},
+		Containers: []model.Container{
+			{Runtime: "docker", Name: "web", Decision: model.DecisionConfirmed},
+			{Runtime: "podman", Name: "db", Decision: model.DecisionExcluded},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "custom.service", Decision: model.DecisionConfirmed},
+		},
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionMigrationNote},
+		},
+		StatefulData: []model.FileFinding{
+			{Path: "/var/lib/postgresql/data", Category: "stateful-data", Decision: model.DecisionMigrationNote},
+		},
+		Items: []model.Item{
+			{Kind: "shell-config", Path: "/home/alice/.zshrc", Decision: model.DecisionConfirmed},
+			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionConfirmed},
+		},
+	}
+
+	got := Summarize(report)
+
+	if got.Total != 11 {
+		t.Fatalf("total=%d, want 11", got.Total)
+	}
+	if got.Pending != 2 {
+		t.Fatalf("pending=%d, want 2", got.Pending)
+	}
+	if got.ProtectedFindings != 2 {
+		t.Fatalf("protected=%d, want 2", got.ProtectedFindings)
+	}
+	if got.Decisions[string(model.DecisionConfirmed)] != 6 {
+		t.Fatalf("confirmed=%d, want 6", got.Decisions[string(model.DecisionConfirmed)])
+	}
+	if got.Decisions[string(model.DecisionCandidate)] != 1 {
+		t.Fatalf("candidate=%d, want 1", got.Decisions[string(model.DecisionCandidate)])
+	}
+	if got.Decisions[string(model.DecisionTODO)] != 1 {
+		t.Fatalf("todo=%d, want 1", got.Decisions[string(model.DecisionTODO)])
+	}
+	if got.Decisions[string(model.DecisionMigrationNote)] != 2 {
+		t.Fatalf("migration-note=%d, want 2", got.Decisions[string(model.DecisionMigrationNote)])
+	}
+	if got.Decisions[string(model.DecisionExcluded)] != 1 {
+		t.Fatalf("excluded=%d, want 1", got.Decisions[string(model.DecisionExcluded)])
+	}
+	if got.NixImpact.SystemPackages != 1 || got.NixImpact.HomePackages != 1 || got.NixImpact.Users != 1 {
+		t.Fatalf("unexpected nix package/user impact: %+v", got.NixImpact)
+	}
+	if got.NixImpact.HostShellPrograms != 1 || got.NixImpact.HomePrograms != 2 {
+		t.Fatalf("unexpected nix program impact: %+v", got.NixImpact)
+	}
+	if got.NixImpact.SystemdServices != 1 || got.NixImpact.ContainerRuntimeEnables != 1 || got.NixImpact.ConfirmedContainers != 1 {
+		t.Fatalf("unexpected nix service/container impact: %+v", got.NixImpact)
+	}
+}
+
+func TestFormatSummaryMarkdownOmitsFindingDetails(t *testing.T) {
+	report := model.ScanReport{
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionMigrationNote},
+		},
+	}
+
+	got := FormatSummaryMarkdown(Summarize(report))
+
+	for _, want := range []string{"# Review summary", "Protected findings: 1", "filesystem-findings"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "id_ed25519") {
+		t.Fatalf("summary leaked protected finding path:\n%s", got)
+	}
+}

@@ -1,0 +1,390 @@
+package review
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/vnoiram/linux-nixer/internal/model"
+)
+
+type Summary struct {
+	Total             int             `json:"total"`
+	Pending           int             `json:"pending"`
+	ProtectedFindings int             `json:"protectedFindings"`
+	Decisions         map[string]int  `json:"decisions"`
+	Domains           []DomainSummary `json:"domains"`
+	NixImpact         NixImpact       `json:"nixImpact"`
+}
+
+type DomainSummary struct {
+	Domain            string         `json:"domain"`
+	Total             int            `json:"total"`
+	Pending           int            `json:"pending"`
+	ProtectedFindings int            `json:"protectedFindings,omitempty"`
+	Decisions         map[string]int `json:"decisions"`
+}
+
+type NixImpact struct {
+	SystemPackages          int `json:"systemPackages"`
+	HomePackages            int `json:"homePackages"`
+	Users                   int `json:"users"`
+	HostShellPrograms       int `json:"hostShellPrograms"`
+	HomePrograms            int `json:"homePrograms"`
+	SystemdServices         int `json:"systemdServices"`
+	ContainerRuntimeEnables int `json:"containerRuntimeEnables"`
+	ConfirmedContainers     int `json:"confirmedContainers"`
+}
+
+func Summarize(report model.ScanReport) Summary {
+	s := Summary{
+		Decisions: emptyDecisionCounts(),
+		NixImpact: NixImpact{
+			SystemPackages:          len(systemPackageNames(report)),
+			HomePackages:            len(homePackageNames(report)),
+			Users:                   len(humanUsers(report)),
+			HostShellPrograms:       len(hostShellPrograms(report)),
+			HomePrograms:            len(homePrograms(report)),
+			SystemdServices:         confirmedSystemdServices(report),
+			ContainerRuntimeEnables: containerRuntimeEnables(report),
+			ConfirmedContainers:     confirmedContainers(report),
+		},
+	}
+
+	addDomain := func(domain string, decisions []model.Decision, protected int) {
+		if len(decisions) == 0 {
+			return
+		}
+		d := DomainSummary{
+			Domain:            domain,
+			Total:             len(decisions),
+			ProtectedFindings: protected,
+			Decisions:         emptyDecisionCounts(),
+		}
+		for _, decision := range decisions {
+			key := decisionKey(decision)
+			d.Decisions[key]++
+			s.Decisions[key]++
+			if isPending(decision) {
+				d.Pending++
+				s.Pending++
+			}
+		}
+		s.Total += d.Total
+		s.ProtectedFindings += protected
+		s.Domains = append(s.Domains, d)
+	}
+
+	addDomain("packages", packageDecisions(report.Packages), 0)
+	addDomain("language-packages", languagePackageDecisions(report), 0)
+	addDomain("git-sources", gitSourceDecisions(report.GitSources), 0)
+	addDomain("containers", containerDecisions(report.Containers), 0)
+	addDomain("services", serviceDecisions(report.Services), 0)
+	addDomain("filesystem-findings", fileFindingDecisions(report.FilesystemDiff), protectedFileFindings(report.FilesystemDiff, false))
+	addDomain("stateful-data", fileFindingDecisions(report.StatefulData), protectedFileFindings(report.StatefulData, true))
+	addDomain("config-items", itemDecisions(report.Items), 0)
+	addDomain("desktop-autostart", fileFindingDecisions(report.Desktop.Autostart), protectedFileFindings(report.Desktop.Autostart, false))
+
+	return s
+}
+
+func FormatSummaryMarkdown(s Summary) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Review summary\n\n")
+	fmt.Fprintf(&b, "Total findings: %d\n", s.Total)
+	fmt.Fprintf(&b, "Pending findings: %d\n", s.Pending)
+	fmt.Fprintf(&b, "Protected findings: %d\n\n", s.ProtectedFindings)
+
+	b.WriteString("## Decisions\n\n")
+	for _, key := range decisionKeys() {
+		fmt.Fprintf(&b, "- %s: %d\n", key, s.Decisions[key])
+	}
+
+	b.WriteString("\n## Domains\n\n")
+	for _, domain := range s.Domains {
+		fmt.Fprintf(&b, "- %s: total=%d pending=%d", domain.Domain, domain.Total, domain.Pending)
+		if domain.ProtectedFindings > 0 {
+			fmt.Fprintf(&b, " protected=%d", domain.ProtectedFindings)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n## Generated Nix impact\n\n")
+	fmt.Fprintf(&b, "- system packages: %d\n", s.NixImpact.SystemPackages)
+	fmt.Fprintf(&b, "- home packages: %d\n", s.NixImpact.HomePackages)
+	fmt.Fprintf(&b, "- users: %d\n", s.NixImpact.Users)
+	fmt.Fprintf(&b, "- host shell programs: %d\n", s.NixImpact.HostShellPrograms)
+	fmt.Fprintf(&b, "- home programs: %d\n", s.NixImpact.HomePrograms)
+	fmt.Fprintf(&b, "- systemd services: %d\n", s.NixImpact.SystemdServices)
+	fmt.Fprintf(&b, "- container runtime enables: %d\n", s.NixImpact.ContainerRuntimeEnables)
+	fmt.Fprintf(&b, "- confirmed containers: %d\n", s.NixImpact.ConfirmedContainers)
+	return b.String()
+}
+
+func emptyDecisionCounts() map[string]int {
+	counts := map[string]int{}
+	for _, key := range decisionKeys() {
+		counts[key] = 0
+	}
+	return counts
+}
+
+func decisionKeys() []string {
+	return []string{
+		string(model.DecisionConfirmed),
+		string(model.DecisionCandidate),
+		string(model.DecisionTODO),
+		string(model.DecisionMigrationNote),
+		string(model.DecisionExcluded),
+		"unset",
+	}
+}
+
+func decisionKey(decision model.Decision) string {
+	if decision == "" {
+		return "unset"
+	}
+	return string(decision)
+}
+
+func isPending(decision model.Decision) bool {
+	return decision == model.DecisionCandidate || decision == model.DecisionTODO
+}
+
+func packageDecisions(pkgs []model.Package) []model.Decision {
+	decisions := make([]model.Decision, 0, len(pkgs))
+	for _, pkg := range pkgs {
+		decisions = append(decisions, pkg.Decision)
+	}
+	return decisions
+}
+
+func languagePackageDecisions(report model.ScanReport) []model.Decision {
+	var decisions []model.Decision
+	for _, pkgs := range [][]model.Package{report.Languages.NPM, report.Languages.Conda, report.Languages.Cargo, report.Languages.Gem, report.Languages.Go} {
+		decisions = append(decisions, packageDecisions(pkgs)...)
+	}
+	for _, env := range report.Languages.Python {
+		decisions = append(decisions, packageDecisions(env.Packages)...)
+	}
+	return decisions
+}
+
+func gitSourceDecisions(items []model.GitSource) []model.Decision {
+	decisions := make([]model.Decision, 0, len(items))
+	for _, item := range items {
+		decisions = append(decisions, item.Decision)
+	}
+	return decisions
+}
+
+func containerDecisions(items []model.Container) []model.Decision {
+	decisions := make([]model.Decision, 0, len(items))
+	for _, item := range items {
+		decisions = append(decisions, item.Decision)
+	}
+	return decisions
+}
+
+func serviceDecisions(items []model.Service) []model.Decision {
+	decisions := make([]model.Decision, 0, len(items))
+	for _, item := range items {
+		decisions = append(decisions, item.Decision)
+	}
+	return decisions
+}
+
+func fileFindingDecisions(items []model.FileFinding) []model.Decision {
+	decisions := make([]model.Decision, 0, len(items))
+	for _, item := range items {
+		decisions = append(decisions, item.Decision)
+	}
+	return decisions
+}
+
+func itemDecisions(items []model.Item) []model.Decision {
+	decisions := make([]model.Decision, 0, len(items))
+	for _, item := range items {
+		decisions = append(decisions, item.Decision)
+	}
+	return decisions
+}
+
+func protectedFileFindings(items []model.FileFinding, force bool) int {
+	count := 0
+	for _, item := range items {
+		if force || item.SecretRisk {
+			count++
+		}
+	}
+	return count
+}
+
+func systemPackageNames(report model.ScanReport) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, pkg := range report.Packages {
+		if pkg.Decision != model.DecisionConfirmed || len(pkg.NixNames) == 0 {
+			continue
+		}
+		name := pkg.NixNames[0]
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func homePackageNames(report model.ScanReport) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(pkg model.Package) {
+		if pkg.Decision != model.DecisionConfirmed || len(pkg.NixNames) == 0 {
+			return
+		}
+		name := pkg.NixNames[0]
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, pkg := range report.Languages.NPM {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Conda {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Cargo {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Gem {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Go {
+		add(pkg)
+	}
+	for _, env := range report.Languages.Python {
+		for _, pkg := range env.Packages {
+			add(pkg)
+		}
+	}
+	return names
+}
+
+func humanUsers(report model.ScanReport) []model.User {
+	var users []model.User
+	for _, user := range report.Users {
+		if user.System || user.Name == "root" || !strings.HasPrefix(user.Home, "/home/") {
+			continue
+		}
+		users = append(users, user)
+	}
+	sort.Slice(users, func(i, j int) bool { return users[i].Name < users[j].Name })
+	return users
+}
+
+func hostShellPrograms(report model.ScanReport) []string {
+	seen := map[string]bool{}
+	for _, user := range humanUsers(report) {
+		switch {
+		case strings.HasSuffix(user.Shell, "/zsh"):
+			seen["zsh"] = true
+		case strings.HasSuffix(user.Shell, "/fish"):
+			seen["fish"] = true
+		}
+	}
+	order := []string{"zsh", "fish"}
+	var programs []string
+	for _, program := range order {
+		if seen[program] {
+			programs = append(programs, program)
+		}
+	}
+	return programs
+}
+
+func homePrograms(report model.ScanReport) []string {
+	user := primaryUser(report)
+	programs := map[string]bool{}
+	for _, item := range report.Items {
+		if item.Decision != model.DecisionConfirmed || !strings.HasPrefix(item.Path, user.Home+"/") {
+			continue
+		}
+		switch {
+		case item.Kind == "shell-config" && strings.HasSuffix(item.Path, "/.bashrc"):
+			programs["bash"] = true
+		case item.Kind == "shell-config" && strings.HasSuffix(item.Path, "/.zshrc"):
+			programs["zsh"] = true
+		case item.Kind == "shell-config" && strings.HasSuffix(item.Path, "/.config/fish/config.fish"):
+			programs["fish"] = true
+		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.gitconfig"):
+			programs["git"] = true
+		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.tmux.conf"):
+			programs["tmux"] = true
+		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.config/starship.toml"):
+			programs["starship"] = true
+		}
+	}
+	order := []string{"bash", "zsh", "fish", "git", "tmux", "starship"}
+	var out []string
+	for _, program := range order {
+		if programs[program] {
+			out = append(out, program)
+		}
+	}
+	return out
+}
+
+func primaryUser(report model.ScanReport) model.User {
+	for _, user := range report.Users {
+		if !user.System && user.Name != "root" && strings.HasPrefix(user.Home, "/home/") {
+			return user
+		}
+	}
+	return model.User{Name: "generated", Home: "/home/generated"}
+}
+
+func confirmedSystemdServices(report model.ScanReport) int {
+	count := 0
+	for _, service := range report.Services {
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
+			count++
+		}
+	}
+	return count
+}
+
+func containerRuntimeEnables(report model.ScanReport) int {
+	docker := false
+	podman := false
+	for _, container := range report.Containers {
+		if container.Decision != model.DecisionConfirmed {
+			continue
+		}
+		if container.Runtime == "docker" || container.Runtime == "compose" {
+			docker = true
+		}
+		if container.Runtime == "podman" {
+			podman = true
+		}
+	}
+	count := 0
+	if docker {
+		count++
+	}
+	if podman {
+		count++
+	}
+	return count
+}
+
+func confirmedContainers(report model.ScanReport) int {
+	count := 0
+	for _, container := range report.Containers {
+		if container.Decision == model.DecisionConfirmed {
+			count++
+		}
+	}
+	return count
+}

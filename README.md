@@ -21,6 +21,7 @@ This is an early implementation scaffold. It includes:
 - Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
+- Review summary output and pending-finding gates before generating Nix
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Optional `doctor --boot` check for starting the generated VM script with a timeout
 - Baseline IDs such as `ubuntu:24.04` resolved from local `baselines/` or user cache
@@ -36,6 +37,8 @@ go build -o bin/linux-nixer ./cmd/linux-nixer
 bin/linux-nixer scan --out scan.json
 bin/linux-nixer scan --sudo --out scan.json
 bin/linux-nixer review --scan scan.json --out reviewed.json --auto-safe
+bin/linux-nixer summary --scan reviewed.json
+bin/linux-nixer summary --scan reviewed.json --fail-on-pending
 bin/linux-nixer generate --scan reviewed.json --out nix-config
 bin/linux-nixer doctor --project nix-config
 ```
@@ -70,6 +73,16 @@ bin/linux-nixer review \
 ```
 
 Interactive review accepts `c` confirmed, `k` candidate, `t` todo, `m` migration-note, `x` excluded, `s` skip, and `q` quit. Secret-like and stateful findings cannot be confirmed interactively; they remain migration notes unless excluded.
+
+Summarize reviewed decisions before generating Nix:
+
+```sh
+bin/linux-nixer summary --scan reviewed.json
+bin/linux-nixer summary --scan reviewed.json --json
+bin/linux-nixer summary --scan reviewed.json --fail-on-pending
+```
+
+`--fail-on-pending` exits non-zero when `candidate` or `todo` findings remain. `migration-note` findings are treated as expected manual migration work and do not fail the gate.
 
 VM validation builds the generated NixOS VM derivation when Nix is available:
 

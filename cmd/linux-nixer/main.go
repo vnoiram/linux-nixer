@@ -38,6 +38,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runScan(ctx, args[1:], stdout)
 	case "review":
 		return runReview(args[1:], stdin, stdout)
+	case "summary":
+		return runSummary(args[1:], stdout)
 	case "generate":
 		return runGenerate(args[1:], stdout)
 	case "doctor":
@@ -61,6 +63,7 @@ func usage(w io.Writer) {
 Usage:
   linux-nixer scan --out scan.json [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
   linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
+  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
   linux-nixer generate --scan reviewed.json --out ./nix-config
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
@@ -154,6 +157,38 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 		report = review.Apply(report, opts)
 	}
 	return writeJSON(*out, &report)
+}
+
+func runSummary(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("summary", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	scanPath := fs.String("scan", "", "input reviewed scan JSON")
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON summary")
+	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *scanPath == "" {
+		return errors.New("summary requires --scan")
+	}
+	var report model.ScanReport
+	if err := readJSON(*scanPath, &report); err != nil {
+		return err
+	}
+	summary := review.Summarize(report)
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(summary); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprint(stdout, review.FormatSummaryMarkdown(summary))
+	}
+	if *failOnPending && summary.Pending > 0 {
+		return fmt.Errorf("summary has %d pending findings", summary.Pending)
+	}
+	return nil
 }
 
 func runGenerate(args []string, stdout io.Writer) error {
