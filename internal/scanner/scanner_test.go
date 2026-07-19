@@ -36,6 +36,80 @@ Version: 1.0
 	}
 }
 
+func TestAptScannerFindsPackageSourcesAndInstallReasons(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/var/lib/dpkg/status", `Package: curl
+Status: install ok installed
+Version: 8.0
+
+Package: libauto
+Status: install ok installed
+Version: 1.0
+
+`)
+	write(t, root, "/var/lib/apt/extended_states", `Package: libauto
+Architecture: amd64
+Auto-Installed: 1
+
+`)
+	write(t, root, "/etc/apt/sources.list", "# comment\ndeb http://archive.ubuntu.com/ubuntu noble main\n")
+	write(t, root, "/etc/apt/sources.list.d/vendor.sources", "Types: deb\nURIs: https://example.com/apt\nSuites: stable\n")
+	write(t, root, "/etc/apt/keyrings/vendor.gpg", "key")
+	write(t, root, "/etc/apt/trusted.gpg.d/legacy.gpg", "key")
+	write(t, root, "/etc/apt/preferences.d/pin", "Package: *\nPin: origin example.com\n")
+	write(t, root, "/etc/apt/apt.conf.d/99local", `APT::Install-Recommends "false";`)
+
+	report := &model.ScanReport{}
+	if err := (AptScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	packages := map[string]model.Package{}
+	for _, pkg := range report.Packages {
+		packages[pkg.Name] = pkg
+	}
+	if packages["curl"].Source != "dpkg:manual-or-unknown" {
+		t.Fatalf("curl source=%q, want manual-or-unknown in %+v", packages["curl"].Source, report.Packages)
+	}
+	if packages["libauto"].Source != "dpkg:auto-installed" {
+		t.Fatalf("libauto source=%q, want auto-installed in %+v", packages["libauto"].Source, report.Packages)
+	}
+	items := map[string]model.Item{}
+	for _, item := range report.Items {
+		items[item.Path] = item
+	}
+	for path, kind := range map[string]string{
+		"/etc/apt/sources.list":                  "apt-source",
+		"/etc/apt/sources.list.d/vendor.sources": "apt-source",
+		"/etc/apt/keyrings/vendor.gpg":           "apt-keyring",
+		"/etc/apt/trusted.gpg.d/legacy.gpg":      "apt-keyring",
+		"/etc/apt/preferences.d/pin":             "apt-preference",
+		"/etc/apt/apt.conf.d/99local":            "apt-config",
+	} {
+		if items[path].Kind != kind {
+			t.Fatalf("item %s kind=%q, want %q in %+v", path, items[path].Kind, kind, report.Items)
+		}
+	}
+	if !strings.Contains(items["/etc/apt/sources.list"].Source, "deb http://archive.ubuntu.com/ubuntu noble main") {
+		t.Fatalf("apt source hint missing sanitized source line: %+v", items["/etc/apt/sources.list"])
+	}
+}
+
+func TestAptInstallReasonUsesAptMarkOnHostRoot(t *testing.T) {
+	report := &model.ScanReport{}
+	manual, auto, loaded := aptInstallReasonHints(context.Background(), Options{
+		Root: "/",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name != "apt-mark" || strings.Join(args, " ") != "showmanual" {
+				t.Fatalf("unexpected command: %s %v", name, args)
+			}
+			return []byte("curl\ngit\n"), nil
+		},
+	}, report)
+	if !manual["curl"] || !manual["git"] || len(auto) != 0 || loaded {
+		t.Fatalf("unexpected apt-mark hints manual=%+v auto=%+v loaded=%v", manual, auto, loaded)
+	}
+}
+
 func TestAptScannerUsesSudoFallbackForStatus(t *testing.T) {
 	if _, err := os.Stat("/var/lib/dpkg/status"); err == nil {
 		t.Skip("host dpkg status is readable; apt sudo fallback path cannot be forced deterministically")
@@ -46,6 +120,9 @@ func TestAptScannerUsesSudoFallbackForStatus(t *testing.T) {
 		Root:    "/",
 		UseSudo: true,
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "apt-mark" && strings.Join(args, " ") == "showmanual" {
+				return nil, errors.New("apt-mark unavailable")
+			}
 			called = true
 			if name != "sudo" || strings.Join(args, " ") != "cat /var/lib/dpkg/status" {
 				t.Fatalf("unexpected command: %s %v", name, args)

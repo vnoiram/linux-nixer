@@ -75,6 +75,14 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{
 		Host: model.Host{Hostname: "demo"},
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", Version: "8.0", Source: "apt-mark:manual", NixNames: []string{"curl"}, Decision: model.DecisionCandidate},
+			{Manager: "apt", Name: "excluded", Source: "apt-mark:manual", Decision: model.DecisionExcluded},
+			{Manager: "snap", Name: "hello", Version: "1.0", Source: "/snap/hello", Decision: model.DecisionCandidate},
+			{Manager: "flatpak", Name: "org.example.App", Source: "flathub", Decision: model.DecisionCandidate},
+			{Manager: "appimage", Name: "Tool", Source: "/home/alice/Applications/Tool.AppImage", Decision: model.DecisionMigrationNote},
+			{Manager: "homebrew", Name: "hello", Source: "/home/linuxbrew/.linuxbrew/Cellar/hello", Decision: model.DecisionCandidate},
+		},
 		Services: []model.Service{
 			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", Decision: model.DecisionCandidate},
 			{Manager: "cron", Name: "excluded", Path: "/etc/cron.d/excluded", Decision: model.DecisionExcluded},
@@ -106,6 +114,11 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			VMs:   []model.VersionTool{{Name: "mise", Path: "/home/alice/.local/share/mise"}, {Name: ".tool-versions", Path: "/home/alice/.tool-versions"}},
 		},
 		Items: []model.Item{
+			{Kind: "apt-source", Name: "sources.list", Path: "/etc/apt/sources.list", Source: "deb http://archive.ubuntu.com/ubuntu noble main", Decision: model.DecisionCandidate, Reason: "apt repository source"},
+			{Kind: "apt-keyring", Name: "vendor.gpg", Path: "/etc/apt/keyrings/vendor.gpg", Decision: model.DecisionCandidate, Reason: "apt repository trust keyring"},
+			{Kind: "apt-preference", Name: "pin", Path: "/etc/apt/preferences.d/pin", Decision: model.DecisionCandidate, Reason: "apt package pinning or repository priority"},
+			{Kind: "apt-config", Name: "99local", Path: "/etc/apt/apt.conf.d/99local", Decision: model.DecisionCandidate, Reason: "apt client configuration"},
+			{Kind: "apt-source", Name: "excluded", Path: "/etc/apt/sources.list.d/excluded.list", Decision: model.DecisionExcluded, Reason: "apt repository source"},
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
 			{Kind: "language-project", Name: "package.json", Path: "/home/alice/app/package.json", Decision: model.DecisionCandidate, Reason: "node dependency or package manager file"},
 			{Kind: "language-project", Name: "pyproject.toml", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "python dependency or virtual environment file"},
@@ -178,6 +191,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if strings.Contains(devopsConfig, "super-secret") || strings.Contains(devopsConfig, "excluded") {
 		t.Fatalf("devops config report leaked raw secret or excluded entry:\n%s", devopsConfig)
+	}
+	packageSources := readFile(t, out, "reports/package-sources.md")
+	for _, want := range []string{"# Package source findings", "Apt packages", "`curl` via apt -> `curl` [candidate] version `8.0` source `apt-mark:manual`", "Apt repositories", "/etc/apt/sources.list", "deb http://archive.ubuntu.com/ubuntu noble main", "Apt keyrings", "/etc/apt/keyrings/vendor.gpg", "Apt preferences", "/etc/apt/preferences.d/pin", "Apt configuration", "/etc/apt/apt.conf.d/99local", "Alternative package ecosystems", "`hello` via snap", "`org.example.App` via flatpak", "`Tool` via appimage", "`hello` via homebrew"} {
+		if !strings.Contains(packageSources, want) {
+			t.Fatalf("package sources report missing %q:\n%s", want, packageSources)
+		}
+	}
+	if strings.Contains(packageSources, "excluded") {
+		t.Fatalf("package sources report included excluded entry:\n%s", packageSources)
 	}
 	containers := readFile(t, out, "modules/containers.nix")
 	if !strings.Contains(containers, "virtualisation.docker.enable = false;") {
@@ -261,6 +283,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	reportMD := readFile(t, out, "reports/migration-report.md")
 	if !strings.Contains(reportMD, "## Git sources") || !strings.Contains(reportMD, "/home/alice/app") {
 		t.Fatalf("migration report missing git source section:\n%s", reportMD)
+	}
+	if !strings.Contains(reportMD, "`curl` via apt -> `curl` [candidate] source `apt-mark:manual`") || !strings.Contains(reportMD, "/etc/apt/sources.list") {
+		t.Fatalf("migration report missing package source hints:\n%s", reportMD)
 	}
 	if !strings.Contains(reportMD, "## Language packages") || !strings.Contains(reportMD, "`prettier` via pnpm") || !strings.Contains(reportMD, "version manager `mise`") || !strings.Contains(reportMD, "/home/alice/app/package.json") {
 		t.Fatalf("migration report missing language section:\n%s", reportMD)

@@ -139,6 +139,7 @@ func writeGeneratedProject(t *testing.T, host string) string {
 		"hosts/generated/configuration.nix",
 		"users/home.nix",
 		"modules/containers.nix",
+		"reports/package-sources.md",
 		"reports/containers.md",
 		"reports/git-sources.md",
 		"reports/languages.md",
