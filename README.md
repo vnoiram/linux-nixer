@@ -22,6 +22,7 @@ This is an early implementation scaffold. It includes:
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - Review summary output and pending-finding gates before generating Nix
+- Scan JSON validation for schema, decisions, and protected findings
 - One-shot capture workflow for scan, auto-safe review, summary, and Nix generation
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Optional `doctor --boot` check for starting the generated VM script with a timeout
@@ -39,6 +40,7 @@ bin/linux-nixer scan --out scan.json
 bin/linux-nixer scan --sudo --out scan.json
 bin/linux-nixer capture --out linux-nixer-output --sudo --deep
 bin/linux-nixer review --scan scan.json --out reviewed.json --auto-safe
+bin/linux-nixer validate --scan reviewed.json
 bin/linux-nixer summary --scan reviewed.json
 bin/linux-nixer summary --scan reviewed.json --fail-on-pending
 bin/linux-nixer generate --scan reviewed.json --out nix-config
@@ -88,6 +90,16 @@ bin/linux-nixer summary --scan reviewed.json --fail-on-pending
 ```
 
 `--fail-on-pending` exits non-zero when `candidate` or `todo` findings remain. `migration-note` findings are treated as expected manual migration work and do not fail the gate.
+
+Validate scan or reviewed JSON before generating Nix:
+
+```sh
+bin/linux-nixer validate --scan reviewed.json
+bin/linux-nixer validate --scan reviewed.json --json
+bin/linux-nixer validate --scan reviewed.json --strict
+```
+
+`--strict` rejects unknown JSON fields in addition to checking schema version, known decision values, required identifiers, and protected secret/stateful findings.
 
 VM validation builds the generated NixOS VM derivation when Nix is available:
 

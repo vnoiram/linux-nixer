@@ -63,10 +63,80 @@ func TestRunHelpIncludesCaptureSummaryAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"linux-nixer capture --out DIR", "linux-nixer summary --scan reviewed.json", "linux-nixer version"} {
+	for _, want := range []string{"linux-nixer capture --out DIR", "linux-nixer validate --scan reviewed.json", "linux-nixer summary --scan reviewed.json", "linux-nixer version"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestRunValidateWritesTextAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", Decision: model.DecisionConfirmed},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"validate", "--scan", scanPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "valid scan") {
+		t.Fatalf("validate text missing valid result:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"validate", "--scan", scanPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid validate json: %v\n%s", err, stdout.String())
+	}
+	if !got.OK {
+		t.Fatalf("validate json ok=false: %s", stdout.String())
+	}
+}
+
+func TestRunValidateFailsInvalidScanAndStrictUnknownField(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", Decision: model.Decision("maybe")},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"validate", "--scan", scanPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected invalid scan to fail")
+	}
+	if !strings.Contains(stdout.String(), "unknown decision") {
+		t.Fatalf("validate text missing unknown decision:\n%s", stdout.String())
+	}
+
+	strictPath := filepath.Join(dir, "strict.json")
+	if err := os.WriteFile(strictPath, []byte(`{"schemaVersion":"linux-nixer.scan.v1","unexpected":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	err = run(context.Background(), []string{"validate", "--scan", strictPath, "--strict", "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected strict unknown field to fail")
+	}
+	if !strings.Contains(stdout.String(), "unknown field") {
+		t.Fatalf("strict validate output missing unknown field:\n%s", stdout.String())
 	}
 }
 
@@ -167,6 +237,12 @@ Version: 1.0
 	}
 	if !strings.Contains(string(summary), "Pending findings:") {
 		t.Fatalf("summary missing pending count:\n%s", string(summary))
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"validate", "--scan", filepath.Join(out, "reviewed.json")}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

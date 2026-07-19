@@ -10,6 +10,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 
 - Build-time version injection for release binaries.
 - Release tag validation and archive smoke tests in the GitHub Actions release workflow.
+- Scan JSON validation for schema, decisions, and protected findings.
 
 ## [0.1.0] - 2026-07-19
 

@@ -17,6 +17,7 @@ import (
 	"github.com/vnoiram/linux-nixer/internal/render"
 	"github.com/vnoiram/linux-nixer/internal/review"
 	"github.com/vnoiram/linux-nixer/internal/scanner"
+	"github.com/vnoiram/linux-nixer/internal/validate"
 )
 
 var version = "0.1.0-dev"
@@ -42,6 +43,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runReview(args[1:], stdin, stdout)
 	case "summary":
 		return runSummary(args[1:], stdout)
+	case "validate":
+		return runValidate(args[1:], stdout)
 	case "generate":
 		return runGenerate(args[1:], stdout)
 	case "doctor":
@@ -67,6 +70,7 @@ Usage:
   linux-nixer capture --out DIR [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
   linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
+  linux-nixer validate --scan reviewed.json [--json] [--strict]
   linux-nixer generate --scan reviewed.json --out ./nix-config
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
@@ -271,6 +275,55 @@ func runSummary(args []string, stdout io.Writer) error {
 	return nil
 }
 
+func runValidate(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	scanPath := fs.String("scan", "", "input scan JSON")
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON validation result")
+	strict := fs.Bool("strict", false, "reject unknown JSON fields")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *scanPath == "" {
+		return errors.New("validate requires --scan")
+	}
+	var report model.ScanReport
+	if *strict {
+		if err := readJSONStrict(*scanPath, &report); err != nil {
+			result := validate.Result{
+				OK:     false,
+				Errors: []validate.Issue{{Path: *scanPath, Message: err.Error()}},
+			}
+			if *jsonOutput {
+				enc := json.NewEncoder(stdout)
+				enc.SetIndent("", "  ")
+				if encodeErr := enc.Encode(result); encodeErr != nil {
+					return encodeErr
+				}
+			} else {
+				fmt.Fprint(stdout, validate.FormatText(result))
+			}
+			return fmt.Errorf("validation failed with 1 error")
+		}
+	} else if err := readJSON(*scanPath, &report); err != nil {
+		return err
+	}
+	result := validate.ScanReport(report)
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(result); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprint(stdout, validate.FormatText(result))
+	}
+	if !result.OK {
+		return fmt.Errorf("validation failed with %d errors", len(result.Errors))
+	}
+	return nil
+}
+
 func runGenerate(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -368,4 +421,15 @@ func readJSON(path string, value any) error {
 	}
 	defer f.Close()
 	return json.NewDecoder(f).Decode(value)
+}
+
+func readJSONStrict(path string, value any) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+	return dec.Decode(value)
 }
