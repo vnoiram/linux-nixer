@@ -14,6 +14,7 @@ import (
 	"github.com/vnoiram/linux-nixer/internal/baseline"
 	"github.com/vnoiram/linux-nixer/internal/doctor"
 	"github.com/vnoiram/linux-nixer/internal/model"
+	"github.com/vnoiram/linux-nixer/internal/policy"
 	"github.com/vnoiram/linux-nixer/internal/render"
 	"github.com/vnoiram/linux-nixer/internal/review"
 	"github.com/vnoiram/linux-nixer/internal/scanner"
@@ -51,6 +52,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runDoctor(ctx, args[1:], stdout)
 	case "baseline":
 		return runBaseline(ctx, args[1:], stdout)
+	case "policy":
+		return runPolicy(args[1:], stdout)
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, version)
 		return nil
@@ -66,14 +69,15 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `linux-nixer converts Debian/Ubuntu environments into NixOS + Home Manager flakes.
 
 Usage:
-  linux-nixer scan --out scan.json [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
-  linux-nixer capture --out DIR [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
-  linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
+  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
+  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
   linux-nixer validate --scan reviewed.json [--json] [--strict]
   linux-nixer generate --scan reviewed.json --out ./nix-config
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
+  linux-nixer policy init --out linux-nixer-policy.json
   linux-nixer version`)
 }
 
@@ -81,6 +85,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output scan JSON path")
+	policyPath := fs.String("policy", "", "policy JSON path")
 	root := fs.String("root", "/", "root filesystem to scan")
 	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
 	deep := fs.Bool("deep", false, "scan broader filesystem paths")
@@ -95,25 +100,16 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if *out == "" {
 		return errors.New("scan requires --out")
 	}
-	resolvedBaseline := *baselineID
-	if *baselineID != "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		if resolution := baseline.Resolve(*baselineID, cwd); resolution.OK {
-			resolvedBaseline = resolution.Path
-		}
+	p, err := policy.Load(*policyPath)
+	if err != nil {
+		return err
+	}
+	opts, err := scannerOptionsFromFlags(fs, p, *root, *useSudo, *deep, *baselineID, includes, excludes)
+	if err != nil {
+		return err
 	}
 	reg := scanner.DefaultRegistry()
-	report, err := reg.Scan(ctx, scanner.Options{
-		Root:       *root,
-		UseSudo:    *useSudo,
-		Deep:       *deep,
-		BaselineID: resolvedBaseline,
-		Includes:   includes,
-		Excludes:   excludes,
-	})
+	report, err := reg.Scan(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -124,10 +120,12 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output directory")
+	policyPath := fs.String("policy", "", "policy JSON path")
 	root := fs.String("root", "/", "root filesystem to scan")
 	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
 	deep := fs.Bool("deep", false, "scan broader filesystem paths")
 	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
+	autoSafe := fs.Bool("auto-safe", true, "confirm high-confidence safe findings during capture")
 	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain after capture")
 	var includes multiFlag
 	var excludes multiFlag
@@ -139,27 +137,17 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	if *out == "" {
 		return errors.New("capture requires --out")
 	}
-
-	resolvedBaseline := *baselineID
-	if *baselineID != "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		if resolution := baseline.Resolve(*baselineID, cwd); resolution.OK {
-			resolvedBaseline = resolution.Path
-		}
+	p, err := policy.Load(*policyPath)
+	if err != nil {
+		return err
+	}
+	scanOpts, err := scannerOptionsFromFlags(fs, p, *root, *useSudo, *deep, *baselineID, includes, excludes)
+	if err != nil {
+		return err
 	}
 
 	reg := scanner.DefaultRegistry()
-	report, err := reg.Scan(ctx, scanner.Options{
-		Root:       *root,
-		UseSudo:    *useSudo,
-		Deep:       *deep,
-		BaselineID: resolvedBaseline,
-		Includes:   includes,
-		Excludes:   excludes,
-	})
+	report, err := reg.Scan(ctx, scanOpts)
 	if err != nil {
 		return err
 	}
@@ -174,7 +162,8 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote scan: %s\n", scanPath)
 
-	reviewed := review.Apply(*report, review.Options{AutoSafe: true})
+	reviewOpts := reviewOptionsFromFlags(fs, p, review.Options{AutoSafe: true}, *autoSafe, nil, nil, nil, nil, nil, nil)
+	reviewed := review.Apply(*report, reviewOpts)
 	if err := writeJSON(reviewedPath, reviewed); err != nil {
 		return err
 	}
@@ -202,6 +191,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input scan JSON")
 	out := fs.String("out", "", "output reviewed JSON")
+	policyPath := fs.String("policy", "", "policy JSON path")
 	autoSafe := fs.Bool("auto-safe", false, "confirm high-confidence safe findings")
 	interactive := fs.Bool("interactive", false, "review findings interactively")
 	var confirmKinds multiFlag
@@ -226,15 +216,11 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := readJSON(*scanPath, &report); err != nil {
 		return err
 	}
-	opts := review.Options{
-		AutoSafe:            *autoSafe,
-		ConfirmKinds:        confirmKinds,
-		ExcludeKinds:        excludeKinds,
-		TODOKinds:           todoKinds,
-		MigrationNoteKinds:  noteKinds,
-		ConfirmManagers:     confirmManagers,
-		ExcludePathPrefixes: excludePaths,
+	p, err := policy.Load(*policyPath)
+	if err != nil {
+		return err
 	}
+	opts := reviewOptionsFromFlags(fs, p, review.Options{}, *autoSafe, confirmKinds, excludeKinds, todoKinds, noteKinds, confirmManagers, excludePaths)
 	if *interactive {
 		report = review.Interactive(stdin, stdout, report, opts)
 	} else {
@@ -383,6 +369,82 @@ func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	return writeJSON(*out, manifest)
+}
+
+func runPolicy(args []string, stdout io.Writer) error {
+	if len(args) == 0 || args[0] != "init" {
+		return errors.New("policy supports only: policy init")
+	}
+	fs := flag.NewFlagSet("policy init", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	out := fs.String("out", "", "output policy JSON")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if err := policy.WriteTemplate(*out); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote policy: %s\n", *out)
+	return nil
+}
+
+func scannerOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, root string, useSudo bool, deep bool, baselineID string, includes []string, excludes []string) (scanner.Options, error) {
+	opts := p.ScanOptions(scanner.Options{Root: root})
+	if flagSpecified(fs, "sudo") {
+		opts.UseSudo = useSudo
+	}
+	if flagSpecified(fs, "deep") {
+		opts.Deep = deep
+	}
+	if flagSpecified(fs, "baseline") {
+		opts.BaselineID = baselineID
+	}
+	opts.Includes = policy.Merge(includes, opts.Includes)
+	opts.Excludes = policy.Merge(excludes, opts.Excludes)
+	resolvedBaseline, err := resolveBaselineID(opts.BaselineID)
+	if err != nil {
+		return scanner.Options{}, err
+	}
+	opts.BaselineID = resolvedBaseline
+	return opts, nil
+}
+
+func reviewOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, base review.Options, autoSafe bool, confirmKinds []string, excludeKinds []string, todoKinds []string, noteKinds []string, confirmManagers []string, excludePaths []string) review.Options {
+	opts := p.ReviewOptions(base)
+	if flagSpecified(fs, "auto-safe") {
+		opts.AutoSafe = autoSafe
+	}
+	opts.ConfirmKinds = policy.Merge(confirmKinds, opts.ConfirmKinds)
+	opts.ExcludeKinds = policy.Merge(excludeKinds, opts.ExcludeKinds)
+	opts.TODOKinds = policy.Merge(todoKinds, opts.TODOKinds)
+	opts.MigrationNoteKinds = policy.Merge(noteKinds, opts.MigrationNoteKinds)
+	opts.ConfirmManagers = policy.Merge(confirmManagers, opts.ConfirmManagers)
+	opts.ExcludePathPrefixes = policy.Merge(excludePaths, opts.ExcludePathPrefixes)
+	return opts
+}
+
+func resolveBaselineID(baselineID string) (string, error) {
+	if baselineID == "" {
+		return "", nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	if resolution := baseline.Resolve(baselineID, cwd); resolution.OK {
+		return resolution.Path, nil
+	}
+	return baselineID, nil
+}
+
+func flagSpecified(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 type multiFlag []string

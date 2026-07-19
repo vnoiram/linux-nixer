@@ -10,7 +10,7 @@ Generated Nix settings only include findings marked `confirmed`. Findings left a
 
 This is an early implementation scaffold. It includes:
 
-- Go CLI commands: `scan`, `review`, `generate`, `doctor`, `baseline create`
+- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`, `policy init`
 - Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, system config files, DevOps/project config, user shell settings, desktop settings, and filesystem findings
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
@@ -24,6 +24,7 @@ This is an early implementation scaffold. It includes:
 - Review summary output and pending-finding gates before generating Nix
 - Scan JSON validation for schema, decisions, and protected findings
 - One-shot capture workflow for scan, auto-safe review, summary, and Nix generation
+- Reusable JSON policy files for repeatable scan and review rules
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Optional `doctor --boot` check for starting the generated VM script with a timeout
 - Baseline IDs such as `ubuntu:24.04` resolved from local `baselines/` or user cache
@@ -39,6 +40,8 @@ go build -o bin/linux-nixer ./cmd/linux-nixer
 bin/linux-nixer scan --out scan.json
 bin/linux-nixer scan --sudo --out scan.json
 bin/linux-nixer capture --out linux-nixer-output --sudo --deep
+bin/linux-nixer policy init --out linux-nixer-policy.json
+bin/linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-output
 bin/linux-nixer review --scan scan.json --out reviewed.json --auto-safe
 bin/linux-nixer validate --scan reviewed.json
 bin/linux-nixer summary --scan reviewed.json
@@ -56,6 +59,17 @@ bin/linux-nixer capture --root /path/to/rootfs --include /random-seed-42 --out l
 
 `capture` writes `scan.json`, `reviewed.json`, `summary.md`, and `nix-config/` under the output directory. It applies the same conservative auto-safe review as `review --auto-safe`; use the split `scan` and `review --interactive` flow when you want to approve findings manually before generating Nix.
 After capture, review `nix-config/reports/migration-checklist.md` for manual package, secret, stateful data, and configuration migration steps.
+
+Policy files make scan and review decisions repeatable:
+
+```sh
+bin/linux-nixer policy init --out linux-nixer-policy.json
+bin/linux-nixer scan --policy linux-nixer-policy.json --out scan.json
+bin/linux-nixer review --policy linux-nixer-policy.json --scan scan.json --out reviewed.json
+bin/linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-output
+```
+
+Policy paths are plain prefixes, not globs. CLI list flags are merged with policy lists; explicitly provided boolean and string flags override policy values.
 
 Create a local baseline manifest:
 

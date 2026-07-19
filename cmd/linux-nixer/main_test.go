@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
+	policypkg "github.com/vnoiram/linux-nixer/internal/policy"
 )
 
 func TestRunReviewInteractiveWritesReviewedJSON(t *testing.T) {
@@ -140,6 +141,27 @@ func TestRunValidateFailsInvalidScanAndStrictUnknownField(t *testing.T) {
 	}
 }
 
+func TestRunPolicyInitWritesParseablePolicy(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "linux-nixer-policy.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "init", "--out", policyPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "wrote policy:") {
+		t.Fatalf("policy init stdout missing path:\n%s", stdout.String())
+	}
+	p, err := policypkg.Load(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SchemaVersion != policypkg.SchemaVersion || p.AutoSafe == nil || !*p.AutoSafe {
+		t.Fatalf("unexpected policy template: %+v", p)
+	}
+}
+
 func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	project := t.TempDir()
 	root := filepath.Join(project, "root")
@@ -175,6 +197,84 @@ func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 		if finding.Path == "/usr/local/bin/tool" {
 			t.Fatalf("baseline-matched file should not be reported: %+v", got.FilesystemDiff)
 		}
+	}
+}
+
+func TestRunScanAppliesPolicy(t *testing.T) {
+	project := t.TempDir()
+	root := filepath.Join(project, "root")
+	writeFile(t, root, "/usr/local/bin/tool", "#!/bin/sh\necho changed\n")
+	if err := os.Chmod(filepath.Join(root, "usr/local/bin/tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	baselineDir := filepath.Join(project, "baselines")
+	if err := os.MkdirAll(baselineDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baselineDir, "ubuntu-24.04.json"), []byte(`{"files":[{"path":"/usr/local/bin/tool","type":"script","mode":"-rwxr-xr-x","size":20,"sha256":"different"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policyPath := filepath.Join(project, "policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","includePaths":["/usr/local/bin"],"baseline":"ubuntu:24.04","deep":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(project)
+
+	outPath := filepath.Join(project, "scan.json")
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--policy", policyPath, "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	found := false
+	for _, finding := range got.FilesystemDiff {
+		if finding.Path == "/usr/local/bin/tool" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("policy include/baseline should report changed file: %+v", got.FilesystemDiff)
+	}
+}
+
+func TestRunReviewAppliesPolicy(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	policyPath := filepath.Join(dir, "policy.json")
+	writeScan(t, scanPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+			{Manager: "snap", Name: "hello", Source: "/snap/hello"},
+		},
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/tmp/tool", Category: "script"},
+		},
+	})
+	if err := os.WriteFile(policyPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","confirmManagers":["apt"],"excludePathPrefixes":["/tmp"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--policy", policyPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	if got.Packages[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("apt decision=%q, want confirmed", got.Packages[0].Decision)
+	}
+	if got.Packages[1].Decision != model.DecisionCandidate {
+		t.Fatalf("snap decision=%q, want candidate", got.Packages[1].Decision)
+	}
+	if got.FilesystemDiff[0].Decision != model.DecisionExcluded {
+		t.Fatalf("filesystem decision=%q, want excluded", got.FilesystemDiff[0].Decision)
 	}
 }
 
@@ -244,6 +344,45 @@ Version: 1.0
 	err = run(context.Background(), []string{"validate", "--scan", filepath.Join(out, "reviewed.json")}, strings.NewReader(""), &stdout, &stdout)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunCaptureAppliesPolicy(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	out := filepath.Join(dir, "capture")
+	policyPath := filepath.Join(dir, "policy.json")
+	writeFile(t, root, "/var/lib/dpkg/status", `Package: curl
+Status: install ok installed
+Version: 8.0
+
+`)
+	writeFile(t, root, "/custom/bin/tool", "#!/bin/sh\necho custom\n")
+	if err := os.Chmod(filepath.Join(root, "custom/bin/tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policyPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","autoSafe":false,"confirmManagers":["apt"],"includePaths":["/custom/bin"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"capture", "--root", root, "--policy", policyPath, "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewed model.ScanReport
+	readScan(t, filepath.Join(out, "reviewed.json"), &reviewed)
+	if len(reviewed.Packages) != 1 || reviewed.Packages[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("policy confirmManagers not applied: %+v", reviewed.Packages)
+	}
+	found := false
+	for _, finding := range reviewed.FilesystemDiff {
+		if finding.Path == "/custom/bin/tool" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("policy includePaths not applied: %+v", reviewed.FilesystemDiff)
 	}
 }
 

@@ -12,6 +12,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Release tag validation and archive smoke tests in the GitHub Actions release workflow.
 - Scan JSON validation for schema, decisions, and protected findings.
 - Manual migration checklist report for non-automatic migration work.
+- Reusable JSON policy files for scan and review rules.
 
 ## [0.1.0] - 2026-07-19
 
