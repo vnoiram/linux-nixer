@@ -758,6 +758,74 @@ func TestLanguageScannerAddsNixCandidatesForKnownCLIs(t *testing.T) {
 	assertPkgMapping(t, report.Languages.Gem, "bundler", "bundler")
 }
 
+func TestLanguageScannerFindsLanguageEcosystemHints(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/.local/share/pnpm/global/5/node_modules/prettier/package.json", `{"name":"prettier","version":"3.0.0"}`)
+	write(t, root, "/home/alice/.config/yarn/global/node_modules/yarn/package.json", `{"name":"yarn","version":"1.22.0"}`)
+	write(t, root, "/home/alice/project/package.json", `{"packageManager":"pnpm@9.0.0"}`)
+	write(t, root, "/home/alice/project/pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+	write(t, root, "/home/alice/project/pyproject.toml", "[project]\nname='demo'\n")
+	write(t, root, "/home/alice/project/requirements.txt", "ruff\n")
+	write(t, root, "/home/alice/project/poetry.lock", "# lock\n")
+	write(t, root, "/home/alice/project/Pipfile", "[packages]\n")
+	write(t, root, "/home/alice/project/uv.lock", "version = 1\n")
+	write(t, root, "/home/alice/project/environment.yml", "name: demo\n")
+	write(t, root, "/home/alice/project/Cargo.toml", "[package]\n")
+	write(t, root, "/home/alice/project/go.mod", "module example.com/demo\n")
+	write(t, root, "/home/alice/project/Gemfile", "source 'https://rubygems.org'\n")
+	write(t, root, "/srv/app/Gemfile", "source 'https://rubygems.org'\n")
+	write(t, root, "/home/alice/miniconda3/envs/data/conda-meta/history", "")
+	write(t, root, "/home/alice/.condarc", "channels:\n")
+	write(t, root, "/home/alice/.tool-versions", "nodejs 22\n")
+	write(t, root, "/home/alice/project/.node-version", "22\n")
+	write(t, root, "/home/alice/.local/share/mise/config.toml", "")
+
+	report := &model.ScanReport{}
+	if err := (LanguageScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPkgMapping(t, report.Languages.NPM, "prettier", "nodePackages.prettier")
+	assertPkgMapping(t, report.Languages.NPM, "yarn", "yarn")
+	if len(report.Languages.Conda) != 1 || report.Languages.Conda[0].Name != "data" || report.Languages.Conda[0].Decision != model.DecisionMigrationNote {
+		t.Fatalf("unexpected conda envs: %+v", report.Languages.Conda)
+	}
+	vms := map[string]bool{}
+	for _, vm := range report.Languages.VMs {
+		vms[vm.Name+"@"+vm.Path] = true
+	}
+	for _, want := range []string{"mise@/home/alice/.local/share/mise", ".tool-versions@/home/alice/.tool-versions", ".node-version@/home/alice/project/.node-version"} {
+		if !vms[want] {
+			t.Fatalf("missing version manager marker %s in %+v", want, report.Languages.VMs)
+		}
+	}
+	items := map[string]model.Item{}
+	for _, item := range report.Items {
+		if item.Kind == "language-project" {
+			items[item.Path] = item
+		}
+	}
+	for _, path := range []string{
+		"/home/alice/project/package.json",
+		"/home/alice/project/pnpm-lock.yaml",
+		"/home/alice/project/pyproject.toml",
+		"/home/alice/project/requirements.txt",
+		"/home/alice/project/poetry.lock",
+		"/home/alice/project/Pipfile",
+		"/home/alice/project/uv.lock",
+		"/home/alice/project/environment.yml",
+		"/home/alice/project/Cargo.toml",
+		"/home/alice/project/go.mod",
+		"/home/alice/project/Gemfile",
+		"/srv/app/Gemfile",
+		"/home/alice/.condarc",
+	} {
+		if items[path].Decision != model.DecisionCandidate {
+			t.Fatalf("missing language project item %s in %+v", path, report.Items)
+		}
+	}
+}
+
 func assertPkgMapping(t *testing.T, packages []model.Package, name, want string) {
 	t.Helper()
 	for _, pkg := range packages {

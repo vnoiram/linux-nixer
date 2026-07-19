@@ -40,6 +40,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
 		"reports/containers.md":             renderContainersReport(report),
 		"reports/git-sources.md":            renderGitSourcesReport(report),
+		"reports/languages.md":              renderLanguagesReport(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
@@ -250,7 +251,14 @@ func renderReport(report model.ScanReport) string {
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString("\n## Language packages\n\n")
 	writeLanguagePackages(&b, report)
+	for _, vm := range report.Languages.VMs {
+		b.WriteString(fmt.Sprintf("- version manager `%s` at `%s`\n", vm.Name, vm.Path))
+	}
+	for _, item := range languageProjectItems(report) {
+		b.WriteString(fmt.Sprintf("- `%s` %s [%s]\n", item.Path, item.Reason, printableDecision(item.Decision)))
+	}
 	b.WriteString("\n## Services\n\n")
 	for _, service := range report.Services {
 		if reportDecision(service.Decision) {
@@ -474,6 +482,67 @@ func renderGitSourcesReport(report model.ScanReport) string {
 		}
 		if len(source.Build) > 0 {
 			b.WriteString(fmt.Sprintf("  - build hints: %s\n", strings.Join(source.Build, ", ")))
+		}
+	}
+	return b.String()
+}
+
+func renderLanguagesReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Language ecosystem findings\n\n")
+	sections := []struct {
+		title string
+		pkgs  []model.Package
+	}{
+		{"Node global packages", report.Languages.NPM},
+		{"Conda environments", report.Languages.Conda},
+		{"Cargo-installed binaries", report.Languages.Cargo},
+		{"Go-installed binaries", report.Languages.Go},
+		{"Ruby gems", report.Languages.Gem},
+	}
+	for _, section := range sections {
+		pkgs := languagePackages(section.pkgs)
+		if len(pkgs) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, pkg := range pkgs {
+			b.WriteString(languagePackageLine(pkg, ""))
+		}
+		b.WriteString("\n")
+	}
+	if len(report.Languages.Python) > 0 {
+		b.WriteString("## Python environments\n\n")
+		for _, env := range report.Languages.Python {
+			b.WriteString(fmt.Sprintf("- `%s` %s\n", env.Path, env.Kind))
+			for _, pkg := range languagePackages(env.Packages) {
+				b.WriteString("  ")
+				b.WriteString(languagePackageLine(pkg, env.Path))
+			}
+		}
+		b.WriteString("\n")
+	}
+	if len(report.Languages.VMs) > 0 {
+		b.WriteString("## Version managers\n\n")
+		vms := append([]model.VersionTool(nil), report.Languages.VMs...)
+		sort.Slice(vms, func(i, j int) bool { return vms[i].Path < vms[j].Path })
+		for _, vm := range vms {
+			b.WriteString(fmt.Sprintf("- `%s` at `%s`\n", vm.Name, vm.Path))
+		}
+		b.WriteString("\n")
+	}
+	items := languageProjectItems(report)
+	if len(items) > 0 {
+		b.WriteString("## Project language files\n\n")
+		for _, item := range items {
+			b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+			if item.Reason != "" {
+				b.WriteString(": ")
+				b.WriteString(item.Reason)
+			}
+			b.WriteString("\n")
 		}
 	}
 	return b.String()
@@ -761,6 +830,36 @@ func gitSources(report model.ScanReport) []model.GitSource {
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Path < sources[j].Path })
 	return sources
+}
+
+func languagePackages(pkgs []model.Package) []model.Package {
+	var out []model.Package
+	for _, pkg := range pkgs {
+		if reportDecision(pkg.Decision) {
+			out = append(out, pkg)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Manager != out[j].Manager {
+			return out[i].Manager < out[j].Manager
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Source < out[j].Source
+	})
+	return out
+}
+
+func languageProjectItems(report model.ScanReport) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && item.Kind == "language-project" {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
 }
 
 func containerSortKey(container model.Container) string {

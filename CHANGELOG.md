@@ -30,4 +30,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Dedicated DevOps and project configuration scanners plus `reports/devops-config.md` output.
 - Enriched container inspect scanning and `reports/containers.md` output.
 - Enriched Git source scanning and `reports/git-sources.md` output.
+- Enriched language ecosystem scanning and `reports/languages.md` output.
 - CI and tag-based release workflow.

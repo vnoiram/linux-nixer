@@ -88,8 +88,28 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Path: "/home/alice/app", Remote: "https://example.com/app.git", Commit: "abc123", Dirty: true, Build: []string{"branch:main", "submodules", "flake.nix"}, Decision: model.DecisionCandidate},
 			{Path: "/opt/excluded", Remote: "https://example.com/excluded.git", Commit: "def456", Decision: model.DecisionExcluded},
 		},
+		Languages: model.Languages{
+			NPM: []model.Package{
+				{Manager: "pnpm", Name: "prettier", Version: "3.0.0", Source: "/home/alice/.local/share/pnpm/global/5/node_modules/prettier/package.json", NixNames: []string{"nodePackages.prettier"}, Decision: model.DecisionCandidate},
+				{Manager: "npm", Name: "excluded", Decision: model.DecisionExcluded},
+			},
+			Python: []model.PythonEnv{
+				{Path: "/home/alice/.local/pipx/venvs/ruff", Kind: "pipx", Packages: []model.Package{{Manager: "pipx", Name: "ruff", NixNames: []string{"ruff"}, Decision: model.DecisionCandidate}}},
+				{Path: "/home/alice/app/.venv", Kind: "venv"},
+			},
+			Conda: []model.Package{
+				{Manager: "conda", Name: "data", Source: "/home/alice/miniconda3/envs/data", Decision: model.DecisionMigrationNote},
+			},
+			Cargo: []model.Package{{Manager: "cargo", Name: "starship", Source: "/home/alice/.cargo/bin/starship", NixNames: []string{"starship"}, Decision: model.DecisionCandidate}},
+			Go:    []model.Package{{Manager: "go-install", Name: "gopls", Source: "/home/alice/go/bin/gopls", NixNames: []string{"gopls"}, Decision: model.DecisionCandidate}},
+			Gem:   []model.Package{{Manager: "gem", Name: "bundler", Source: "/home/alice/.gem/ruby/3.3.0/bin/bundler", NixNames: []string{"bundler"}, Decision: model.DecisionCandidate}},
+			VMs:   []model.VersionTool{{Name: "mise", Path: "/home/alice/.local/share/mise"}, {Name: ".tool-versions", Path: "/home/alice/.tool-versions"}},
+		},
 		Items: []model.Item{
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
+			{Kind: "language-project", Name: "package.json", Path: "/home/alice/app/package.json", Decision: model.DecisionCandidate, Reason: "node dependency or package manager file"},
+			{Kind: "language-project", Name: "pyproject.toml", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "python dependency or virtual environment file"},
+			{Kind: "language-project", Name: "excluded", Path: "/home/alice/app/excluded.lock", Decision: model.DecisionExcluded, Reason: "excluded language file"},
 			{Kind: "os-config", Name: "99-device.rules", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate, Reason: "kernel or device tuning"},
 			{Kind: "os-config", Name: "home.nmconnection", Path: "/etc/NetworkManager/system-connections/home.nmconnection", Decision: model.DecisionMigrationNote, Reason: "network connection profile may contain credentials"},
 			{Kind: "os-config", Name: "app", Path: "/etc/nginx/sites-enabled/app", Decision: model.DecisionCandidate, Reason: "web server configuration"},
@@ -187,6 +207,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if strings.Contains(gitSources, "/opt/excluded") {
 		t.Fatalf("git sources report included excluded source:\n%s", gitSources)
 	}
+	languages := readFile(t, out, "reports/languages.md")
+	for _, want := range []string{"# Language ecosystem findings", "Node global packages", "`prettier` via pnpm", "Python environments", "/home/alice/.local/pipx/venvs/ruff", "`ruff` via pipx", "Conda environments", "`data` via conda", "Cargo-installed binaries", "`starship` via cargo", "Go-installed binaries", "`gopls` via go-install", "Ruby gems", "`bundler` via gem", "Version managers", "mise", ".tool-versions", "Project language files", "/home/alice/app/package.json", "/home/alice/app/pyproject.toml"} {
+		if !strings.Contains(languages, want) {
+			t.Fatalf("languages report missing %q:\n%s", want, languages)
+		}
+	}
+	if strings.Contains(languages, "excluded") {
+		t.Fatalf("languages report included excluded entry:\n%s", languages)
+	}
 	fs := readFile(t, out, "modules/filesystem-findings.nix")
 	if !strings.Contains(fs, "/usr/local/bin/tool") {
 		t.Fatalf("filesystem module missing script finding:\n%s", fs)
@@ -232,6 +261,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	reportMD := readFile(t, out, "reports/migration-report.md")
 	if !strings.Contains(reportMD, "## Git sources") || !strings.Contains(reportMD, "/home/alice/app") {
 		t.Fatalf("migration report missing git source section:\n%s", reportMD)
+	}
+	if !strings.Contains(reportMD, "## Language packages") || !strings.Contains(reportMD, "`prettier` via pnpm") || !strings.Contains(reportMD, "version manager `mise`") || !strings.Contains(reportMD, "/home/alice/app/package.json") {
+		t.Fatalf("migration report missing language section:\n%s", reportMD)
 	}
 }
 

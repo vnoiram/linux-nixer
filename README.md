@@ -15,7 +15,7 @@ This is an early implementation scaffold. It includes:
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
-- Richer generated modules and reports for services, containers, filesystem findings, system config, DevOps config, user shell settings, desktop settings, and development projects
+- Richer generated modules and reports for services, containers, language ecosystems, filesystem findings, system config, DevOps config, user shell settings, desktop settings, and development projects
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings
 - Non-interactive review rules for confirming, excluding, or deferring findings
@@ -87,6 +87,7 @@ Generated projects include:
 - `modules/filesystem-findings.nix`
 - `reports/containers.md`
 - `reports/git-sources.md`
+- `reports/languages.md`
 - `reports/migration-report.md`
 - `reports/system-config.md`
 - `reports/devops-config.md`
@@ -98,10 +99,10 @@ Generated projects include:
 
 - apt/dpkg packages and apt sources
 - snap, flatpak, AppImage, and Homebrew on Linux
-- npm global packages and local node module metadata
-- Python venv and pipx environments
-- version managers such as asdf, nvm, pyenv, rbenv, sdkman, conda
-- cargo, gem, and `go install` style user binaries
+- npm/pnpm/yarn global packages and local node package manager metadata
+- Python venv, pipx, pyproject, requirements, Poetry, Pipenv, uv, and Conda environment markers
+- version managers such as asdf, mise, nvm, fnm, volta, pyenv, rbenv, sdkman, and conda
+- cargo, gem, `go install` style user binaries, and Rust/Go/Ruby project manifests
 - Git checkouts under common source locations with remote, commit, branch, dirty, submodule, and build hints
 - Docker/Podman containers, inspect metadata, and compose files
 - systemd, cron, network, firewall, web server, and kernel/device tuning markers

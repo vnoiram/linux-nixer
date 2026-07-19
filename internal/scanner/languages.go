@@ -17,10 +17,13 @@ func (LanguageScanner) Name() string { return "languages" }
 
 func (LanguageScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
 	scanNPM(ctx, opts, report)
+	scanNodeGlobalPackages(opts, report)
 	scanPipx(opts, report)
 	scanVenvs(opts, report)
+	scanCondaEnvs(opts, report)
 	scanVersionManagers(opts, report)
 	scanInstalledBins(opts, report)
+	scanLanguageProjectHints(opts, report)
 	return nil
 }
 
@@ -55,6 +58,44 @@ func scanNPM(ctx context.Context, opts Options, report *model.ScanReport) {
 	}
 }
 
+func scanNodeGlobalPackages(opts Options, report *model.ScanReport) {
+	patterns := []struct {
+		manager string
+		globs   []string
+	}{
+		{
+			manager: "pnpm",
+			globs: []string{
+				"/home/*/.local/share/pnpm/global/*/node_modules/*/package.json",
+				"/home/*/.local/share/pnpm/global/*/.pnpm/*/node_modules/*/package.json",
+			},
+		},
+		{
+			manager: "yarn",
+			globs: []string{
+				"/home/*/.config/yarn/global/node_modules/*/package.json",
+				"/home/*/.yarn/global/node_modules/*/package.json",
+			},
+		},
+	}
+	for _, group := range patterns {
+		for _, pkgJSON := range glob(opts.Root, group.globs...) {
+			name, version, ok := readPackageJSON(pkgJSON)
+			if !ok {
+				continue
+			}
+			report.Languages.NPM = append(report.Languages.NPM, model.Package{
+				Manager:  group.manager,
+				Name:     name,
+				Version:  version,
+				Source:   displayPath(opts.Root, pkgJSON),
+				NixNames: mapping.Candidates("npm", name),
+				Decision: model.DecisionCandidate,
+			})
+		}
+	}
+}
+
 func scanPipx(opts Options, report *model.ScanReport) {
 	for _, meta := range glob(opts.Root, "/home/*/.local/pipx/venvs/*/pipx_metadata.json") {
 		app := filepath.Base(filepath.Dir(meta))
@@ -70,6 +111,22 @@ func scanVenvs(opts Options, report *model.ScanReport) {
 	}
 }
 
+func scanCondaEnvs(opts Options, report *model.ScanReport) {
+	for _, env := range glob(opts.Root, "/home/*/miniconda3/envs/*", "/home/*/anaconda3/envs/*", "/home/*/.conda/envs/*") {
+		if info, err := os.Stat(env); err == nil && info.IsDir() {
+			report.Languages.Conda = append(report.Languages.Conda, model.Package{
+				Manager:  "conda",
+				Name:     filepath.Base(env),
+				Source:   displayPath(opts.Root, env),
+				Decision: model.DecisionMigrationNote,
+			})
+		}
+	}
+	for _, cfg := range glob(opts.Root, "/home/*/.condarc") {
+		addLanguageProjectItem(opts, report, cfg, "conda configuration")
+	}
+}
+
 func scanVersionManagers(opts Options, report *model.ScanReport) {
 	tools := map[string][]string{
 		"asdf":   {"/home/*/.asdf"},
@@ -80,13 +137,23 @@ func scanVersionManagers(opts Options, report *model.ScanReport) {
 		"rbenv":  {"/home/*/.rbenv"},
 		"sdkman": {"/home/*/.sdkman"},
 		"conda":  {"/home/*/miniconda3", "/home/*/anaconda3"},
+		"mise":   {"/home/*/.local/share/mise", "/home/*/.config/mise"},
 	}
 	for name, patterns := range tools {
 		for _, p := range patterns {
 			for _, match := range glob(opts.Root, p) {
-				report.Languages.VMs = append(report.Languages.VMs, model.VersionTool{Name: name, Path: displayPath(opts.Root, match)})
+				addVersionTool(report, name, displayPath(opts.Root, match))
 			}
 		}
+	}
+	for _, marker := range recursiveGlob(opts.Root,
+		"/home/*/.tool-versions",
+		"/home/*/**/.tool-versions",
+		"/home/*/**/.node-version",
+		"/home/*/**/.python-version",
+		"/home/*/**/.ruby-version",
+	) {
+		addVersionTool(report, filepath.Base(marker), displayPath(opts.Root, marker))
 	}
 }
 
@@ -109,6 +176,96 @@ func scanInstalledBins(opts Options, report *model.ScanReport) {
 			report.Languages.Gem = append(report.Languages.Gem, model.Package{Manager: "gem", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("gem", name), Decision: model.DecisionCandidate})
 		}
 	}
+}
+
+func scanLanguageProjectHints(opts Options, report *model.ScanReport) {
+	patterns := []string{
+		"/home/*/**/package.json",
+		"/home/*/**/package-lock.json",
+		"/home/*/**/pnpm-lock.yaml",
+		"/home/*/**/yarn.lock",
+		"/home/*/**/pyproject.toml",
+		"/home/*/**/requirements.txt",
+		"/home/*/**/poetry.lock",
+		"/home/*/**/Pipfile",
+		"/home/*/**/Pipfile.lock",
+		"/home/*/**/uv.lock",
+		"/home/*/**/environment.yml",
+		"/home/*/**/environment.yaml",
+		"/home/*/**/conda-lock.yml",
+		"/home/*/**/Cargo.toml",
+		"/home/*/**/Cargo.lock",
+		"/home/*/**/go.mod",
+		"/home/*/**/go.sum",
+		"/home/*/**/Gemfile",
+		"/home/*/**/Gemfile.lock",
+		"/srv/**/package.json",
+		"/srv/**/pyproject.toml",
+		"/srv/**/requirements.txt",
+		"/srv/**/poetry.lock",
+		"/srv/**/Cargo.toml",
+		"/srv/**/go.mod",
+		"/srv/**/Gemfile",
+	}
+	for _, path := range recursiveGlob(opts.Root, patterns...) {
+		addLanguageProjectItem(opts, report, path, languageProjectReason(filepath.Base(path)))
+	}
+}
+
+func addLanguageProjectItem(opts Options, report *model.ScanReport, path, reason string) {
+	report.Items = append(report.Items, model.Item{
+		Kind:     "language-project",
+		Name:     filepath.Base(path),
+		Path:     displayPath(opts.Root, path),
+		Decision: model.DecisionCandidate,
+		Reason:   reason,
+	})
+}
+
+func addVersionTool(report *model.ScanReport, name, path string) {
+	for _, vm := range report.Languages.VMs {
+		if vm.Name == name && vm.Path == path {
+			return
+		}
+	}
+	report.Languages.VMs = append(report.Languages.VMs, model.VersionTool{Name: name, Path: path})
+}
+
+func languageProjectReason(name string) string {
+	switch name {
+	case "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock":
+		return "node dependency or package manager file"
+	case "pyproject.toml", "requirements.txt", "poetry.lock", "Pipfile", "Pipfile.lock", "uv.lock":
+		return "python dependency or virtual environment file"
+	case "environment.yml", "environment.yaml", "conda-lock.yml":
+		return "conda environment file"
+	case "Cargo.toml", "Cargo.lock":
+		return "rust dependency file"
+	case "go.mod", "go.sum":
+		return "go module file"
+	case "Gemfile", "Gemfile.lock":
+		return "ruby dependency file"
+	default:
+		if strings.HasPrefix(name, "requirements-") && strings.HasSuffix(name, ".txt") {
+			return "python dependency or virtual environment file"
+		}
+		return "language dependency or runtime environment file"
+	}
+}
+
+func readPackageJSON(path string) (string, string, bool) {
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return "", "", false
+	}
+	var pkg struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(text, &pkg) != nil || pkg.Name == "" {
+		return "", "", false
+	}
+	return pkg.Name, pkg.Version, true
 }
 
 func glob(root string, patterns ...string) []string {
