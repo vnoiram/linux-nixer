@@ -563,6 +563,101 @@ func TestDesktopScannerDoesNotRunDconfForMountedRoot(t *testing.T) {
 	}
 }
 
+func TestContainerScannerUsesInspectForRuntimeDetails(t *testing.T) {
+	report := &model.ScanReport{}
+	err := (ContainerScanner{}).Scan(context.Background(), Options{
+		Root: "/",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			command := name + " " + strings.Join(args, " ")
+			switch command {
+			case `docker ps -a --format {{json .}}`:
+				return []byte(`{"Names":"web","Image":"nginx:1.27","Ports":"0.0.0.0:8080->80/tcp"}` + "\n"), nil
+			case "docker inspect web":
+				return []byte(`[{
+					"Config":{"Image":"nginx:1.27","Env":["TOKEN=secret","MODE=prod"]},
+					"RepoDigests":["nginx@sha256:demo"],
+					"Mounts":[{"Type":"bind","Source":"/srv/web","Destination":"/app"}]
+				}]`), nil
+			case `podman ps -a --format {{json .}}`:
+				return []byte(`{"Names":"db","Image":"postgres:16","Ports":""}` + "\n"), nil
+			case "podman inspect db":
+				return []byte(`[{
+					"Config":{"Image":"postgres:16","Env":["POSTGRES_PASSWORD=secret"]},
+					"RepoDigests":["postgres@sha256:demo"],
+					"NetworkSettings":{"Ports":{"5432/tcp":[{"HostIP":"127.0.0.1","HostPort":"5432"}]}},
+					"Mounts":[{"Type":"volume","Source":"pgdata","Destination":"/var/lib/postgresql/data"}]
+				}]`), nil
+			default:
+				return nil, errors.New("unexpected command: " + command)
+			}
+		},
+	}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]model.Container{}
+	for _, container := range report.Containers {
+		seen[container.Runtime+":"+container.Name] = container
+	}
+	web := seen["docker:web"]
+	if web.Image != "nginx:1.27" || web.Digest != "nginx@sha256:demo" || len(web.Mounts) != 1 || web.Mounts[0] != "bind:/srv/web:/app" {
+		t.Fatalf("unexpected docker container: %+v", web)
+	}
+	if _, ok := web.Env["TOKEN"]; !ok {
+		t.Fatalf("docker env keys missing TOKEN: %+v", web.Env)
+	}
+	if web.Env["TOKEN"] != "" {
+		t.Fatalf("docker env value should be redacted: %+v", web.Env)
+	}
+	db := seen["podman:db"]
+	if db.Image != "postgres:16" || db.Digest != "postgres@sha256:demo" || len(db.Ports) != 1 || db.Ports[0] != "127.0.0.1:5432->5432/tcp" {
+		t.Fatalf("unexpected podman container: %+v", db)
+	}
+	if _, ok := db.Env["POSTGRES_PASSWORD"]; !ok || db.Env["POSTGRES_PASSWORD"] != "" {
+		t.Fatalf("podman env key should be present with redacted value: %+v", db.Env)
+	}
+}
+
+func TestContainerScannerMountedRootFindsComposeWithoutRuntimeCommands(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/app/compose.yaml", "services: {}\n")
+	write(t, root, "/home/alice/app/compose.yml", "services: {}\n")
+	write(t, root, "/home/alice/app/docker-compose.yml", "services: {}\n")
+	write(t, root, "/home/alice/app/docker-compose.yaml", "services: {}\n")
+	write(t, root, "/srv/app/docker-compose.yaml", "services: {}\n")
+
+	report := &model.ScanReport{}
+	called := false
+	err := (ContainerScanner{}).Scan(context.Background(), Options{
+		Root: root,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = true
+			return nil, errors.New("runtime command should not run")
+		},
+	}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called {
+		t.Fatal("runtime command should not be called for mounted root")
+	}
+	seen := map[string]bool{}
+	for _, container := range report.Containers {
+		seen[container.Compose] = true
+	}
+	for _, want := range []string{
+		"/home/alice/app/compose.yaml",
+		"/home/alice/app/compose.yml",
+		"/home/alice/app/docker-compose.yml",
+		"/home/alice/app/docker-compose.yaml",
+		"/srv/app/docker-compose.yaml",
+	} {
+		if !seen[want] {
+			t.Fatalf("missing compose %s in %+v", want, report.Containers)
+		}
+	}
+}
+
 func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/var/lib/flatpak/app/org.example.App/current/active/files/bin/app", "")

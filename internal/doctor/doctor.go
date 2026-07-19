@@ -39,6 +39,7 @@ func CheckProjectFiles(project string) []Check {
 		"hosts/generated/configuration.nix",
 		"users/home.nix",
 		"modules/containers.nix",
+		"reports/containers.md",
 		"reports/migration-report.md",
 		"reports/system-config.md",
 		"reports/devops-config.md",

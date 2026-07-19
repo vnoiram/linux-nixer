@@ -81,7 +81,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		},
 		Containers: []model.Container{
 			{Runtime: "compose", Compose: "/srv/app/compose.yml", Decision: model.DecisionCandidate},
-			{Runtime: "podman", Name: "db", Image: "postgres:16", Decision: model.DecisionConfirmed},
+			{Runtime: "podman", Name: "db", Image: "postgres:16", Digest: "postgres@sha256:demo", Ports: []string{"127.0.0.1:5432->5432/tcp"}, Mounts: []string{"volume:pgdata:/var/lib/postgresql/data"}, Env: map[string]string{"POSTGRES_PASSWORD": ""}, Decision: model.DecisionConfirmed},
+			{Runtime: "docker", Name: "excluded", Image: "redis:7", Env: map[string]string{"REDIS_PASSWORD": "secret"}, Decision: model.DecisionExcluded},
 		},
 		Items: []model.Item{
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
@@ -163,6 +164,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if !strings.Contains(containers, "/srv/app/compose.yml") || !strings.Contains(containers, "postgres:16") {
 		t.Fatalf("containers module missing TODOs:\n%s", containers)
+	}
+	containerReport := readFile(t, out, "reports/containers.md")
+	for _, want := range []string{"Runtime containers", "podman container `db` image `postgres:16`", "postgres@sha256:demo", "127.0.0.1:5432->5432/tcp", "volume:pgdata:/var/lib/postgresql/data", "POSTGRES_PASSWORD", "Compose files", "/srv/app/compose.yml"} {
+		if !strings.Contains(containerReport, want) {
+			t.Fatalf("container report missing %q:\n%s", want, containerReport)
+		}
+	}
+	if strings.Contains(containerReport, "secret") || strings.Contains(containerReport, "redis:7") {
+		t.Fatalf("container report leaked env value or excluded container:\n%s", containerReport)
 	}
 	fs := readFile(t, out, "modules/filesystem-findings.nix")
 	if !strings.Contains(fs, "/usr/local/bin/tool") {

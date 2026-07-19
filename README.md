@@ -85,6 +85,7 @@ Generated projects include:
 - `modules/containers.nix`
 - `modules/services.nix`
 - `modules/filesystem-findings.nix`
+- `reports/containers.md`
 - `reports/migration-report.md`
 - `reports/system-config.md`
 - `reports/devops-config.md`
@@ -101,7 +102,7 @@ Generated projects include:
 - version managers such as asdf, nvm, pyenv, rbenv, sdkman, conda
 - cargo, gem, and `go install` style user binaries
 - Git checkouts under common source locations
-- Docker/Podman containers and compose files
+- Docker/Podman containers, inspect metadata, and compose files
 - systemd, cron, network, firewall, web server, and kernel/device tuning markers
 - DevOps config markers such as Kubernetes, Docker client config, Helm, Terraform, AWS, GCP, and Azure
 - shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh, gpg, tmux, starship, shell plugin trees, and `.local/bin` executables

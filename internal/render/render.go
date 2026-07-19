@@ -38,6 +38,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/containers.nix":            renderTemplate(containersTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
 		"modules/services.nix":              renderServicesModule(report),
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
+		"reports/containers.md":             renderContainersReport(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
@@ -408,6 +409,40 @@ func renderDevProjectsReport(report model.ScanReport) string {
 	return b.String()
 }
 
+func renderContainersReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Container findings\n\n")
+	runtimeContainers := runtimeContainers(report)
+	if len(runtimeContainers) > 0 {
+		b.WriteString("## Runtime containers\n\n")
+		for _, container := range runtimeContainers {
+			b.WriteString(fmt.Sprintf("- %s [%s]\n", containerSummary(container), printableDecision(container.Decision)))
+			if container.Digest != "" {
+				b.WriteString(fmt.Sprintf("  - digest: `%s`\n", container.Digest))
+			}
+			if len(container.Ports) > 0 {
+				b.WriteString(fmt.Sprintf("  - ports: %s\n", strings.Join(container.Ports, ", ")))
+			}
+			if len(container.Mounts) > 0 {
+				b.WriteString(fmt.Sprintf("  - mounts: %s\n", strings.Join(container.Mounts, ", ")))
+			}
+			if len(container.Env) > 0 {
+				b.WriteString(fmt.Sprintf("  - env keys: %s\n", strings.Join(envKeys(container.Env), ", ")))
+			}
+		}
+		b.WriteString("\n")
+	}
+	composeFiles := composeContainers(report)
+	if len(composeFiles) > 0 {
+		b.WriteString("## Compose files\n\n")
+		for _, container := range composeFiles {
+			b.WriteString(fmt.Sprintf("- `%s` [%s]\n", container.Compose, printableDecision(container.Decision)))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func renderSystemConfigReport(report model.ScanReport) string {
 	var b strings.Builder
 	b.WriteString("# System configuration findings\n\n")
@@ -655,6 +690,46 @@ func systemServices(report model.ScanReport) []model.Service {
 	}
 	sort.Slice(services, func(i, j int) bool { return services[i].Path < services[j].Path })
 	return services
+}
+
+func runtimeContainers(report model.ScanReport) []model.Container {
+	var containers []model.Container
+	for _, container := range report.Containers {
+		if reportDecision(container.Decision) && container.Runtime != "compose" {
+			containers = append(containers, container)
+		}
+	}
+	sort.Slice(containers, func(i, j int) bool {
+		return containerSortKey(containers[i]) < containerSortKey(containers[j])
+	})
+	return containers
+}
+
+func composeContainers(report model.ScanReport) []model.Container {
+	var containers []model.Container
+	for _, container := range report.Containers {
+		if reportDecision(container.Decision) && container.Runtime == "compose" {
+			containers = append(containers, container)
+		}
+	}
+	sort.Slice(containers, func(i, j int) bool { return containers[i].Compose < containers[j].Compose })
+	return containers
+}
+
+func containerSortKey(container model.Container) string {
+	if container.Name != "" {
+		return container.Runtime + ":" + container.Name
+	}
+	return container.Runtime + ":" + container.Image
+}
+
+func envKeys(env map[string]string) []string {
+	var keys []string
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func devOpsConfigItems(report model.ScanReport) []model.Item {
