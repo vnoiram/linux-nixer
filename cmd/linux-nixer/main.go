@@ -21,13 +21,13 @@ import (
 const version = "0.1.0-dev"
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		usage(stdout)
 		return nil
@@ -36,7 +36,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "scan":
 		return runScan(ctx, args[1:], stdout)
 	case "review":
-		return runReview(args[1:], stdout)
+		return runReview(args[1:], stdin, stdout)
 	case "generate":
 		return runGenerate(args[1:], stdout)
 	case "doctor":
@@ -59,7 +59,7 @@ func usage(w io.Writer) {
 
 Usage:
   linux-nixer scan --out scan.json [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
-  linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--confirm-kind KIND] [--exclude-kind KIND]
+  linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer generate --scan reviewed.json --out ./nix-config
   linux-nixer doctor --project ./nix-config [--vm] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
@@ -99,12 +99,13 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	return writeJSON(*out, report)
 }
 
-func runReview(args []string, stdout io.Writer) error {
+func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("review", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input scan JSON")
 	out := fs.String("out", "", "output reviewed JSON")
 	autoSafe := fs.Bool("auto-safe", false, "confirm high-confidence safe findings")
+	interactive := fs.Bool("interactive", false, "review findings interactively")
 	var confirmKinds multiFlag
 	var excludeKinds multiFlag
 	var todoKinds multiFlag
@@ -127,7 +128,7 @@ func runReview(args []string, stdout io.Writer) error {
 	if err := readJSON(*scanPath, &report); err != nil {
 		return err
 	}
-	report = review.Apply(report, review.Options{
+	opts := review.Options{
 		AutoSafe:            *autoSafe,
 		ConfirmKinds:        confirmKinds,
 		ExcludeKinds:        excludeKinds,
@@ -135,7 +136,12 @@ func runReview(args []string, stdout io.Writer) error {
 		MigrationNoteKinds:  noteKinds,
 		ConfirmManagers:     confirmManagers,
 		ExcludePathPrefixes: excludePaths,
-	})
+	}
+	if *interactive {
+		report = review.Interactive(stdin, stdout, report, opts)
+	} else {
+		report = review.Apply(report, opts)
+	}
 	return writeJSON(*out, &report)
 }
 

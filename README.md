@@ -15,6 +15,7 @@ This is an early implementation scaffold. It includes:
 - Nix flake project rendering
 - Richer generated modules for services, containers, filesystem findings, and development project reports
 - Non-interactive review rules for confirming, excluding, or deferring findings
+- Interactive review mode using only the Go standard library
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
@@ -49,10 +50,13 @@ bin/linux-nixer review \
   --scan scan.json \
   --out reviewed.json \
   --auto-safe \
+  --interactive \
   --confirm-manager apt \
   --confirm-kind service \
   --exclude-path /home/alice/Downloads
 ```
+
+Interactive review accepts `c` confirmed, `k` candidate, `t` todo, `m` migration-note, `x` excluded, `s` skip, and `q` quit. Secret-like and stateful findings cannot be confirmed interactively; they remain migration notes unless excluded.
 
 VM validation builds the generated NixOS VM derivation when Nix is available:
 
