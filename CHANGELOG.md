@@ -13,6 +13,8 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Scanners for apt, language tools, Git sources, containers, common configuration, and filesystem findings.
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux.
 - NixOS + Home Manager flake rendering.
+- Richer generated modules for service, container, and filesystem findings.
+- Development project report generation.
 - Baseline manifest creation.
 - Non-interactive review decisions for packages, findings, paths, and managers.
 - VM build validation through `doctor --vm`.

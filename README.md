@@ -13,6 +13,7 @@ This is an early implementation scaffold. It includes:
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
+- Richer generated modules for services, containers, filesystem findings, and development project reports
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - `doctor --vm` support for building the generated NixOS VM derivation
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
@@ -58,6 +59,17 @@ VM validation builds the generated NixOS VM derivation when Nix is available:
 ```sh
 bin/linux-nixer doctor --project nix-config --vm --host generated
 ```
+
+Generated projects include:
+
+- `flake.nix`
+- `hosts/generated/configuration.nix`
+- `users/home.nix`
+- `modules/containers.nix`
+- `modules/services.nix`
+- `modules/filesystem-findings.nix`
+- `reports/migration-report.md`
+- `reports/dev-projects.md`
 
 ## Scanner domains
 
