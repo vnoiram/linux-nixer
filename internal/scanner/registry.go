@@ -45,13 +45,14 @@ func DefaultRegistry() Registry {
 		LanguageScanner{},
 		GitScanner{},
 		ContainerScanner{},
+		StatefulDataScanner{},
+		BackupConfigScanner{},
 		SystemConfigScanner{},
 		DevOpsConfigScanner{},
 		ProjectConfigScanner{},
 		UserConfigScanner{},
 		DesktopScanner{},
 		SecretScanner{},
-		StatefulDataScanner{},
 		FilesystemDiffScanner{},
 	)
 }

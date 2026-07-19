@@ -157,6 +157,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "devops-config", Name: "excluded", Path: "/home/alice/.kube/excluded", Decision: model.DecisionExcluded, Reason: "kubernetes configuration may contain credentials"},
 			{Kind: "cicd-config", Name: "ci.yml", Path: "/home/alice/app/.github/workflows/ci.yml", Decision: model.DecisionCandidate, Reason: "github actions workflow", Details: map[string]string{"jobs": "1", "secret-refs": "1", "triggers": "push,workflow_dispatch"}},
 			{Kind: "cicd-config", Name: "deploy-prod.sh", Path: "/srv/app/scripts/deploy-prod.sh", Decision: model.DecisionCandidate, Reason: "deploy or release script", Details: map[string]string{"shebang": "/bin/sh", "targets": "deploy,release"}},
+			{Kind: "backup-config", Name: "rclone", Path: "/home/alice/.config/rclone/rclone.conf", Decision: model.DecisionMigrationNote, Reason: "rclone backup or sync configuration", Details: map[string]string{"tool": "rclone", "remote-types": "s3", "secret-refs": "2"}},
+			{Kind: "backup-config", Name: "restic", Path: "/etc/systemd/system/restic-backup.service", Decision: model.DecisionMigrationNote, Reason: "backup or sync job", Details: map[string]string{"tools": "restic", "schedule": "OnCalendar=daily"}},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionCandidate, Reason: "shell or login environment configuration"},
 			{Kind: "shell-plugin", Name: ".oh-my-zsh", Path: "/home/alice/.oh-my-zsh", Decision: model.DecisionCandidate, Reason: "shell plugin manager or plugin tree"},
@@ -224,6 +226,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if strings.Contains(devopsConfig, "super-secret") || strings.Contains(devopsConfig, "excluded") {
 		t.Fatalf("devops config report leaked raw secret or excluded entry:\n%s", devopsConfig)
+	}
+	backupSync := readFile(t, out, "reports/backup-sync.md")
+	for _, want := range []string{"# Backup and sync findings", "Rclone", "/home/alice/.config/rclone/rclone.conf", "remote-types `s3`", "secret-refs `2`", "Restic", "/etc/systemd/system/restic-backup.service", "schedule `OnCalendar=daily`"} {
+		if !strings.Contains(backupSync, want) {
+			t.Fatalf("backup sync report missing %q:\n%s", want, backupSync)
+		}
+	}
+	if strings.Contains(backupSync, "super-secret") || strings.Contains(backupSync, "raw-secret") {
+		t.Fatalf("backup sync report leaked raw secret:\n%s", backupSync)
 	}
 	usersReport := readFile(t, out, "reports/users.md")
 	for _, want := range []string{"# User account findings", "Primary Home Manager user: `alice`", "Human users", "`alice` uid `1000`", "groups `alice, docker, sudo, video`", "Privileged and group-sensitive users", "System users", "`daemon` uid `1`", "`root` uid `0`"} {
@@ -317,6 +328,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",
 		"Back up stateful data `/var/lib/postgresql` (postgresql data directory)",
 		"Back up stateful data `/var/lib/redis` (redis data directory)",
+		"Review backup/sync configuration `/home/alice/.config/rclone/rclone.conf`",
+		"Review remote-types `s3`, secret-refs `2`, tool `rclone`",
 		"Confirm user `alice` home `/home/alice`",
 		"Back up or sync browser profile `/home/alice/.mozilla/firefox/alice.default-release` manually",
 		"Review browser extension marker `/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi`",
@@ -326,7 +339,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			t.Fatalf("migration checklist missing %q:\n%s", want, checklist)
 		}
 	}
-	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret", "raw-cookie-secret", "raw-history", "psk", "hidden"} {
+	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret", "raw-cookie-secret", "raw-history", "psk", "hidden", "raw-secret"} {
 		if strings.Contains(checklist, unwanted) {
 			t.Fatalf("migration checklist included unwanted %q:\n%s", unwanted, checklist)
 		}

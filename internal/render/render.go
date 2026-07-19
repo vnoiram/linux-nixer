@@ -46,6 +46,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/languages.md":              renderLanguagesReport(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
+		"reports/backup-sync.md":            renderBackupSyncReport(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
 		"reports/user-config.md":            renderUserConfigReport(report),
 		"reports/desktop.md":                renderDesktopReport(report),
@@ -463,6 +464,7 @@ func renderMigrationChecklist(report model.ScanReport) string {
 	writeFilesystemChecklist(&b, report)
 	writeSecretChecklist(&b, report)
 	writeStatefulChecklist(&b, report)
+	writeBackupSyncChecklist(&b, report)
 	writeUserDesktopChecklist(&b, report)
 	return b.String()
 }
@@ -689,6 +691,25 @@ func writeStatefulChecklist(b *strings.Builder, report model.ScanReport) {
 		items = append(items, fmt.Sprintf("Back up stateful data `%s`%s and define a restore procedure before switching systems.", finding.Path, reason))
 	}
 	writeChecklistSection(b, "Stateful data", items)
+}
+
+func writeBackupSyncChecklist(b *strings.Builder, report model.ScanReport) {
+	var items []string
+	for _, item := range backupConfigItems(report) {
+		if !manualDecision(item.Decision) {
+			continue
+		}
+		action := fmt.Sprintf("Review backup/sync configuration `%s` and verify restore credentials, schedules, and covered stateful data before switching systems.", item.Path)
+		details := itemDetails(item)
+		if len(details) > 0 {
+			if len(details) > 4 {
+				details = details[:4]
+			}
+			action += " Review " + strings.Join(details, ", ") + "."
+		}
+		items = append(items, action)
+	}
+	writeChecklistSection(b, "Backup and sync", items)
 }
 
 func writeUserDesktopChecklist(b *strings.Builder, report model.ScanReport) {
@@ -1214,6 +1235,51 @@ func renderDevOpsConfigReport(report model.ScanReport) string {
 	written := map[string]bool{}
 	for _, section := range sections {
 		items := devOpsConfigItemsByMatch(report, section.match, written)
+		if len(items) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, item := range items {
+			b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+			if item.Reason != "" {
+				b.WriteString(": ")
+				b.WriteString(item.Reason)
+			}
+			b.WriteString("\n")
+			for _, detail := range itemDetails(item) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
+			written[item.Path] = true
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderBackupSyncReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Backup and sync findings\n\n")
+	sections := []struct {
+		title string
+		match func(model.Item) bool
+	}{
+		{"Restic", func(item model.Item) bool { return backupItemToolMatch(item, "restic") }},
+		{"Borg", func(item model.Item) bool { return backupItemToolMatch(item, "borg") }},
+		{"Kopia", func(item model.Item) bool { return backupItemToolMatch(item, "kopia") }},
+		{"Rclone", func(item model.Item) bool { return backupItemToolMatch(item, "rclone") }},
+		{"Rsync", func(item model.Item) bool { return backupItemToolMatch(item, "rsync") }},
+		{"Syncthing", func(item model.Item) bool { return backupItemToolMatch(item, "syncthing") }},
+		{"Timeshift", func(item model.Item) bool { return backupItemToolMatch(item, "timeshift") }},
+		{"Duplicati", func(item model.Item) bool { return backupItemToolMatch(item, "duplicati") }},
+		{"Other", func(item model.Item) bool { return item.Kind == "backup-config" }},
+	}
+	written := map[string]bool{}
+	for _, section := range sections {
+		items := backupConfigItemsByMatch(report, section.match, written)
 		if len(items) == 0 {
 			continue
 		}
@@ -1846,6 +1912,35 @@ func devOpsConfigItemsByMatch(report model.ScanReport, match func(model.Item) bo
 		}
 	}
 	return items
+}
+
+func backupConfigItems(report model.ScanReport) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && item.Kind == "backup-config" {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
+}
+
+func backupConfigItemsByMatch(report model.ScanReport, match func(model.Item) bool, written map[string]bool) []model.Item {
+	var items []model.Item
+	for _, item := range backupConfigItems(report) {
+		if !written[item.Path] && match(item) {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func backupItemToolMatch(item model.Item, tool string) bool {
+	return strings.Contains(item.Path, tool) ||
+		strings.Contains(item.Name, tool) ||
+		strings.Contains(item.Reason, tool) ||
+		strings.Contains(item.Details["tool"], tool) ||
+		strings.Contains(item.Details["tools"], tool)
 }
 
 func userConfigItems(report model.ScanReport) []model.Item {

@@ -661,7 +661,7 @@ func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 		names[scanner.Name()] = true
 		order[scanner.Name()] = i
 	}
-	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "secrets", "stateful-data"} {
+	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "secrets", "stateful-data", "backup-config"} {
 		if !names[want] {
 			t.Fatalf("default registry missing %q in %+v", want, names)
 		}
@@ -672,8 +672,61 @@ func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 	if order["stateful-data"] >= order["filesystem-diff"] {
 		t.Fatalf("stateful scanner should run before filesystem-diff: %+v", order)
 	}
+	if order["backup-config"] >= order["filesystem-diff"] || order["stateful-data"] >= order["backup-config"] {
+		t.Fatalf("backup scanner should run after stateful data and before filesystem-diff: %+v", order)
+	}
 	if names["config"] {
 		t.Fatalf("default registry should not include legacy config scanner: %+v", names)
+	}
+}
+
+func TestBackupConfigScannerFindsBackupAndSyncConfigs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/.config/rclone/rclone.conf", "[remote]\ntype = s3\naccess_key_id = AKIASECRET\nsecret_access_key = raw-secret\n")
+	write(t, root, "/home/alice/.config/syncthing/config.xml", "<configuration><folder id=\"docs\"></folder><device id=\"abc\"></device></configuration>\n")
+	write(t, root, "/etc/restic.env", "RESTIC_REPOSITORY=s3:sensitive\nRESTIC_PASSWORD=raw-secret\n")
+	write(t, root, "/etc/systemd/system/restic-backup.service", "[Service]\nExecStart=/usr/bin/restic backup /srv --password-file /etc/restic-password\n")
+	write(t, root, "/etc/systemd/system/restic-backup.timer", "[Timer]\nOnCalendar=daily\n")
+	write(t, root, "/etc/cron.d/rclone-sync", "15 3 * * * root rclone sync /srv remote:backup --token raw-secret\n")
+
+	report := &model.ScanReport{}
+	if err := (BackupConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]model.Item{}
+	for _, item := range report.Items {
+		seen[item.Path] = item
+	}
+	rclone := seen["/home/alice/.config/rclone/rclone.conf"]
+	if rclone.Kind != "backup-config" || rclone.Decision != model.DecisionMigrationNote || rclone.Details["tool"] != "rclone" || rclone.Details["remote-types"] != "s3" || rclone.Details["secret-refs"] != "2" {
+		t.Fatalf("rclone details missing: %+v", rclone)
+	}
+	syncthing := seen["/home/alice/.config/syncthing/config.xml"]
+	if syncthing.Details["tool"] != "syncthing" || syncthing.Details["folders"] != "1" || syncthing.Details["devices"] != "1" {
+		t.Fatalf("syncthing details missing: %+v", syncthing)
+	}
+	restic := seen["/etc/restic.env"]
+	if restic.Details["tool"] != "restic" || restic.Details["repositories"] != "1" || restic.Details["secret-refs"] != "1" {
+		t.Fatalf("restic config details unsafe or missing: %+v", restic)
+	}
+	job := seen["/etc/systemd/system/restic-backup.service"]
+	if job.Reason != "backup or sync job" || job.Details["tools"] != "restic" || job.Details["secret-refs"] != "1" {
+		t.Fatalf("systemd backup job details missing: %+v", job)
+	}
+	timer := seen["/etc/systemd/system/restic-backup.timer"]
+	if timer.Details["tools"] != "restic" || timer.Details["schedule"] != "OnCalendar=daily" {
+		t.Fatalf("systemd backup timer details missing: %+v", timer)
+	}
+	cron := seen["/etc/cron.d/rclone-sync"]
+	if cron.Details["tools"] != "rclone" || cron.Details["schedule"] != "15 3 * * *" || cron.Details["secret-refs"] != "1" {
+		t.Fatalf("cron backup job details missing: %+v", cron)
+	}
+	for _, item := range report.Items {
+		for _, value := range item.Details {
+			if strings.Contains(value, "raw-secret") || strings.Contains(value, "AKIASECRET") {
+				t.Fatalf("backup details leaked secret in %+v", item)
+			}
+		}
 	}
 }
 
