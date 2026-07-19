@@ -39,6 +39,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/services.nix":              renderServicesModule(report),
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
 		"reports/containers.md":             renderContainersReport(report),
+		"reports/git-sources.md":            renderGitSourcesReport(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
@@ -264,6 +265,20 @@ func renderReport(report model.ScanReport) string {
 			b.WriteString(fmt.Sprintf(" [%s]\n", printableDecision(container.Decision)))
 		}
 	}
+	b.WriteString("\n## Git sources\n\n")
+	for _, source := range gitSources(report) {
+		b.WriteString(fmt.Sprintf("- `%s`", source.Path))
+		if source.Remote != "" {
+			b.WriteString(fmt.Sprintf(" remote `%s`", source.Remote))
+		}
+		if source.Commit != "" {
+			b.WriteString(fmt.Sprintf(" commit `%s`", source.Commit))
+		}
+		if source.Dirty {
+			b.WriteString(" dirty")
+		}
+		b.WriteString(fmt.Sprintf(" [%s]\n", printableDecision(source.Decision)))
+	}
 	b.WriteString("\n## Desktop\n\n")
 	if report.Desktop.Environment != "" {
 		b.WriteString(fmt.Sprintf("- Environment: %s\n", report.Desktop.Environment))
@@ -439,6 +454,27 @@ func renderContainersReport(report model.ScanReport) string {
 			b.WriteString(fmt.Sprintf("- `%s` [%s]\n", container.Compose, printableDecision(container.Decision)))
 		}
 		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderGitSourcesReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Git source findings\n\n")
+	for _, source := range gitSources(report) {
+		b.WriteString(fmt.Sprintf("- `%s` [%s]\n", source.Path, printableDecision(source.Decision)))
+		if source.Remote != "" {
+			b.WriteString(fmt.Sprintf("  - remote: `%s`\n", source.Remote))
+		}
+		if source.Commit != "" {
+			b.WriteString(fmt.Sprintf("  - commit: `%s`\n", source.Commit))
+		}
+		if source.Dirty {
+			b.WriteString("  - dirty: true\n")
+		}
+		if len(source.Build) > 0 {
+			b.WriteString(fmt.Sprintf("  - build hints: %s\n", strings.Join(source.Build, ", ")))
+		}
 	}
 	return b.String()
 }
@@ -714,6 +750,17 @@ func composeContainers(report model.ScanReport) []model.Container {
 	}
 	sort.Slice(containers, func(i, j int) bool { return containers[i].Compose < containers[j].Compose })
 	return containers
+}
+
+func gitSources(report model.ScanReport) []model.GitSource {
+	var sources []model.GitSource
+	for _, source := range report.GitSources {
+		if reportDecision(source.Decision) {
+			sources = append(sources, source)
+		}
+	}
+	sort.Slice(sources, func(i, j int) bool { return sources[i].Path < sources[j].Path })
+	return sources
 }
 
 func containerSortKey(container model.Container) string {

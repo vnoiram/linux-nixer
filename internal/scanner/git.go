@@ -40,7 +40,8 @@ func (GitScanner) Scan(ctx context.Context, opts Options, report *model.ScanRepo
 
 func inspectGitSource(root, path string) model.GitSource {
 	source := model.GitSource{Path: displayPath(root, path), Decision: model.DecisionCandidate}
-	if config, err := os.ReadFile(filepath.Join(path, ".git", "config")); err == nil {
+	gitDir := filepath.Join(path, ".git")
+	if config, err := os.ReadFile(filepath.Join(gitDir, "config")); err == nil {
 		for _, line := range strings.Split(string(config), "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "url =") {
@@ -49,10 +50,14 @@ func inspectGitSource(root, path string) model.GitSource {
 			}
 		}
 	}
-	if head, err := os.ReadFile(filepath.Join(path, ".git", "HEAD")); err == nil {
+	if head, err := os.ReadFile(filepath.Join(gitDir, "HEAD")); err == nil {
 		ref := strings.TrimSpace(string(head))
 		if strings.HasPrefix(ref, "ref: ") {
-			refPath := filepath.Join(path, ".git", strings.TrimPrefix(ref, "ref: "))
+			refName := strings.TrimPrefix(ref, "ref: ")
+			if strings.HasPrefix(refName, "refs/heads/") {
+				source.Build = appendUnique(source.Build, "branch:"+strings.TrimPrefix(refName, "refs/heads/"))
+			}
+			refPath := filepath.Join(gitDir, refName)
 			if commit, err := os.ReadFile(refPath); err == nil {
 				source.Commit = strings.TrimSpace(string(commit))
 			}
@@ -60,10 +65,54 @@ func inspectGitSource(root, path string) model.GitSource {
 			source.Commit = ref
 		}
 	}
-	for _, hint := range []string{"flake.nix", "default.nix", "package.nix", "Makefile", "go.mod", "package.json", "pyproject.toml", "Cargo.toml"} {
+	if _, err := os.Stat(filepath.Join(path, ".gitmodules")); err == nil {
+		source.Build = appendUnique(source.Build, "submodules")
+	}
+	for _, hint := range []string{
+		"flake.nix",
+		"default.nix",
+		"shell.nix",
+		"package.nix",
+		"Makefile",
+		"justfile",
+		"Taskfile.yml",
+		"go.mod",
+		"package.json",
+		"pyproject.toml",
+		"Cargo.toml",
+		"docker-compose.yml",
+		"compose.yaml",
+	} {
 		if _, err := os.Stat(filepath.Join(path, hint)); err == nil {
-			source.Build = append(source.Build, hint)
+			source.Build = appendUnique(source.Build, hint)
 		}
 	}
+	source.Dirty = hasGitDirtyMarker(gitDir)
 	return source
+}
+
+func hasGitDirtyMarker(gitDir string) bool {
+	for _, marker := range []string{
+		"index.lock",
+		"MERGE_HEAD",
+		"CHERRY_PICK_HEAD",
+		"REVERT_HEAD",
+		"BISECT_LOG",
+		"rebase-merge",
+		"rebase-apply",
+	} {
+		if _, err := os.Stat(filepath.Join(gitDir, marker)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }

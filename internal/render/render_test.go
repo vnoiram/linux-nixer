@@ -84,6 +84,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Runtime: "podman", Name: "db", Image: "postgres:16", Digest: "postgres@sha256:demo", Ports: []string{"127.0.0.1:5432->5432/tcp"}, Mounts: []string{"volume:pgdata:/var/lib/postgresql/data"}, Env: map[string]string{"POSTGRES_PASSWORD": ""}, Decision: model.DecisionConfirmed},
 			{Runtime: "docker", Name: "excluded", Image: "redis:7", Env: map[string]string{"REDIS_PASSWORD": "secret"}, Decision: model.DecisionExcluded},
 		},
+		GitSources: []model.GitSource{
+			{Path: "/home/alice/app", Remote: "https://example.com/app.git", Commit: "abc123", Dirty: true, Build: []string{"branch:main", "submodules", "flake.nix"}, Decision: model.DecisionCandidate},
+			{Path: "/opt/excluded", Remote: "https://example.com/excluded.git", Commit: "def456", Decision: model.DecisionExcluded},
+		},
 		Items: []model.Item{
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
 			{Kind: "os-config", Name: "99-device.rules", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate, Reason: "kernel or device tuning"},
@@ -174,6 +178,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if strings.Contains(containerReport, "secret") || strings.Contains(containerReport, "redis:7") {
 		t.Fatalf("container report leaked env value or excluded container:\n%s", containerReport)
 	}
+	gitSources := readFile(t, out, "reports/git-sources.md")
+	for _, want := range []string{"# Git source findings", "/home/alice/app", "https://example.com/app.git", "abc123", "dirty: true", "branch:main, submodules, flake.nix"} {
+		if !strings.Contains(gitSources, want) {
+			t.Fatalf("git sources report missing %q:\n%s", want, gitSources)
+		}
+	}
+	if strings.Contains(gitSources, "/opt/excluded") {
+		t.Fatalf("git sources report included excluded source:\n%s", gitSources)
+	}
 	fs := readFile(t, out, "modules/filesystem-findings.nix")
 	if !strings.Contains(fs, "/usr/local/bin/tool") {
 		t.Fatalf("filesystem module missing script finding:\n%s", fs)
@@ -215,6 +228,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	cfg = readFile(t, out, "hosts/generated/configuration.nix")
 	if strings.Contains(cfg, "color-scheme") {
 		t.Fatalf("configuration should not render raw dconf dump:\n%s", cfg)
+	}
+	reportMD := readFile(t, out, "reports/migration-report.md")
+	if !strings.Contains(reportMD, "## Git sources") || !strings.Contains(reportMD, "/home/alice/app") {
+		t.Fatalf("migration report missing git source section:\n%s", reportMD)
 	}
 }
 

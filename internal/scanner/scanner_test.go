@@ -303,6 +303,59 @@ func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 	}
 }
 
+func TestGitScannerFindsSourceMetadataAndHints(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/app/.git/config", "[remote \"origin\"]\n  url = https://example.com/app.git\n")
+	write(t, root, "/home/alice/app/.git/HEAD", "ref: refs/heads/main\n")
+	write(t, root, "/home/alice/app/.git/refs/heads/main", "abc123\n")
+	write(t, root, "/home/alice/app/.gitmodules", "[submodule \"lib\"]\n")
+	write(t, root, "/home/alice/app/flake.nix", "{}")
+	write(t, root, "/home/alice/app/shell.nix", "{}")
+	write(t, root, "/home/alice/app/justfile", "build:\n")
+	write(t, root, "/home/alice/app/Taskfile.yml", "version: '3'\n")
+	write(t, root, "/home/alice/app/docker-compose.yml", "services: {}\n")
+	write(t, root, "/home/alice/app/compose.yaml", "services: {}\n")
+	write(t, root, "/home/alice/app/.git/MERGE_HEAD", "def456\n")
+
+	write(t, root, "/opt/tool/.git/config", "[remote \"origin\"]\n  url = git@example.com:tool.git\n")
+	write(t, root, "/opt/tool/.git/HEAD", "deadbeef\n")
+	write(t, root, "/opt/tool/Makefile", "all:\n")
+
+	write(t, root, "/custom/source/.git/config", "[remote \"origin\"]\n  url = https://example.com/custom.git\n")
+	write(t, root, "/custom/source/.git/HEAD", "ref: refs/heads/dev\n")
+	write(t, root, "/custom/source/.git/refs/heads/dev", "feedface\n")
+	write(t, root, "/custom/source/package.json", "{}")
+
+	report := &model.ScanReport{}
+	if err := (GitScanner{}).Scan(context.Background(), Options{Root: root, Includes: []string{"/custom"}}, report); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]model.GitSource{}
+	for _, source := range report.GitSources {
+		seen[source.Path] = source
+	}
+	app := seen["/home/alice/app"]
+	if app.Remote != "https://example.com/app.git" || app.Commit != "abc123" || !app.Dirty {
+		t.Fatalf("unexpected app git source: %+v", app)
+	}
+	for _, want := range []string{"branch:main", "submodules", "flake.nix", "shell.nix", "justfile", "Taskfile.yml", "docker-compose.yml", "compose.yaml"} {
+		if !contains(app.Build, want) {
+			t.Fatalf("app missing build hint %q in %+v", want, app.Build)
+		}
+	}
+	tool := seen["/opt/tool"]
+	if tool.Remote != "git@example.com:tool.git" || tool.Commit != "deadbeef" || tool.Dirty {
+		t.Fatalf("unexpected tool git source: %+v", tool)
+	}
+	if !contains(tool.Build, "Makefile") {
+		t.Fatalf("tool missing Makefile hint: %+v", tool.Build)
+	}
+	custom := seen["/custom/source"]
+	if custom.Remote != "https://example.com/custom.git" || custom.Commit != "feedface" || !contains(custom.Build, "branch:dev") || !contains(custom.Build, "package.json") {
+		t.Fatalf("unexpected custom git source: %+v", custom)
+	}
+}
+
 func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/etc/fstab", "UUID=demo / ext4 defaults 0 1\n")
@@ -716,6 +769,15 @@ func assertPkgMapping(t *testing.T, packages []model.Package, name, want string)
 		}
 	}
 	t.Fatalf("package %s missing from %+v", name, packages)
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func write(t *testing.T, root, path, content string) {
