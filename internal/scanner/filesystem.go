@@ -53,7 +53,7 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 				return nil
 			}
 			if finding.Category != "" {
-				report.FilesystemDiff = append(report.FilesystemDiff, finding)
+				appendFileFindingUnique(report, finding)
 			}
 			return nil
 		})
@@ -251,5 +251,32 @@ func looksSecret(path string, head []byte) bool {
 		}
 	}
 	text := strings.ToLower(string(head))
-	return strings.Contains(text, "private key") || strings.Contains(text, "access_token") || strings.Contains(text, "secret_access_key")
+	for _, marker := range []string{
+		"private key",
+		"access_token",
+		"refresh_token",
+		"secret_access_key",
+		"aws_secret_access_key",
+		"api_token",
+		"api_key",
+		"client_secret",
+		"password=",
+		"token:",
+		"auth:",
+		"psk=",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func appendFileFindingUnique(report *model.ScanReport, finding model.FileFinding) {
+	for _, existing := range report.FilesystemDiff {
+		if existing.Path == finding.Path && existing.Category == finding.Category {
+			return
+		}
+	}
+	report.FilesystemDiff = append(report.FilesystemDiff, finding)
 }

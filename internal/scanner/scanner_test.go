@@ -318,6 +318,101 @@ func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
 	}
 }
 
+func TestSecretScannerFindsCommonCredentialLocations(t *testing.T) {
+	root := t.TempDir()
+	writeMode(t, root, "/home/alice/.ssh/id_ed25519", []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-value\n"), 0o600)
+	writeMode(t, root, "/home/alice/.aws/credentials", []byte("[default]\naws_secret_access_key=secret-value\n"), 0o600)
+	writeMode(t, root, "/home/alice/.docker/config.json", []byte(`{"auths":{"example.com":{"auth":"secret-value"}}}`), 0o600)
+	writeMode(t, root, "/home/alice/.kube/config", []byte("users:\n- token: secret-value\n"), 0o600)
+	writeMode(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", []byte("[wifi-security]\npsk=secret-value\n"), 0o600)
+	writeMode(t, root, "/etc/app/config.conf", []byte("mode=prod\n"), 0o644)
+
+	report := &model.ScanReport{}
+	if err := (SecretScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := map[string]model.FileFinding{}
+	for _, finding := range report.FilesystemDiff {
+		findings[finding.Path] = finding
+	}
+	for _, path := range []string{
+		"/home/alice/.ssh/id_ed25519",
+		"/home/alice/.aws/credentials",
+		"/home/alice/.docker/config.json",
+		"/home/alice/.kube/config",
+		"/etc/NetworkManager/system-connections/home.nmconnection",
+	} {
+		finding, ok := findings[path]
+		if !ok {
+			t.Fatalf("missing secret finding %s in %+v", path, report.FilesystemDiff)
+		}
+		if finding.Category != "secret" || !finding.SecretRisk || finding.Decision != model.DecisionMigrationNote {
+			t.Fatalf("secret finding not protected: %+v", finding)
+		}
+		if strings.Contains(finding.Reason, "secret-value") {
+			t.Fatalf("secret finding leaked raw value in reason: %+v", finding)
+		}
+		if finding.SHA256 == "" || finding.Mode == "" || finding.Size == 0 {
+			t.Fatalf("secret finding missing metadata: %+v", finding)
+		}
+	}
+	if _, ok := findings["/etc/app/config.conf"]; ok {
+		t.Fatalf("non-secret config should not be a secret finding: %+v", findings["/etc/app/config.conf"])
+	}
+}
+
+func TestSecretScannerDeepFindsProjectEnvFiles(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/project/.env", "API_TOKEN=secret-value\n")
+
+	shallow := &model.ScanReport{}
+	if err := (SecretScanner{}).Scan(context.Background(), Options{Root: root}, shallow); err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range shallow.FilesystemDiff {
+		if finding.Path == "/home/alice/project/.env" {
+			t.Fatalf("project .env should require deep scan: %+v", shallow.FilesystemDiff)
+		}
+	}
+
+	deep := &model.ScanReport{}
+	if err := (SecretScanner{}).Scan(context.Background(), Options{Root: root, Deep: true}, deep); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, finding := range deep.FilesystemDiff {
+		if finding.Path == "/home/alice/project/.env" && finding.SecretRisk {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("deep scan missing project .env: %+v", deep.FilesystemDiff)
+	}
+}
+
+func TestSecretScannerDoesNotDuplicateFilesystemSecretFindings(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/.ssh/id_ed25519", "PRIVATE KEY\n")
+
+	report := &model.ScanReport{}
+	if err := (SecretScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if err := (FilesystemDiffScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, finding := range report.FilesystemDiff {
+		if finding.Path == "/home/alice/.ssh/id_ed25519" && finding.Category == "secret" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("secret finding count=%d, want 1 in %+v", count, report.FilesystemDiff)
+	}
+}
+
 func TestDevOpsConfigScannerMarksSecretRiskConfig(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/home/alice/.kube/config", "users:\n- token: super-secret\n")
@@ -465,13 +560,18 @@ func TestProjectConfigScannerFindsProjectFiles(t *testing.T) {
 func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
 	reg := DefaultRegistry()
 	names := map[string]bool{}
-	for _, scanner := range reg.scanners {
+	order := map[string]int{}
+	for i, scanner := range reg.scanners {
 		names[scanner.Name()] = true
+		order[scanner.Name()] = i
 	}
-	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop"} {
+	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop", "secrets"} {
 		if !names[want] {
 			t.Fatalf("default registry missing %q in %+v", want, names)
 		}
+	}
+	if order["secrets"] >= order["filesystem-diff"] {
+		t.Fatalf("secrets scanner should run before filesystem-diff: %+v", order)
 	}
 	if names["config"] {
 		t.Fatalf("default registry should not include legacy config scanner: %+v", names)

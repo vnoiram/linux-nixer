@@ -50,6 +50,7 @@ func DefaultRegistry() Registry {
 		ProjectConfigScanner{},
 		UserConfigScanner{},
 		DesktopScanner{},
+		SecretScanner{},
 		FilesystemDiffScanner{},
 	)
 }

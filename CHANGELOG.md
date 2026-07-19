@@ -14,6 +14,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Manual migration checklist report for non-automatic migration work.
 - Reusable JSON policy files for scan and review rules.
 - Command-specific CLI help with examples and flag notes.
+- Dedicated secrets scanner for common credential files and token-bearing configs.
 
 ## [0.1.0] - 2026-07-19
 

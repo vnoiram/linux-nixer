@@ -11,7 +11,7 @@ Generated Nix settings only include findings marked `confirmed`. Findings left a
 This is an early implementation scaffold. It includes:
 
 - Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`, `policy init`
-- Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, system config files, DevOps/project config, user shell settings, desktop settings, and filesystem findings
+- Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, secrets, system config files, DevOps/project config, user shell settings, desktop settings, and filesystem findings
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
