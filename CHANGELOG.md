@@ -16,6 +16,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Command-specific CLI help with examples and flag notes.
 - Dedicated secrets scanner for common credential files and token-bearing configs.
 - Service detail reporting for systemd units, timers, and cron schedules.
+- GUI profile inventory for browser profiles, browser extensions, and editor profiles.
 
 ## [0.1.0] - 2026-07-19
 

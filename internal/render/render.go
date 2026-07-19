@@ -670,6 +670,21 @@ func writeUserDesktopChecklist(b *strings.Builder, report model.ScanReport) {
 			items = append(items, fmt.Sprintf("Review desktop configuration `%s` and decide whether to translate it to Home Manager or keep it manual.", item.Path))
 		}
 	}
+	for _, item := range browserProfileItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Back up or sync browser profile `%s` manually; review cookies, history, sessions, and credentials before migration.", item.Path))
+		}
+	}
+	for _, item := range browserExtensionItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Review browser extension marker `%s` and decide whether to reinstall through browser sync or manual export.", item.Path))
+		}
+	}
+	for _, item := range editorProfileItems(report) {
+		if manualDecision(item.Decision) {
+			items = append(items, fmt.Sprintf("Review editor profile `%s` and decide whether to recreate it with Home Manager, Settings Sync, or manual restore.", item.Path))
+		}
+	}
 	for _, finding := range report.Desktop.Autostart {
 		if reportDecision(finding.Decision) {
 			items = append(items, fmt.Sprintf("Review desktop autostart entry `%s` and decide whether to translate it to Home Manager.", finding.Path))
@@ -1194,6 +1209,9 @@ func renderDesktopReport(report model.ScanReport) string {
 			b.WriteString("\n")
 		}
 	}
+	writeDesktopItemSection(&b, "Browser profiles", browserProfileItems(report))
+	writeDesktopItemSection(&b, "Browser extensions", browserExtensionItems(report))
+	writeDesktopItemSection(&b, "Editor profiles", editorProfileItems(report))
 	if len(report.Desktop.Dconf) > 0 {
 		b.WriteString("\n## Dconf dump\n\n")
 		b.WriteString("```ini\n")
@@ -1204,6 +1222,23 @@ func renderDesktopReport(report model.ScanReport) string {
 		b.WriteString("```\n")
 	}
 	return b.String()
+}
+
+func writeDesktopItemSection(b *strings.Builder, title string, items []model.Item) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString("\n## ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+	for _, item := range items {
+		b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+		if item.Reason != "" {
+			b.WriteString(": ")
+			b.WriteString(item.Reason)
+		}
+		b.WriteString("\n")
+	}
 }
 
 func renderUserConfigReport(report model.ScanReport) string {
@@ -1579,6 +1614,29 @@ func desktopConfigItems(report model.ScanReport) []model.Item {
 	var items []model.Item
 	for _, item := range report.Items {
 		if reportDecision(item.Decision) && item.Kind == "desktop-config" {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
+}
+
+func browserProfileItems(report model.ScanReport) []model.Item {
+	return desktopItemsByKind(report, "browser-profile")
+}
+
+func browserExtensionItems(report model.ScanReport) []model.Item {
+	return desktopItemsByKind(report, "browser-extension")
+}
+
+func editorProfileItems(report model.ScanReport) []model.Item {
+	return desktopItemsByKind(report, "editor-profile")
+}
+
+func desktopItemsByKind(report model.ScanReport, kind string) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && item.Kind == kind {
 			items = append(items, item)
 		}
 	}

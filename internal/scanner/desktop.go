@@ -18,6 +18,7 @@ func (DesktopScanner) Scan(ctx context.Context, opts Options, report *model.Scan
 	scanDesktopAssets(opts, report)
 	scanAutostartEntries(opts, report)
 	scanDesktopConfigs(opts, report)
+	scanGUIProfiles(opts, report)
 	scanDconf(ctx, opts, report)
 	return nil
 }
@@ -91,6 +92,64 @@ func scanDesktopConfigs(opts Options, report *model.ScanReport) {
 			Reason:   "desktop environment configuration",
 		})
 	}
+}
+
+func scanGUIProfiles(opts Options, report *model.ScanReport) {
+	for _, path := range glob(opts.Root,
+		"/home/*/.mozilla/firefox/profiles.ini",
+		"/home/*/.mozilla/firefox/*.default*",
+		"/home/*/.config/google-chrome/Default",
+		"/home/*/.config/google-chrome/Profile *",
+		"/home/*/.config/chromium/Default",
+		"/home/*/.config/chromium/Profile *",
+		"/home/*/.config/BraveSoftware/Brave-Browser/Default",
+		"/home/*/.config/BraveSoftware/Brave-Browser/Profile *",
+	) {
+		addDesktopItem(opts, report, path, "browser-profile", model.DecisionMigrationNote, "browser profile may contain cookies, history, saved sessions, and credentials")
+	}
+	for _, path := range glob(opts.Root,
+		"/home/*/.mozilla/firefox/*.default*/extensions/*",
+		"/home/*/.config/google-chrome/*/Extensions/*",
+		"/home/*/.config/chromium/*/Extensions/*",
+		"/home/*/.config/BraveSoftware/Brave-Browser/*/Extensions/*",
+	) {
+		addDesktopItem(opts, report, path, "browser-extension", model.DecisionMigrationNote, "browser extension marker; review sync/export strategy manually")
+	}
+	for _, path := range glob(opts.Root,
+		"/home/*/.config/Code/User/settings.json",
+		"/home/*/.config/Code/User/keybindings.json",
+		"/home/*/.config/Code/User/snippets",
+		"/home/*/.config/VSCodium/User/settings.json",
+		"/home/*/.config/VSCodium/User/keybindings.json",
+		"/home/*/.config/VSCodium/User/snippets",
+		"/home/*/.vscode/extensions/*",
+		"/home/*/.vscode-oss/extensions/*",
+		"/home/*/.config/JetBrains/*",
+		"/home/*/.local/share/JetBrains/*",
+	) {
+		addDesktopItem(opts, report, path, "editor-profile", model.DecisionCandidate, "editor settings, extensions, or IDE profile")
+	}
+}
+
+func addDesktopItem(opts Options, report *model.ScanReport, path string, kind string, decision model.Decision, reason string) {
+	if info, err := os.Stat(path); err != nil {
+		return
+	} else if !info.IsDir() && kind != "editor-profile" && kind != "browser-extension" && !strings.HasSuffix(path, "profiles.ini") {
+		return
+	}
+	display := displayPath(opts.Root, path)
+	for _, item := range report.Items {
+		if item.Path == display && item.Kind == kind {
+			return
+		}
+	}
+	report.Items = append(report.Items, model.Item{
+		Kind:     kind,
+		Name:     desktopConfigName(path),
+		Path:     display,
+		Decision: decision,
+		Reason:   reason,
+	})
 }
 
 func scanDconf(ctx context.Context, opts Options, report *model.ScanReport) {

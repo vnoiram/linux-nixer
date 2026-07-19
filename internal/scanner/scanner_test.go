@@ -829,8 +829,16 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 	write(t, root, "/home/alice/.config/alacritty/alacritty.toml", "[window]\n")
 	write(t, root, "/home/alice/.config/kitty/kitty.conf", "font_size 12\n")
 	write(t, root, "/home/alice/.config/Code/User/settings.json", "{}")
+	write(t, root, "/home/alice/.config/Code/User/snippets/go.json", "{}")
+	write(t, root, "/home/alice/.vscode/extensions/publisher.tool-1.0.0/.keep", "")
+	write(t, root, "/home/alice/.config/JetBrains/IdeaIC2026.1/options/editor.xml", "<application />")
 	write(t, root, "/home/alice/.config/nvim/init.lua", "vim.opt.number = true\n")
 	write(t, root, "/home/alice/.vimrc", "set number\n")
+	write(t, root, "/home/alice/.mozilla/firefox/profiles.ini", "[Profile0]\n")
+	write(t, root, "/home/alice/.mozilla/firefox/alice.default-release/cookies.sqlite", "raw-cookie-secret")
+	write(t, root, "/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi", "xpi")
+	write(t, root, "/home/alice/.config/google-chrome/Default/History", "raw-history")
+	write(t, root, "/home/alice/.config/google-chrome/Default/Extensions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/1.0/manifest.json", "{}")
 
 	report := &model.ScanReport{}
 	if err := (DesktopScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -872,6 +880,42 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 	} {
 		if !seen[want] {
 			t.Fatalf("missing desktop config %q in %+v", want, report.Items)
+		}
+	}
+	items := map[string]model.Item{}
+	for _, item := range report.Items {
+		items[item.Path] = item
+	}
+	for _, path := range []string{
+		"/home/alice/.mozilla/firefox/profiles.ini",
+		"/home/alice/.mozilla/firefox/alice.default-release",
+		"/home/alice/.config/google-chrome/Default",
+	} {
+		if items[path].Kind != "browser-profile" || items[path].Decision != model.DecisionMigrationNote {
+			t.Fatalf("browser profile %s missing migration note in %+v", path, report.Items)
+		}
+	}
+	for _, path := range []string{
+		"/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi",
+		"/home/alice/.config/google-chrome/Default/Extensions/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	} {
+		if items[path].Kind != "browser-extension" || items[path].Decision != model.DecisionMigrationNote {
+			t.Fatalf("browser extension %s missing migration note in %+v", path, report.Items)
+		}
+	}
+	for _, path := range []string{
+		"/home/alice/.config/Code/User/settings.json",
+		"/home/alice/.config/Code/User/snippets",
+		"/home/alice/.vscode/extensions/publisher.tool-1.0.0",
+		"/home/alice/.config/JetBrains/IdeaIC2026.1",
+	} {
+		if items[path].Kind != "editor-profile" || items[path].Decision != model.DecisionCandidate {
+			t.Fatalf("editor profile %s missing candidate in %+v", path, report.Items)
+		}
+	}
+	for _, item := range report.Items {
+		if strings.Contains(item.Reason, "raw-cookie-secret") || strings.Contains(item.Reason, "raw-history") {
+			t.Fatalf("desktop scanner leaked raw profile content: %+v", item)
 		}
 	}
 }

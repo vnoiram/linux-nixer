@@ -159,6 +159,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "user-bin", Name: "tool", Path: "/home/alice/.local/bin/tool", Decision: model.DecisionCandidate, Reason: "user-local executable"},
 			{Kind: "direnv", Name: ".envrc", Path: "/home/alice/app/.envrc", Decision: model.DecisionCandidate, Reason: "direnv project environment file"},
 			{Kind: "desktop-config", Name: "settings.json", Path: "/home/alice/.config/Code/User/settings.json", Decision: model.DecisionCandidate, Reason: "desktop environment configuration"},
+			{Kind: "browser-profile", Name: "alice.default-release", Path: "/home/alice/.mozilla/firefox/alice.default-release", Decision: model.DecisionMigrationNote, Reason: "browser profile may contain cookies, history, saved sessions, and credentials"},
+			{Kind: "browser-extension", Name: "addon@example.xpi", Path: "/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi", Decision: model.DecisionMigrationNote, Reason: "browser extension marker; review sync/export strategy manually"},
+			{Kind: "editor-profile", Name: "publisher.tool-1.0.0", Path: "/home/alice/.vscode/extensions/publisher.tool-1.0.0", Decision: model.DecisionCandidate, Reason: "editor settings, extensions, or IDE profile"},
 		},
 		Desktop: model.Desktop{
 			Environment: "gnome",
@@ -303,12 +306,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",
 		"Back up stateful data `/var/lib/postgresql/data/PG_VERSION`",
 		"Confirm user `alice` home `/home/alice`",
+		"Back up or sync browser profile `/home/alice/.mozilla/firefox/alice.default-release` manually",
+		"Review browser extension marker `/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi`",
+		"Review editor profile `/home/alice/.vscode/extensions/publisher.tool-1.0.0`",
 	} {
 		if !strings.Contains(checklist, want) {
 			t.Fatalf("migration checklist missing %q:\n%s", want, checklist)
 		}
 	}
-	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret"} {
+	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret", "raw-cookie-secret", "raw-history"} {
 		if strings.Contains(checklist, unwanted) {
 			t.Fatalf("migration checklist included unwanted %q:\n%s", unwanted, checklist)
 		}
@@ -338,15 +344,23 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if strings.Contains(home, "color-scheme") {
 		t.Fatalf("home module should not render raw dconf dump:\n%s", home)
 	}
+	if strings.Contains(home, ".mozilla/firefox") || strings.Contains(home, ".vscode/extensions") {
+		t.Fatalf("home module should not render GUI profile paths:\n%s", home)
+	}
 	desktop := readFile(t, out, "reports/desktop.md")
-	for _, want := range []string{"Environment: gnome", "/home/alice/.local/share/fonts/demo.ttf", "/home/alice/.themes/demo", "/home/alice/.config/autostart/tool.desktop", "/home/alice/.config/Code/User/settings.json", "color-scheme='prefer-dark'"} {
+	for _, want := range []string{"Environment: gnome", "/home/alice/.local/share/fonts/demo.ttf", "/home/alice/.themes/demo", "/home/alice/.config/autostart/tool.desktop", "/home/alice/.config/Code/User/settings.json", "Browser profiles", "/home/alice/.mozilla/firefox/alice.default-release", "Browser extensions", "addon@example.xpi", "Editor profiles", "/home/alice/.vscode/extensions/publisher.tool-1.0.0", "color-scheme='prefer-dark'"} {
 		if !strings.Contains(desktop, want) {
 			t.Fatalf("desktop report missing %q:\n%s", want, desktop)
 		}
 	}
+	for _, unwanted := range []string{"raw-cookie-secret", "raw-history"} {
+		if strings.Contains(desktop, unwanted) {
+			t.Fatalf("desktop report leaked profile content %q:\n%s", unwanted, desktop)
+		}
+	}
 	cfg = readFile(t, out, "hosts/generated/configuration.nix")
-	if strings.Contains(cfg, "color-scheme") {
-		t.Fatalf("configuration should not render raw dconf dump:\n%s", cfg)
+	if strings.Contains(cfg, "color-scheme") || strings.Contains(cfg, ".mozilla/firefox") || strings.Contains(cfg, ".vscode/extensions") {
+		t.Fatalf("configuration should not render raw desktop/profile details:\n%s", cfg)
 	}
 	reportMD := readFile(t, out, "reports/migration-report.md")
 	if !strings.Contains(reportMD, "## Users") || !strings.Contains(reportMD, "Primary Home Manager user: `alice`") || !strings.Contains(reportMD, "Privileged or group-sensitive user: `alice` groups `alice, docker, sudo, video`") {

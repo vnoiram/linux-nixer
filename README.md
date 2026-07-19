@@ -161,7 +161,7 @@ Generated projects include:
 - systemd, cron, network, firewall, web server, and kernel/device tuning markers
 - DevOps config markers such as Kubernetes, Docker client config, Helm, Terraform, AWS, GCP, and Azure
 - shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh, gpg, tmux, starship, shell plugin trees, and `.local/bin` executables
-- desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, and common terminal/editor settings
+- desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, browser profiles/extensions, and common terminal/editor settings
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, stateful data, and location hints for `/opt`, `/usr/local`, `/srv`, and user-local paths
 
 Package mapping and Nix option rendering are intentionally conservative. apt and common language CLI tools get static Nix candidates when known; snap, flatpak, AppImage, Homebrew, secrets, stateful data, raw dotfiles, service unit bodies, and repository keys are reported without automatic Nix replacements by default.
