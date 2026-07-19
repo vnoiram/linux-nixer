@@ -34,4 +34,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Enriched package source scanning and `reports/package-sources.md` output.
 - Enriched filesystem migration reporting and `reports/filesystem.md` output.
 - Enriched user account scanning and `reports/users.md` output.
+- Conservative Nix option rendering for users, shells, selected Home Manager programs, and service hints.
 - CI and tag-based release workflow.

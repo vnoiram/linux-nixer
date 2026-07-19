@@ -379,6 +379,84 @@ func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
 	}
 }
 
+func TestProjectRendersConservativeNixOptions(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Host: model.Host{Hostname: "demo"},
+		Users: []model.User{
+			{Name: "root", UID: "0", GID: "0", Home: "/root", Shell: "/bin/bash", Groups: []string{"root"}},
+			{Name: "alice", UID: "1000", GID: "1000", Home: "/home/alice", Shell: "/bin/zsh", Groups: []string{"alice", "docker", "sudo", "video"}},
+			{Name: "daemon", UID: "1", GID: "1", Home: "/usr/sbin", Shell: "/usr/sbin/nologin", Groups: []string{"daemon"}, System: true},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "candidate.service", Path: "/etc/systemd/system/candidate.service", Decision: model.DecisionCandidate},
+		},
+		Items: []model.Item{
+			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionConfirmed, Reason: "shell or login environment configuration"},
+			{Kind: "user-config", Name: ".gitconfig", Path: "/home/alice/.gitconfig", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
+			{Kind: "user-config", Name: ".tmux.conf", Path: "/home/alice/.tmux.conf", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
+			{Kind: "user-config", Name: "starship.toml", Path: "/home/alice/.config/starship.toml", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
+			{Kind: "shell-config", Name: ".bashrc", Path: "/home/alice/.bashrc", Decision: model.DecisionCandidate, Reason: "candidate shell config"},
+			{Kind: "user-config", Name: ".gitconfig", Path: "/home/bob/.gitconfig", Decision: model.DecisionConfirmed, Reason: "other user config"},
+		},
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionMigrationNote},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := readFile(t, out, "hosts/generated/configuration.nix")
+	for _, want := range []string{
+		`programs.zsh.enable = true;`,
+		`users.users."alice" = {`,
+		`isNormalUser = true;`,
+		`home = "/home/alice";`,
+		`"docker"`,
+		`"sudo"`,
+		`"video"`,
+		`shell = pkgs.zsh;`,
+	} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("configuration missing %q:\n%s", want, cfg)
+		}
+	}
+	for _, notWant := range []string{`users.users."root"`, `users.users."daemon"`} {
+		if strings.Contains(cfg, notWant) {
+			t.Fatalf("configuration should not contain %q:\n%s", notWant, cfg)
+		}
+	}
+
+	home := readFile(t, out, "users/home.nix")
+	for _, want := range []string{`programs.zsh.enable = true;`, `programs.git.enable = true;`, `programs.tmux.enable = true;`, `programs.starship.enable = true;`} {
+		if !strings.Contains(home, want) {
+			t.Fatalf("home missing %q:\n%s", want, home)
+		}
+	}
+	for _, notWant := range []string{`programs.bash.enable = true;`, `PRIVATE KEY`, `programs.fish.enable = true;`} {
+		if strings.Contains(home, notWant) {
+			t.Fatalf("home should not contain %q:\n%s", notWant, home)
+		}
+	}
+
+	services := readFile(t, out, "modules/services.nix")
+	if !strings.Contains(services, `systemd.services."custom".enable = true;`) {
+		t.Fatalf("services missing generated systemd hint:\n%s", services)
+	}
+	if strings.Contains(services, `systemd.services."candidate".enable = true;`) {
+		t.Fatalf("services should not generate candidate systemd hint:\n%s", services)
+	}
+
+	reportMD := readFile(t, out, "reports/migration-report.md")
+	for _, want := range []string{"## Generated Nix summary", "user option: `users.users.alice`", "host shell option: `programs.zsh.enable`", "Home Manager option: `programs.git.enable`", "service hint: `systemd.services.custom.enable`"} {
+		if !strings.Contains(reportMD, want) {
+			t.Fatalf("migration report missing generated Nix summary %q:\n%s", want, reportMD)
+		}
+	}
+}
+
 func readFile(t *testing.T, root, rel string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(root, rel))

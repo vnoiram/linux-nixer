@@ -68,15 +68,18 @@ type data struct {
 
 func renderTemplate(tpl string, d data) string {
 	t := template.Must(template.New("nix").Funcs(template.FuncMap{
-		"nixList":           nixList,
-		"quote":             quote,
-		"systemPackages":    packageNames,
-		"homePackages":      homePackageNames,
-		"bool":              nixBool,
-		"dockerDetected":    dockerDetected,
-		"podmanDetected":    podmanDetected,
-		"todoComments":      todoComments,
-		"containerComments": containerComments,
+		"nixList":            nixList,
+		"quote":              quote,
+		"systemPackages":     packageNames,
+		"homePackages":       homePackageNames,
+		"bool":               nixBool,
+		"dockerDetected":     dockerDetected,
+		"podmanDetected":     podmanDetected,
+		"todoComments":       todoComments,
+		"containerComments":  containerComments,
+		"hostUserOptions":    hostUserOptions,
+		"hostShellOptions":   hostShellOptions,
+		"homeProgramOptions": homeProgramOptions,
 	}).Parse(tpl))
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, d); err != nil {
@@ -167,6 +170,59 @@ func homePackageNames(report model.ScanReport) []string {
 	return names
 }
 
+func hostShellOptions(report model.ScanReport) string {
+	var lines []string
+	for _, shell := range generatedHostShells(report) {
+		switch shell {
+		case "zsh":
+			lines = append(lines, "  programs.zsh.enable = true;")
+		case "fish":
+			lines = append(lines, "  programs.fish.enable = true;")
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(lines, "\n") + "\n"
+}
+
+func hostUserOptions(report model.ScanReport) string {
+	users := nixUsers(report)
+	if len(users) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	for _, user := range users {
+		b.WriteString(fmt.Sprintf("  users.users.%s = {\n", quote(user.Name)))
+		b.WriteString("    isNormalUser = true;\n")
+		if user.Home != "" {
+			b.WriteString(fmt.Sprintf("    home = %s;\n", quote(user.Home)))
+		}
+		if groups := nixUserGroups(user); len(groups) > 0 {
+			b.WriteString("    extraGroups = ")
+			b.WriteString(nixStringList(groups, 4))
+			b.WriteString(";\n")
+		}
+		if shell := nixShellPackage(user.Shell); shell != "" {
+			b.WriteString(fmt.Sprintf("    shell = %s;\n", shell))
+		}
+		b.WriteString("  };\n")
+	}
+	return b.String()
+}
+
+func homeProgramOptions(report model.ScanReport) string {
+	var lines []string
+	for _, program := range generatedHomePrograms(report) {
+		lines = append(lines, fmt.Sprintf("  programs.%s.enable = true;", program))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(lines, "\n") + "\n"
+}
+
 func dockerDetected(report model.ScanReport) bool {
 	for _, c := range report.Containers {
 		if c.Decision == model.DecisionConfirmed && (c.Runtime == "docker" || c.Runtime == "compose") {
@@ -238,6 +294,7 @@ func renderReport(report model.ScanReport) string {
 	b.WriteString("## Host\n\n")
 	b.WriteString(fmt.Sprintf("- Distro: %s %s\n", report.Host.Distro, report.Host.Release))
 	b.WriteString(fmt.Sprintf("- Hostname: %s\n\n", report.Host.Hostname))
+	writeGeneratedNixSummary(&b, report)
 	b.WriteString("## Users\n\n")
 	user := primaryUser(report)
 	b.WriteString(fmt.Sprintf("- Primary Home Manager user: `%s` home `%s`\n", user.Name, user.Home))
@@ -355,6 +412,33 @@ func renderReport(report model.ScanReport) string {
 	return b.String()
 }
 
+func writeGeneratedNixSummary(b *strings.Builder, report model.ScanReport) {
+	var lines []string
+	for _, user := range nixUsers(report) {
+		lines = append(lines, fmt.Sprintf("- user option: `users.users.%s`", user.Name))
+	}
+	for _, shell := range generatedHostShells(report) {
+		lines = append(lines, fmt.Sprintf("- host shell option: `programs.%s.enable`", shell))
+	}
+	for _, program := range generatedHomePrograms(report) {
+		lines = append(lines, fmt.Sprintf("- Home Manager option: `programs.%s.enable`", program))
+	}
+	for _, service := range report.Services {
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
+			lines = append(lines, fmt.Sprintf("- service hint: `systemd.services.%s.enable`", serviceNameAttr(service.Name)))
+		}
+	}
+	if len(lines) == 0 {
+		return
+	}
+	b.WriteString("## Generated Nix summary\n\n")
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
 func writeLanguagePackages(b *strings.Builder, report model.ScanReport) {
 	sections := []struct {
 		name string
@@ -427,6 +511,11 @@ func renderServicesModule(report model.ScanReport) string {
 		b.WriteString("  # TODO service: ")
 		b.WriteString(comment(fmt.Sprintf("%s %s at %s [%s]", service.Manager, service.Name, service.Path, printableDecision(service.Decision))))
 		b.WriteString("\n")
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
+			b.WriteString("  # Generated hint: ")
+			b.WriteString(comment(fmt.Sprintf("systemd.services.%s.enable = true;", quote(serviceNameAttr(service.Name)))))
+			b.WriteString("\n")
+		}
 	}
 	for _, item := range report.Items {
 		if !includeDecision(item.Decision) || !isServiceLikeItem(item) {
@@ -905,6 +994,125 @@ func containerComments(report model.ScanReport) []string {
 	return lines
 }
 
+func nixUsers(report model.ScanReport) []model.User {
+	var users []model.User
+	for _, user := range report.Users {
+		if user.System || user.Name == "root" || !strings.HasPrefix(user.Home, "/home/") {
+			continue
+		}
+		users = append(users, user)
+	}
+	sortUsers(users)
+	return users
+}
+
+func generatedHostShells(report model.ScanReport) []string {
+	seen := map[string]bool{}
+	for _, user := range nixUsers(report) {
+		switch nixShellPackage(user.Shell) {
+		case "pkgs.zsh":
+			seen["zsh"] = true
+		case "pkgs.fish":
+			seen["fish"] = true
+		}
+	}
+	order := []string{"zsh", "fish"}
+	var shells []string
+	for _, shell := range order {
+		if seen[shell] {
+			shells = append(shells, shell)
+		}
+	}
+	return shells
+}
+
+func generatedHomePrograms(report model.ScanReport) []string {
+	user := primaryUser(report)
+	programs := map[string]bool{}
+	for _, item := range report.Items {
+		if item.Decision != model.DecisionConfirmed || !strings.HasPrefix(item.Path, user.Home+"/") {
+			continue
+		}
+		switch {
+		case item.Kind == "shell-config" && shellProgramFromPath(item.Path) != "":
+			programs[shellProgramFromPath(item.Path)] = true
+		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.gitconfig"):
+			programs["git"] = true
+		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.tmux.conf"):
+			programs["tmux"] = true
+		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.config/starship.toml"):
+			programs["starship"] = true
+		}
+	}
+	order := []string{"bash", "zsh", "fish", "git", "tmux", "starship"}
+	var out []string
+	for _, program := range order {
+		if programs[program] {
+			out = append(out, program)
+		}
+	}
+	return out
+}
+
+func nixUserGroups(user model.User) []string {
+	allowed := []string{"sudo", "wheel", "docker", "podman", "audio", "video", "input", "plugdev", "dialout"}
+	var groups []string
+	for _, group := range user.Groups {
+		if containsString(allowed, group) {
+			groups = append(groups, group)
+		}
+	}
+	sort.Strings(groups)
+	return groups
+}
+
+func nixStringList(values []string, indent int) string {
+	if len(values) == 0 {
+		return "[ ]"
+	}
+	var b strings.Builder
+	b.WriteString("[\n")
+	prefix := strings.Repeat(" ", indent)
+	for _, value := range values {
+		b.WriteString(prefix)
+		b.WriteString("  ")
+		b.WriteString(quote(value))
+		b.WriteString("\n")
+	}
+	b.WriteString(prefix)
+	b.WriteString("]")
+	return b.String()
+}
+
+func nixShellPackage(shell string) string {
+	switch shell {
+	case "/bin/zsh", "/usr/bin/zsh":
+		return "pkgs.zsh"
+	case "/bin/fish", "/usr/bin/fish":
+		return "pkgs.fish"
+	default:
+		return ""
+	}
+}
+
+func shellProgramFromPath(path string) string {
+	switch {
+	case strings.HasSuffix(path, "/.bashrc") || strings.HasSuffix(path, "/.bash_profile") || strings.HasSuffix(path, "/.profile"):
+		return "bash"
+	case strings.HasSuffix(path, "/.zshrc") || strings.HasSuffix(path, "/.zprofile"):
+		return "zsh"
+	case strings.Contains(path, "/.config/fish/"):
+		return "fish"
+	default:
+		return ""
+	}
+}
+
+func serviceNameAttr(name string) string {
+	name = strings.TrimSuffix(name, ".service")
+	return name
+}
+
 func humanUsers(report model.ScanReport) []model.User {
 	var users []model.User
 	for _, user := range report.Users {
@@ -1326,6 +1534,8 @@ var hostTemplate = `# Generated by linux-nixer. Review before applying.
   time.timeZone = "UTC";
 
   environment.systemPackages = with pkgs; {{ nixList (systemPackages .Report) }};
+{{ hostShellOptions .Report }}
+{{ hostUserOptions .Report }}
 
   imports = [
     ../../modules/containers.nix
@@ -1344,6 +1554,7 @@ var homeTemplate = `# Generated by linux-nixer. Review before applying.
   home.stateVersion = "24.05";
   programs.home-manager.enable = true;
   home.packages = {{ nixList (homePackages .Report) }};
+{{ homeProgramOptions .Report }}
 
 {{- range todoComments .Report }}
   # TODO home: {{ . }}
