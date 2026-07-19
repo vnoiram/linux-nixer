@@ -702,7 +702,11 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/etc/fstab", "UUID=demo / ext4 defaults 0 1\n")
 	write(t, root, "/etc/hosts", "127.0.0.1 localhost\n")
-	write(t, root, "/etc/sudoers", "root ALL=(ALL) ALL\n")
+	write(t, root, "/etc/sudoers", "root ALL=(ALL) ALL\n%sudo ALL=(ALL) NOPASSWD: /usr/bin/systemctl\n@includedir /etc/sudoers.d\n")
+	write(t, root, "/etc/sudoers.d/admins", "%admin ALL=(ALL) ALL\n")
+	write(t, root, "/etc/login.defs", "UID_MIN 1000\nUID_MAX 60000\nPASS_MAX_DAYS 90\nUMASK 027\nENCRYPT_METHOD SHA512\n")
+	write(t, root, "/etc/default/useradd", "SHELL=/bin/bash\nCREATE_HOME=yes\n")
+	write(t, root, "/etc/adduser.conf", "DSHELL=/bin/zsh\nFIRST_UID=1000\nLAST_UID=29999\n")
 	write(t, root, "/etc/locale.conf", "LANG=en_US.UTF-8\n")
 	write(t, root, "/etc/timezone", "UTC\n")
 	write(t, root, "/etc/ssh/sshd_config", "Port 2222\nPermitRootLogin no\nPasswordAuthentication no\n")
@@ -718,6 +722,16 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/sysctl.d/99-local.conf", "fs.inotify.max_user_watches=1\n")
 	write(t, root, "/etc/modprobe.d/local.conf", "options test value=1\n")
 	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
+	write(t, root, "/etc/pam.d/sshd", "auth required pam_faillock.so deny=3 secret=hidden\nauth required pam_u2f.so\nsession optional pam_systemd.so\n")
+	write(t, root, "/etc/security/limits.d/audio.conf", "@audio - rtprio 95\n")
+	write(t, root, "/etc/polkit-1/rules.d/49-admin.rules", `polkit.addAdminRule(function(action, subject) { return ["unix-group:sudo"]; });`)
+	write(t, root, "/usr/local/share/polkit-1/rules.d/50-wheel.rules", `polkit.addRule(function(action, subject) { return polkit.Result.YES; });`)
+	write(t, root, "/etc/fail2ban/jail.local", "[sshd]\nenabled = true\nmaxretry = 5\nbantime = 1h\n")
+	write(t, root, "/etc/fail2ban/jail.d/nginx.conf", "[nginx-http-auth]\nenabled = true\n")
+	write(t, root, "/etc/audit/auditd.conf", "log_file = /var/log/audit/audit.log\nmax_log_file = 16\n")
+	write(t, root, "/etc/audit/rules.d/hardening.rules", "-w /etc/passwd -p wa -k identity\n-a always,exit -F arch=b64 -S execve -k exec\n")
+	write(t, root, "/etc/apparmor.d/usr.bin.demo", "#include <tunables/global>\nprofile demo /usr/bin/demo {\n  capability net_bind_service,\n}\n")
+	write(t, root, "/etc/apparmor.d/local/usr.bin.demo", "capability dac_override,\n")
 	write(t, root, "/etc/logrotate.d/app", "/var/log/app/*.log {}\n")
 	write(t, root, "/etc/nginx/sites-enabled/app", "server {}\n")
 	write(t, root, "/etc/apache2/sites-enabled/app.conf", "<VirtualHost *:80>\n")
@@ -745,23 +759,37 @@ WantedBy=multi-user.target
 		seen[item.Path] = item
 	}
 	for path, reason := range map[string]string{
-		"/etc/fstab":           "filesystem mount configuration",
-		"/etc/hosts":           "system configuration",
-		"/etc/sudoers":         "privilege configuration",
-		"/etc/locale.conf":     "localization configuration",
-		"/etc/timezone":        "localization configuration",
-		"/etc/ssh/sshd_config": "ssh daemon configuration",
-		"/etc/sysctl.conf":     "kernel or device tuning",
-		"/etc/nftables.conf":   "firewall configuration",
-		"/etc/ufw/ufw.conf":    "firewall configuration",
-		"/etc/default/ufw":     "firewall configuration",
-		"/etc/netplan":         "network configuration",
+		"/etc/fstab":                                               "filesystem mount configuration",
+		"/etc/hosts":                                               "system configuration",
+		"/etc/sudoers":                                             "auth and security configuration",
+		"/etc/sudoers.d/admins":                                    "auth and security configuration",
+		"/etc/login.defs":                                          "auth and security configuration",
+		"/etc/default/useradd":                                     "auth and security configuration",
+		"/etc/adduser.conf":                                        "auth and security configuration",
+		"/etc/locale.conf":                                         "localization configuration",
+		"/etc/timezone":                                            "localization configuration",
+		"/etc/ssh/sshd_config":                                     "ssh daemon configuration",
+		"/etc/sysctl.conf":                                         "kernel or device tuning",
+		"/etc/nftables.conf":                                       "firewall configuration",
+		"/etc/ufw/ufw.conf":                                        "firewall configuration",
+		"/etc/default/ufw":                                         "firewall configuration",
+		"/etc/netplan":                                             "network configuration",
 		"/etc/NetworkManager/NetworkManager.conf":                  "network configuration",
 		"/etc/resolv.conf":                                         "network configuration",
 		"/etc/systemd/resolved.conf":                               "network configuration",
 		"/etc/sysctl.d/99-local.conf":                              "kernel or device tuning",
 		"/etc/modprobe.d/local.conf":                               "kernel or device tuning",
 		"/etc/udev/rules.d/99-device.rules":                        "kernel or device tuning",
+		"/etc/pam.d/sshd":                                          "auth and security configuration",
+		"/etc/security/limits.d/audio.conf":                        "auth and security configuration",
+		"/etc/polkit-1/rules.d/49-admin.rules":                     "auth and security configuration",
+		"/usr/local/share/polkit-1/rules.d/50-wheel.rules":         "auth and security configuration",
+		"/etc/fail2ban/jail.local":                                 "auth and security configuration",
+		"/etc/fail2ban/jail.d/nginx.conf":                          "auth and security configuration",
+		"/etc/audit/auditd.conf":                                   "auth and security configuration",
+		"/etc/audit/rules.d/hardening.rules":                       "auth and security configuration",
+		"/etc/apparmor.d/usr.bin.demo":                             "auth and security configuration",
+		"/etc/apparmor.d/local/usr.bin.demo":                       "auth and security configuration",
 		"/etc/logrotate.d/app":                                     "log rotation configuration",
 		"/etc/netplan/01-net.yaml":                                 "network configuration",
 		"/etc/nginx/sites-enabled/app":                             "web server configuration",
@@ -797,6 +825,33 @@ WantedBy=multi-user.target
 	}
 	if seen["/etc/nftables.conf"].Details["tables"] != "1" || seen["/etc/nftables.conf"].Details["chains"] != "1" || seen["/etc/nftables.conf"].Details["rules"] != "1" {
 		t.Fatalf("nftables details missing: %+v", seen["/etc/nftables.conf"])
+	}
+	if seen["/etc/sudoers"].Details["user-rules"] != "1" || seen["/etc/sudoers"].Details["group-rules"] != "1" || seen["/etc/sudoers"].Details["nopasswd-rules"] != "1" || seen["/etc/sudoers"].Details["includes"] != "1" {
+		t.Fatalf("sudoers details missing: %+v", seen["/etc/sudoers"])
+	}
+	if seen["/etc/login.defs"].Details["UID_MIN"] != "1000" || seen["/etc/login.defs"].Details["PASS_MAX_DAYS"] != "90" || seen["/etc/login.defs"].Details["UMASK"] != "027" {
+		t.Fatalf("login.defs details missing: %+v", seen["/etc/login.defs"])
+	}
+	if seen["/etc/default/useradd"].Details["SHELL"] != "/bin/bash" || seen["/etc/adduser.conf"].Details["DSHELL"] != "/bin/zsh" {
+		t.Fatalf("useradd/adduser details missing: %+v %+v", seen["/etc/default/useradd"], seen["/etc/adduser.conf"])
+	}
+	if seen["/etc/pam.d/sshd"].Details["rules"] != "3" || !strings.Contains(seen["/etc/pam.d/sshd"].Details["important-modules"], "pam_faillock.so") || strings.Contains(seen["/etc/pam.d/sshd"].Details["modules"], "hidden") {
+		t.Fatalf("pam details unsafe or missing: %+v", seen["/etc/pam.d/sshd"])
+	}
+	if seen["/etc/security/limits.d/audio.conf"].Details["entries"] != "1" || seen["/etc/security/limits.d/audio.conf"].Details["domains"] != "@audio" {
+		t.Fatalf("security conf details missing: %+v", seen["/etc/security/limits.d/audio.conf"])
+	}
+	if seen["/etc/polkit-1/rules.d/49-admin.rules"].Details["admin-rules"] != "1" || seen["/etc/polkit-1/rules.d/49-admin.rules"].Details["mentions-sudo"] != "true" {
+		t.Fatalf("polkit details missing: %+v", seen["/etc/polkit-1/rules.d/49-admin.rules"])
+	}
+	if seen["/etc/fail2ban/jail.local"].Details["enabled-jails"] != "1" || seen["/etc/fail2ban/jail.local"].Details["maxretry"] != "5" {
+		t.Fatalf("fail2ban details missing: %+v", seen["/etc/fail2ban/jail.local"])
+	}
+	if seen["/etc/audit/rules.d/hardening.rules"].Details["rules"] != "2" || seen["/etc/audit/rules.d/hardening.rules"].Details["watches"] != "1" || seen["/etc/audit/rules.d/hardening.rules"].Details["syscall-rules"] != "1" {
+		t.Fatalf("audit rules details missing: %+v", seen["/etc/audit/rules.d/hardening.rules"])
+	}
+	if seen["/etc/apparmor.d/usr.bin.demo"].Details["profiles"] != "1" || seen["/etc/apparmor.d/usr.bin.demo"].Details["includes"] != "1" || seen["/etc/apparmor.d/usr.bin.demo"].Details["capabilities"] != "1" {
+		t.Fatalf("apparmor details missing: %+v", seen["/etc/apparmor.d/usr.bin.demo"])
 	}
 	services := map[string]model.Service{}
 	for _, service := range report.Services {

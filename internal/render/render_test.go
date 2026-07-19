@@ -143,6 +143,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "language-project", Name: "excluded", Path: "/home/alice/app/excluded.lock", Decision: model.DecisionExcluded, Reason: "excluded language file"},
 			{Kind: "os-config", Name: "99-device.rules", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate, Reason: "kernel or device tuning"},
 			{Kind: "os-config", Name: "home.nmconnection", Path: "/etc/NetworkManager/system-connections/home.nmconnection", Decision: model.DecisionMigrationNote, Reason: "network connection profile may contain credentials", Details: map[string]string{"id": "home", "type": "wifi", "interface-name": "wlp1s0"}},
+			{Kind: "os-config", Name: "sudoers", Path: "/etc/sudoers", Decision: model.DecisionCandidate, Reason: "auth and security configuration", Details: map[string]string{"group-rules": "1", "nopasswd-rules": "1"}},
+			{Kind: "os-config", Name: "sshd", Path: "/etc/pam.d/sshd", Decision: model.DecisionCandidate, Reason: "auth and security configuration", Details: map[string]string{"important-modules": "pam_faillock.so,pam_u2f.so", "rules": "2"}},
 			{Kind: "os-config", Name: "app", Path: "/etc/nginx/sites-enabled/app", Decision: model.DecisionCandidate, Reason: "web server configuration"},
 			{Kind: "os-config", Name: "ufw.conf", Path: "/etc/ufw/ufw.conf", Decision: model.DecisionExcluded, Reason: "firewall configuration"},
 			{Kind: "devops-config", Name: "config", Path: "/home/alice/.kube/config", Decision: model.DecisionMigrationNote, Reason: "kubernetes configuration may contain credentials"},
@@ -204,7 +206,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("services module included excluded service:\n%s", services)
 	}
 	systemConfig := readFile(t, out, "reports/system-config.md")
-	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "id `home`", "interface-name `wlp1s0`", "type `wifi`", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service", "Custom app", "user `app`", "working directory `/srv/app`", "exec `/opt/vendor/bin/app --token=<redacted>`", "environment files `/etc/default/custom`", "wanted by `multi-user.target`", "custom.timer", "schedule `OnCalendar=daily`", "job", "schedule `15 2 * * *`"} {
+	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "id `home`", "interface-name `wlp1s0`", "type `wifi`", "Auth and security", "/etc/sudoers", "nopasswd-rules `1`", "/etc/pam.d/sshd", "important-modules `pam_faillock.so,pam_u2f.so`", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service", "Custom app", "user `app`", "working directory `/srv/app`", "exec `/opt/vendor/bin/app --token=<redacted>`", "environment files `/etc/default/custom`", "wanted by `multi-user.target`", "custom.timer", "schedule `OnCalendar=daily`", "job", "schedule `15 2 * * *`"} {
 		if !strings.Contains(systemConfig, want) {
 			t.Fatalf("system config report missing %q:\n%s", want, systemConfig)
 		}
@@ -303,6 +305,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"schedule `15 2 * * *`",
 		"Translate system configuration `/etc/NetworkManager/system-connections/home.nmconnection`",
 		"Review id `home`, interface-name `wlp1s0`, type `wifi`",
+		"Translate system configuration `/etc/sudoers`",
+		"Review group-rules `1`, nopasswd-rules `1`",
 		"Translate compose `/srv/app/compose.yml`",
 		"backup dirty changes before migration",
 		"Decide how to recreate `/usr/local/bin/tool`",
@@ -318,7 +322,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			t.Fatalf("migration checklist missing %q:\n%s", want, checklist)
 		}
 	}
-	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret", "raw-cookie-secret", "raw-history", "psk"} {
+	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret", "raw-cookie-secret", "raw-history", "psk", "hidden"} {
 		if strings.Contains(checklist, unwanted) {
 			t.Fatalf("migration checklist included unwanted %q:\n%s", unwanted, checklist)
 		}

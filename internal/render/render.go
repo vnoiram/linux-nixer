@@ -1078,6 +1078,9 @@ func renderSystemConfigReport(report model.ScanReport) string {
 	}{
 		{"Network", func(item model.Item) bool { return strings.Contains(item.Reason, "network") }},
 		{"Firewall", func(item model.Item) bool { return strings.Contains(item.Reason, "firewall") }},
+		{"Auth and security", func(item model.Item) bool {
+			return strings.Contains(item.Reason, "auth") || strings.Contains(item.Reason, "security") || strings.Contains(item.Reason, "ssh daemon")
+		}},
 		{"Web servers", func(item model.Item) bool { return strings.Contains(item.Reason, "web server") }},
 		{"Kernel and devices", func(item model.Item) bool {
 			return strings.Contains(item.Reason, "kernel") || strings.Contains(item.Reason, "device")

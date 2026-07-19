@@ -28,6 +28,9 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/fstab",
 		"/etc/hosts",
 		"/etc/sudoers",
+		"/etc/login.defs",
+		"/etc/default/useradd",
+		"/etc/adduser.conf",
 		"/etc/locale.conf",
 		"/etc/timezone",
 		"/etc/ssh/sshd_config",
@@ -39,6 +42,8 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/NetworkManager/NetworkManager.conf",
 		"/etc/resolv.conf",
 		"/etc/systemd/resolved.conf",
+		"/etc/fail2ban/jail.local",
+		"/etc/audit/auditd.conf",
 	} {
 		if existsWithSudo(ctx, opts, report, "system-config", path) {
 			details := readSystemConfigDetails(ctx, opts, report, path)
@@ -60,6 +65,16 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 		"/etc/modprobe.d/*.conf",
 		"/etc/udev/rules.d/*.rules",
 		"/etc/logrotate.d/*",
+		"/etc/sudoers.d/*",
+		"/etc/pam.d/*",
+		"/etc/security/*.conf",
+		"/etc/security/limits.d/*.conf",
+		"/etc/polkit-1/rules.d/*",
+		"/usr/local/share/polkit-1/rules.d/*",
+		"/etc/fail2ban/jail.d/*.conf",
+		"/etc/audit/rules.d/*.rules",
+		"/etc/apparmor.d/*",
+		"/etc/apparmor.d/local/*",
 		"/etc/netplan/*.yaml",
 		"/etc/NetworkManager/system-connections/*",
 		"/etc/nginx/sites-enabled/*",
@@ -125,6 +140,24 @@ func systemConfigDetails(path, content string) map[string]string {
 		return nftablesDetails(content)
 	case strings.HasSuffix(path, "/etc/ssh/sshd_config"):
 		return sshdDetails(content)
+	case strings.HasSuffix(path, "/etc/sudoers") || strings.Contains(path, "/etc/sudoers.d/"):
+		return sudoersDetails(content)
+	case strings.HasSuffix(path, "/etc/login.defs"):
+		return loginDefsDetails(content)
+	case strings.HasSuffix(path, "/etc/default/useradd") || strings.HasSuffix(path, "/etc/adduser.conf"):
+		return keyValueDetails(content, []string{"GROUP", "HOME", "SHELL", "SKEL", "CREATE_HOME", "DSHELL", "DHOME", "FIRST_UID", "LAST_UID", "FIRST_GID", "LAST_GID", "USERGROUPS"})
+	case strings.Contains(path, "/etc/pam.d/"):
+		return pamDetails(content)
+	case strings.Contains(path, "/etc/security/"):
+		return securityConfDetails(content)
+	case strings.Contains(path, "/polkit-1/rules.d/"):
+		return polkitDetails(content)
+	case strings.Contains(path, "/fail2ban/"):
+		return fail2banDetails(content)
+	case strings.Contains(path, "/audit/"):
+		return auditDetails(content)
+	case strings.Contains(path, "/apparmor.d/"):
+		return apparmorDetails(content)
 	default:
 		return nil
 	}
@@ -310,6 +343,232 @@ func sshdDetails(content string) map[string]string {
 	return emptyNil(details)
 }
 
+func sudoersDetails(content string) map[string]string {
+	userRules, groupRules, nopasswd, includes := 0, 0, 0, 0
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		trimmed := strings.TrimSpace(sc.Text())
+		if trimmed == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trimmed, "@include") || strings.HasPrefix(trimmed, "#include"):
+			includes++
+		case strings.HasPrefix(trimmed, "#"):
+			continue
+		case strings.HasPrefix(trimmed, "%"):
+			groupRules++
+			if strings.Contains(strings.ToUpper(trimmed), "NOPASSWD") {
+				nopasswd++
+			}
+		default:
+			fields := strings.Fields(trimmed)
+			if len(fields) >= 2 && strings.Contains(fields[1], "=") {
+				userRules++
+				if strings.Contains(strings.ToUpper(trimmed), "NOPASSWD") {
+					nopasswd++
+				}
+			}
+		}
+	}
+	return countDetails("user-rules", userRules, "group-rules", groupRules, "nopasswd-rules", nopasswd, "includes", includes)
+}
+
+func loginDefsDetails(content string) map[string]string {
+	details := map[string]string{}
+	allowed := map[string]bool{
+		"UID_MIN":        true,
+		"UID_MAX":        true,
+		"GID_MIN":        true,
+		"GID_MAX":        true,
+		"SYS_UID_MIN":    true,
+		"SYS_UID_MAX":    true,
+		"SYS_GID_MIN":    true,
+		"SYS_GID_MAX":    true,
+		"PASS_MAX_DAYS":  true,
+		"PASS_MIN_DAYS":  true,
+		"PASS_WARN_AGE":  true,
+		"UMASK":          true,
+		"ENCRYPT_METHOD": true,
+	}
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		key := fields[0]
+		if allowed[key] && !isSecretConfigKey(key) {
+			setDetail(details, key, strings.Join(fields[1:], " "))
+		}
+	}
+	return emptyNil(details)
+}
+
+func pamDetails(content string) map[string]string {
+	modules := map[string]bool{}
+	important := map[string]bool{}
+	rules := 0
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		rules++
+		module := filepath.Base(fields[2])
+		modules[module] = true
+		switch module {
+		case "pam_faillock.so", "pam_u2f.so", "pam_google_authenticator.so", "pam_limits.so", "pam_systemd.so", "pam_sss.so", "pam_ldap.so", "pam_mount.so":
+			important[module] = true
+		}
+	}
+	details := countDetails("rules", rules)
+	if details == nil {
+		details = map[string]string{}
+	}
+	if len(modules) > 0 {
+		details["modules"] = limitedJoinedKeys(modules, 8)
+	}
+	if len(important) > 0 {
+		details["important-modules"] = limitedJoinedKeys(important, 8)
+	}
+	return emptyNil(details)
+}
+
+func securityConfDetails(content string) map[string]string {
+	entries := 0
+	domains := map[string]bool{}
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		entries++
+		domains[fields[0]] = true
+	}
+	details := countDetails("entries", entries)
+	if details == nil {
+		details = map[string]string{}
+	}
+	if len(domains) > 0 {
+		details["domains"] = limitedJoinedKeys(domains, 8)
+	}
+	return emptyNil(details)
+}
+
+func polkitDetails(content string) map[string]string {
+	rules := strings.Count(content, "polkit.addRule")
+	adminRules := strings.Count(content, "polkit.addAdminRule")
+	mentionsWheel := strings.Contains(content, "unix-group:wheel")
+	mentionsSudo := strings.Contains(content, "unix-group:sudo")
+	details := countDetails("rules", rules, "admin-rules", adminRules)
+	if details == nil {
+		details = map[string]string{}
+	}
+	if mentionsWheel {
+		details["mentions-wheel"] = "true"
+	}
+	if mentionsSudo {
+		details["mentions-sudo"] = "true"
+	}
+	return emptyNil(details)
+}
+
+func fail2banDetails(content string) map[string]string {
+	details := map[string]string{}
+	enabledJails := 0
+	currentSection := ""
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripInlineComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = strings.Trim(line, "[]")
+			if currentSection != "DEFAULT" && currentSection != "" {
+				appendDetail(details, "jails", currentSection)
+			}
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if currentSection != "" && currentSection != "DEFAULT" && strings.EqualFold(key, "enabled") && strings.EqualFold(value, "true") {
+			enabledJails++
+		}
+		switch key {
+		case "bantime", "findtime", "maxretry", "backend":
+			setDetail(details, key, value)
+		}
+	}
+	if enabledJails > 0 {
+		details["enabled-jails"] = strconv.Itoa(enabledJails)
+	}
+	return emptyNil(details)
+}
+
+func auditDetails(content string) map[string]string {
+	rules, watches, syscalls := 0, 0, 0
+	settings := map[string]string{}
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch {
+		case fields[0] == "-w":
+			rules++
+			watches++
+		case fields[0] == "-a":
+			rules++
+			if strings.Contains(line, "-S ") {
+				syscalls++
+			}
+		default:
+			if key, value, ok := strings.Cut(line, "="); ok {
+				key = strings.TrimSpace(key)
+				value = strings.TrimSpace(value)
+				if stringIn([]string{"log_file", "max_log_file", "num_logs", "flush", "freq"}, key) && !isSecretConfigKey(key) {
+					settings[key] = value
+				}
+			}
+		}
+	}
+	details := countDetails("rules", rules, "watches", watches, "syscall-rules", syscalls)
+	if details == nil {
+		details = map[string]string{}
+	}
+	for key, value := range settings {
+		setDetail(details, key, value)
+	}
+	return emptyNil(details)
+}
+
+func apparmorDetails(content string) map[string]string {
+	profiles := 0
+	includes := 0
+	capabilities := 0
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		trimmed := strings.TrimSpace(sc.Text())
+		if trimmed == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trimmed, "profile "):
+			profiles++
+		case strings.HasPrefix(trimmed, "#include") || strings.HasPrefix(trimmed, "include "):
+			includes++
+		case strings.HasPrefix(trimmed, "capability "):
+			capabilities++
+		}
+	}
+	return countDetails("profiles", profiles, "includes", includes, "capabilities", capabilities)
+}
+
 func countDetails(pairs ...any) map[string]string {
 	details := map[string]string{}
 	for i := 0; i+1 < len(pairs); i += 2 {
@@ -370,6 +629,23 @@ func sortedKeys(values map[string]bool) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func limitedJoinedKeys(values map[string]bool, limit int) string {
+	keys := sortedKeys(values)
+	if len(keys) > limit {
+		keys = keys[:limit]
+	}
+	return strings.Join(keys, ",")
+}
+
+func stringIn(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func isSecretConfigKey(key string) bool {
@@ -533,6 +809,17 @@ func systemConfigReason(path string) string {
 	case strings.Contains(path, "/nginx/") ||
 		strings.Contains(path, "/apache2/"):
 		return "web server configuration"
+	case strings.Contains(path, "sudoers") ||
+		strings.Contains(path, "/pam.d/") ||
+		strings.Contains(path, "/security/") ||
+		strings.Contains(path, "login.defs") ||
+		strings.Contains(path, "/default/useradd") ||
+		strings.Contains(path, "adduser.conf") ||
+		strings.Contains(path, "/polkit-1/") ||
+		strings.Contains(path, "/fail2ban/") ||
+		strings.Contains(path, "/audit/") ||
+		strings.Contains(path, "/apparmor.d/"):
+		return "auth and security configuration"
 	case strings.Contains(path, "sysctl") ||
 		strings.Contains(path, "/modprobe.d/") ||
 		strings.Contains(path, "/udev/"):
@@ -543,8 +830,6 @@ func systemConfigReason(path string) string {
 		return "ssh daemon configuration"
 	case strings.Contains(path, "fstab"):
 		return "filesystem mount configuration"
-	case strings.Contains(path, "sudoers"):
-		return "privilege configuration"
 	case strings.Contains(path, "locale") || strings.Contains(path, "timezone"):
 		return "localization configuration"
 	default:
