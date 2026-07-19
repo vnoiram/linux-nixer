@@ -32,4 +32,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Enriched Git source scanning and `reports/git-sources.md` output.
 - Enriched language ecosystem scanning and `reports/languages.md` output.
 - Enriched package source scanning and `reports/package-sources.md` output.
+- Enriched filesystem migration reporting and `reports/filesystem.md` output.
 - CI and tag-based release workflow.

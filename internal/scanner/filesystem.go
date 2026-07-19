@@ -124,31 +124,62 @@ func classifyFile(abs, disp string, info os.FileInfo) model.FileFinding {
 	case strings.HasPrefix(string(head), "\x7fELF"):
 		f.Category = "executable"
 		f.Type = "elf"
-		f.Reason = "ELF executable outside explicit package mapping"
+		f.Reason = filesystemReason(disp, "ELF executable outside explicit package mapping")
 	case strings.HasPrefix(string(head), "#!"):
 		f.Category = "script"
 		f.Type = "script"
-		f.Reason = "shebang script"
+		f.Reason = filesystemReason(disp, "shebang script")
 	case strings.HasSuffix(disp, ".desktop"):
 		f.Category = "desktop-entry"
 		f.Type = "desktop-entry"
+		f.Reason = filesystemReason(disp, "desktop entry outside explicit package mapping")
 	case strings.HasSuffix(disp, ".service") || strings.HasSuffix(disp, ".timer"):
 		f.Category = "service"
 		f.Type = "systemd-unit"
+		f.Reason = filesystemReason(disp, "systemd unit outside explicit package mapping")
 	case looksSecret(disp, head):
 		f.Category = "secret"
 		f.SecretRisk = true
 		f.Decision = model.DecisionMigrationNote
-		f.Reason = "secret-like file excluded from generated Nix"
+		f.Reason = filesystemReason(disp, "secret-like file excluded from generated Nix")
 	case isStatefulPath(disp):
 		f.Category = "stateful-data"
 		f.Decision = model.DecisionMigrationNote
+		f.Reason = filesystemReason(disp, "stateful data requires manual backup or migration")
 	default:
 		if strings.HasPrefix(disp, "/etc/") || strings.Contains(disp, "/.config/") {
 			f.Category = "config"
+			f.Reason = filesystemReason(disp, "configuration file outside explicit package mapping")
 		}
 	}
 	return f
+}
+
+func filesystemReason(path, base string) string {
+	hint := filesystemLocationHint(path)
+	if hint == "" {
+		return base
+	}
+	return base + "; " + hint
+}
+
+func filesystemLocationHint(path string) string {
+	switch {
+	case strings.HasPrefix(path, "/opt/"):
+		return "under /opt, commonly used for manually installed vendor applications"
+	case strings.HasPrefix(path, "/usr/local/bin/") || strings.HasPrefix(path, "/usr/local/sbin/"):
+		return "under /usr/local executable path, commonly outside apt package ownership"
+	case strings.HasPrefix(path, "/usr/local/"):
+		return "under /usr/local, commonly used for local administrator installs"
+	case strings.HasPrefix(path, "/srv/"):
+		return "under /srv, commonly service or application data"
+	case strings.Contains(path, "/.local/bin/"):
+		return "under user-local bin, commonly installed outside system package managers"
+	case strings.HasPrefix(path, "/home/"):
+		return "under a user home directory"
+	default:
+		return ""
+	}
 }
 
 func sha256File(path string) (string, error) {

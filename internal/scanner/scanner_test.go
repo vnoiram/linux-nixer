@@ -189,6 +189,52 @@ func TestFilesystemDiffClassifiesSeededRandomLikeApps(t *testing.T) {
 	}
 }
 
+func TestFilesystemDiffAddsMigrationHintsForCommonLocations(t *testing.T) {
+	root := t.TempDir()
+	writeMode(t, root, "/opt/vendor/bin/app", append([]byte{0x7f, 'E', 'L', 'F'}, []byte("payload")...), 0o755)
+	writeMode(t, root, "/usr/local/bin/local-tool", []byte("#!/bin/sh\necho local\n"), 0o755)
+	write(t, root, "/srv/app/app.service", "[Service]\nExecStart=/opt/vendor/bin/app\n")
+	write(t, root, "/home/alice/.config/tool/config.toml", "theme = 'dark'\n")
+	write(t, root, "/home/alice/.ssh/id_ed25519", "PRIVATE KEY\n")
+	write(t, root, "/var/lib/postgresql/data/PG_VERSION", "16\n")
+
+	report := &model.ScanReport{}
+	err := (FilesystemDiffScanner{}).Scan(context.Background(), Options{Root: root, Includes: []string{"/var/lib/postgresql"}}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := map[string]model.FileFinding{}
+	for _, finding := range report.FilesystemDiff {
+		findings[finding.Path] = finding
+	}
+	for path, category := range map[string]string{
+		"/opt/vendor/bin/app":                  "executable",
+		"/usr/local/bin/local-tool":            "script",
+		"/srv/app/app.service":                 "service",
+		"/home/alice/.config/tool/config.toml": "config",
+		"/home/alice/.ssh/id_ed25519":          "secret",
+	} {
+		if findings[path].Category != category {
+			t.Fatalf("finding %s category=%q, want %q in %+v", path, findings[path].Category, category, report.FilesystemDiff)
+		}
+		if findings[path].Reason == "" {
+			t.Fatalf("finding %s missing reason: %+v", path, findings[path])
+		}
+	}
+	if !strings.Contains(findings["/opt/vendor/bin/app"].Reason, "/opt") {
+		t.Fatalf("opt executable missing location hint: %+v", findings["/opt/vendor/bin/app"])
+	}
+	if !strings.Contains(findings["/usr/local/bin/local-tool"].Reason, "/usr/local executable path") {
+		t.Fatalf("usr local script missing location hint: %+v", findings["/usr/local/bin/local-tool"])
+	}
+	if findings["/home/alice/.ssh/id_ed25519"].Decision != model.DecisionMigrationNote || !findings["/home/alice/.ssh/id_ed25519"].SecretRisk {
+		t.Fatalf("secret should be migration note with secret risk: %+v", findings["/home/alice/.ssh/id_ed25519"])
+	}
+	if len(report.StatefulData) != 1 || report.StatefulData[0].Path != "/var/lib/postgresql/data/PG_VERSION" || report.StatefulData[0].Reason == "" {
+		t.Fatalf("unexpected stateful data: %+v", report.StatefulData)
+	}
+}
+
 func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
 	root := t.TempDir()
 	writeMode(t, root, "/usr/local/bin/same", []byte("#!/bin/sh\necho same\n"), 0o755)

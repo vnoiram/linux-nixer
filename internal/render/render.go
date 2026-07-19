@@ -39,6 +39,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/services.nix":              renderServicesModule(report),
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
 		"reports/package-sources.md":        renderPackageSourcesReport(report),
+		"reports/filesystem.md":             renderFilesystemReport(report),
 		"reports/containers.md":             renderContainersReport(report),
 		"reports/git-sources.md":            renderGitSourcesReport(report),
 		"reports/languages.md":              renderLanguagesReport(report),
@@ -321,11 +322,13 @@ func renderReport(report model.ScanReport) string {
 		if !reportDecision(f.Decision) {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("- `%s` %s %s\n", f.Path, f.Type, f.Reason))
+		b.WriteString(fileFindingLine(f))
 	}
 	b.WriteString("\n## Stateful data and manual migration notes\n\n")
 	for _, f := range report.StatefulData {
-		b.WriteString(fmt.Sprintf("- `%s` %s\n", f.Path, f.Reason))
+		if reportDecision(f.Decision) {
+			b.WriteString(fileFindingLine(f))
+		}
 	}
 	for _, item := range report.Items {
 		if item.Decision == model.DecisionTODO || item.Decision == model.DecisionMigrationNote || item.Decision == model.DecisionCandidate {
@@ -439,6 +442,46 @@ func renderFilesystemModule(report model.ScanReport) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("}\n")
+	return b.String()
+}
+
+func renderFilesystemReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Filesystem migration findings\n\n")
+	sections := []struct {
+		title      string
+		categories []string
+	}{
+		{"Executable files", []string{"executable"}},
+		{"Scripts", []string{"script"}},
+		{"Service and desktop entries", []string{"service", "desktop-entry"}},
+		{"Config files", []string{"config"}},
+		{"Secret-risk files", []string{"secret"}},
+		{"Other findings", []string{}},
+	}
+	written := map[string]bool{}
+	for _, section := range sections {
+		findings := filesystemFindingsByCategory(report, section.categories, written)
+		if len(findings) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, finding := range findings {
+			b.WriteString(fileFindingLine(finding))
+			written[finding.Path] = true
+		}
+		b.WriteString("\n")
+	}
+	stateful := statefulFindings(report)
+	if len(stateful) > 0 {
+		b.WriteString("## Stateful data\n\n")
+		for _, finding := range stateful {
+			b.WriteString(fileFindingLine(finding))
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 
@@ -855,6 +898,64 @@ func packageSourceItemsByKind(report model.ScanReport, kinds ...string) []model.
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items
+}
+
+func filesystemFindingsByCategory(report model.ScanReport, categories []string, written map[string]bool) []model.FileFinding {
+	var findings []model.FileFinding
+	for _, finding := range filesystemFindings(report) {
+		if written[finding.Path] {
+			continue
+		}
+		if len(categories) == 0 || containsString(categories, finding.Category) {
+			findings = append(findings, finding)
+		}
+	}
+	return findings
+}
+
+func filesystemFindings(report model.ScanReport) []model.FileFinding {
+	var findings []model.FileFinding
+	for _, finding := range report.FilesystemDiff {
+		if reportDecision(finding.Decision) {
+			findings = append(findings, finding)
+		}
+	}
+	sort.Slice(findings, func(i, j int) bool { return findings[i].Path < findings[j].Path })
+	return findings
+}
+
+func statefulFindings(report model.ScanReport) []model.FileFinding {
+	var findings []model.FileFinding
+	for _, finding := range report.StatefulData {
+		if reportDecision(finding.Decision) {
+			findings = append(findings, finding)
+		}
+	}
+	sort.Slice(findings, func(i, j int) bool { return findings[i].Path < findings[j].Path })
+	return findings
+}
+
+func fileFindingLine(finding model.FileFinding) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("- `%s` %s/%s [%s]", finding.Path, finding.Category, finding.Type, printableDecision(finding.Decision)))
+	if finding.Mode != "" {
+		b.WriteString(fmt.Sprintf(" mode `%s`", finding.Mode))
+	}
+	if finding.Size > 0 {
+		b.WriteString(fmt.Sprintf(" size `%d`", finding.Size))
+	}
+	if finding.SHA256 != "" {
+		b.WriteString(fmt.Sprintf(" sha256 `%s`", finding.SHA256))
+	}
+	if finding.SecretRisk {
+		b.WriteString(" secret-risk")
+	}
+	if finding.Reason != "" {
+		b.WriteString(": ")
+		b.WriteString(finding.Reason)
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 func devProjectItems(report model.ScanReport) []model.Item {

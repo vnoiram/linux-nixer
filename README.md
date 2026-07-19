@@ -86,6 +86,7 @@ Generated projects include:
 - `modules/services.nix`
 - `modules/filesystem-findings.nix`
 - `reports/package-sources.md`
+- `reports/filesystem.md`
 - `reports/containers.md`
 - `reports/git-sources.md`
 - `reports/languages.md`
@@ -110,7 +111,7 @@ Generated projects include:
 - DevOps config markers such as Kubernetes, Docker client config, Helm, Terraform, AWS, GCP, and Azure
 - shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh, gpg, tmux, starship, shell plugin trees, and `.local/bin` executables
 - desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, and common terminal/editor settings
-- filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, and stateful data
+- filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, stateful data, and location hints for `/opt`, `/usr/local`, `/srv`, and user-local paths
 
 Package mapping is intentionally conservative. apt and common language CLI tools get static Nix candidates when known; snap, flatpak, AppImage, and Homebrew findings are reported without automatic Nix replacements by default.
 

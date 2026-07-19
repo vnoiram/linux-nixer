@@ -152,9 +152,16 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			Dconf: []string{"[org/gnome/desktop/interface]", "color-scheme='prefer-dark'"},
 		},
 		FilesystemDiff: []model.FileFinding{
-			{Path: "/usr/local/bin/tool", Category: "script", Reason: "shebang script", Decision: model.DecisionCandidate},
-			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionMigrationNote},
+			{Path: "/opt/vendor/bin/app", Type: "elf", Mode: "-rwxr-xr-x", Size: 7, SHA256: "abc123", Category: "executable", Reason: "ELF executable outside explicit package mapping; under /opt, commonly used for manually installed vendor applications", Decision: model.DecisionCandidate},
+			{Path: "/usr/local/bin/tool", Type: "script", Mode: "-rwxr-xr-x", Size: 20, SHA256: "def456", Category: "script", Reason: "shebang script; under /usr/local executable path, commonly outside apt package ownership", Decision: model.DecisionCandidate},
+			{Path: "/srv/app/app.service", Type: "systemd-unit", Mode: "-rw-r--r--", Size: 40, Category: "service", Reason: "systemd unit outside explicit package mapping; under /srv, commonly service or application data", Decision: model.DecisionCandidate},
+			{Path: "/home/alice/.config/tool/config.toml", Type: "file", Mode: "-rw-r--r--", Size: 14, Category: "config", Reason: "configuration file outside explicit package mapping; under a user home directory", Decision: model.DecisionCandidate},
+			{Path: "/home/alice/.ssh/id_ed25519", Type: "file", Mode: "-rw-------", Size: 32, SHA256: "secretsha", Category: "secret", Reason: "secret-like file excluded from generated Nix; under a user home directory", SecretRisk: true, Decision: model.DecisionMigrationNote},
 			{Path: "/tmp/excluded", Category: "script", Decision: model.DecisionExcluded},
+		},
+		StatefulData: []model.FileFinding{
+			{Path: "/var/lib/postgresql/data/PG_VERSION", Type: "file", Mode: "-rw-------", Size: 3, SHA256: "statesha", Category: "stateful-data", Reason: "stateful data requires manual backup or migration", Decision: model.DecisionMigrationNote},
+			{Path: "/var/lib/mysql/excluded", Category: "stateful-data", Decision: model.DecisionExcluded},
 		},
 	}
 	if err := Project(out, report); err != nil {
@@ -245,6 +252,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if strings.Contains(fs, "id_ed25519") || strings.Contains(fs, "/tmp/excluded") {
 		t.Fatalf("filesystem module leaked secret/excluded finding:\n%s", fs)
 	}
+	filesystemReport := readFile(t, out, "reports/filesystem.md")
+	for _, want := range []string{"# Filesystem migration findings", "Executable files", "/opt/vendor/bin/app", "sha256 `abc123`", "Scripts", "/usr/local/bin/tool", "Service and desktop entries", "/srv/app/app.service", "Config files", "/home/alice/.config/tool/config.toml", "Secret-risk files", "/home/alice/.ssh/id_ed25519", "secret-risk", "Stateful data", "/var/lib/postgresql/data/PG_VERSION", "statesha"} {
+		if !strings.Contains(filesystemReport, want) {
+			t.Fatalf("filesystem report missing %q:\n%s", want, filesystemReport)
+		}
+	}
+	if strings.Contains(filesystemReport, "/tmp/excluded") || strings.Contains(filesystemReport, "/var/lib/mysql/excluded") || strings.Contains(filesystemReport, "PRIVATE KEY") {
+		t.Fatalf("filesystem report included excluded finding or raw secret content:\n%s", filesystemReport)
+	}
 	dev := readFile(t, out, "reports/dev-projects.md")
 	if !strings.Contains(dev, "/home/alice/app/pyproject.toml") || !strings.Contains(dev, "/home/alice/app/.envrc") {
 		t.Fatalf("dev project report missing project:\n%s", dev)
@@ -289,6 +305,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if !strings.Contains(reportMD, "## Language packages") || !strings.Contains(reportMD, "`prettier` via pnpm") || !strings.Contains(reportMD, "version manager `mise`") || !strings.Contains(reportMD, "/home/alice/app/package.json") {
 		t.Fatalf("migration report missing language section:\n%s", reportMD)
+	}
+	if !strings.Contains(reportMD, "/opt/vendor/bin/app") || !strings.Contains(reportMD, "sha256 `abc123`") || !strings.Contains(reportMD, "/var/lib/postgresql/data/PG_VERSION") {
+		t.Fatalf("migration report missing filesystem metadata:\n%s", reportMD)
 	}
 }
 
