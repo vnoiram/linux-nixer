@@ -14,6 +14,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux.
 - NixOS + Home Manager flake rendering.
 - Richer generated modules for service, container, and filesystem findings.
+- Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables.
 - Development project report generation.
 - Baseline manifest creation.
 - Non-interactive review decisions for packages, findings, paths, and managers.

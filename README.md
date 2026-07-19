@@ -4,6 +4,8 @@
 
 The project is intentionally conservative: it detects a wide range of system state, but only turns high-confidence items into Nix automatically. Risky items such as secrets, keys, large stateful data, browser profiles, and cloud credentials are reported as migration notes instead of being embedded into generated Nix files.
 
+Generated Nix settings only include findings marked `confirmed`. Findings left as `candidate` stay in reports and TODO comments until reviewed.
+
 ## Current status
 
 This is an early implementation scaffold. It includes:
@@ -14,6 +16,7 @@ This is an early implementation scaffold. It includes:
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
 - Richer generated modules for services, containers, filesystem findings, and development project reports
+- Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - `doctor --vm` support for building the generated NixOS VM derivation

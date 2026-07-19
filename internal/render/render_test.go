@@ -18,7 +18,7 @@ func TestProjectRendersFlakeAndReport(t *testing.T) {
 			Manager:  "apt",
 			Name:     "curl",
 			NixNames: []string{"curl"},
-			Decision: model.DecisionCandidate,
+			Decision: model.DecisionConfirmed,
 		}},
 	}
 	if err := Project(out, report); err != nil {
@@ -112,8 +112,8 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("services module included excluded service:\n%s", services)
 	}
 	containers := readFile(t, out, "modules/containers.nix")
-	if !strings.Contains(containers, "virtualisation.docker.enable = true;") {
-		t.Fatalf("containers module should enable docker for compose:\n%s", containers)
+	if !strings.Contains(containers, "virtualisation.docker.enable = false;") {
+		t.Fatalf("containers module should not enable docker for candidate compose:\n%s", containers)
 	}
 	if !strings.Contains(containers, "virtualisation.podman.enable = true;") {
 		t.Fatalf("containers module should enable podman:\n%s", containers)
@@ -135,6 +135,56 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	home := readFile(t, out, "users/home.nix")
 	if !strings.Contains(home, "/home/alice/.gitconfig") {
 		t.Fatalf("home module missing user config TODO:\n%s", home)
+	}
+}
+
+func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Host: model.Host{Hostname: "demo"},
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+			{Manager: "apt", Name: "git", NixNames: []string{"git"}, Decision: model.DecisionCandidate},
+			{Manager: "apt", Name: "vim", NixNames: []string{"vim"}, Decision: model.DecisionExcluded},
+		},
+		Languages: model.Languages{
+			NPM: []model.Package{
+				{Manager: "npm", Name: "typescript", NixNames: []string{"nodePackages.typescript"}, Decision: model.DecisionConfirmed},
+				{Manager: "npm", Name: "eslint", NixNames: []string{"nodePackages.eslint"}, Decision: model.DecisionCandidate},
+			},
+		},
+		Containers: []model.Container{
+			{Runtime: "docker", Name: "confirmed", Decision: model.DecisionConfirmed},
+			{Runtime: "podman", Name: "candidate", Decision: model.DecisionCandidate},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	cfg := readFile(t, out, "hosts/generated/configuration.nix")
+	if !strings.Contains(cfg, "pkgs.curl") {
+		t.Fatalf("confirmed package missing from systemPackages:\n%s", cfg)
+	}
+	if strings.Contains(cfg, "pkgs.git") || strings.Contains(cfg, "pkgs.vim") {
+		t.Fatalf("candidate/excluded package leaked into systemPackages:\n%s", cfg)
+	}
+	home := readFile(t, out, "users/home.nix")
+	if !strings.Contains(home, "pkgs.nodePackages.typescript") {
+		t.Fatalf("confirmed npm package missing from home.packages:\n%s", home)
+	}
+	if strings.Contains(home, "nodePackages.eslint") {
+		t.Fatalf("candidate npm package leaked into home.packages:\n%s", home)
+	}
+	containers := readFile(t, out, "modules/containers.nix")
+	if !strings.Contains(containers, "virtualisation.docker.enable = true;") {
+		t.Fatalf("confirmed docker runtime should be enabled:\n%s", containers)
+	}
+	if !strings.Contains(containers, "virtualisation.podman.enable = false;") {
+		t.Fatalf("candidate podman runtime should not be enabled:\n%s", containers)
+	}
+	reportMD := readFile(t, out, "reports/migration-report.md")
+	if !strings.Contains(reportMD, "`git` via apt -> `git` [candidate]") {
+		t.Fatalf("candidate package missing from report:\n%s", reportMD)
 	}
 }
 
