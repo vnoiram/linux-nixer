@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -49,6 +52,7 @@ func (UserScanner) Scan(ctx context.Context, opts Options, report *model.ScanRep
 	if err != nil {
 		return err
 	}
+	groupsByGID, groupsByUser := readGroups(opts.Root)
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	for sc.Scan() {
 		parts := strings.Split(sc.Text(), ":")
@@ -56,8 +60,68 @@ func (UserScanner) Scan(ctx context.Context, opts Options, report *model.ScanRep
 			continue
 		}
 		u := model.User{Name: parts[0], UID: parts[2], GID: parts[3], Home: parts[5], Shell: parts[6]}
-		u.System = !strings.HasPrefix(u.Home, "/home/") && u.Name != "root"
+		u.Groups = userGroups(u, groupsByGID, groupsByUser)
+		u.System = isSystemUser(u)
 		report.Users = append(report.Users, u)
 	}
 	return sc.Err()
+}
+
+func readGroups(root string) (map[string]string, map[string][]string) {
+	b, err := os.ReadFile(rootPath(root, "/etc/group"))
+	if err != nil {
+		return nil, nil
+	}
+	byGID := map[string]string{}
+	byUser := map[string][]string{}
+	sc := bufio.NewScanner(bytes.NewReader(b))
+	for sc.Scan() {
+		parts := strings.Split(sc.Text(), ":")
+		if len(parts) < 4 {
+			continue
+		}
+		name := parts[0]
+		gid := parts[2]
+		byGID[gid] = name
+		for _, member := range strings.Split(parts[3], ",") {
+			member = strings.TrimSpace(member)
+			if member == "" {
+				continue
+			}
+			byUser[member] = append(byUser[member], name)
+		}
+	}
+	return byGID, byUser
+}
+
+func userGroups(user model.User, groupsByGID map[string]string, groupsByUser map[string][]string) []string {
+	seen := map[string]bool{}
+	var groups []string
+	add := func(group string) {
+		if group == "" || seen[group] {
+			return
+		}
+		seen[group] = true
+		groups = append(groups, group)
+	}
+	add(groupsByGID[user.GID])
+	for _, group := range groupsByUser[user.Name] {
+		add(group)
+	}
+	sort.Strings(groups)
+	return groups
+}
+
+func isSystemUser(user model.User) bool {
+	if user.Name == "root" {
+		return false
+	}
+	if uid, err := strconv.Atoi(user.UID); err == nil && uid < 1000 {
+		return true
+	}
+	shell := strings.TrimSpace(user.Shell)
+	if strings.HasSuffix(shell, "/nologin") || strings.HasSuffix(shell, "/false") {
+		return true
+	}
+	return !strings.HasPrefix(user.Home, "/home/")
 }

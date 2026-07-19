@@ -11,7 +11,7 @@ Generated Nix settings only include findings marked `confirmed`. Findings left a
 This is an early implementation scaffold. It includes:
 
 - Go CLI commands: `scan`, `review`, `generate`, `doctor`, `baseline create`
-- Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, system config files, DevOps/project config, user shell settings, desktop settings, and filesystem findings
+- Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, system config files, DevOps/project config, user shell settings, desktop settings, and filesystem findings
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
@@ -87,6 +87,7 @@ Generated projects include:
 - `modules/filesystem-findings.nix`
 - `reports/package-sources.md`
 - `reports/filesystem.md`
+- `reports/users.md`
 - `reports/containers.md`
 - `reports/git-sources.md`
 - `reports/languages.md`
@@ -100,6 +101,7 @@ Generated projects include:
 ## Scanner domains
 
 - apt/dpkg packages, manual install hints, apt repositories, keyrings, preferences, and apt config
+- Linux users, login shells, home directories, system-user hints, supplementary groups, and privileged group membership
 - snap, flatpak, AppImage, and Homebrew on Linux
 - npm/pnpm/yarn global packages and local node package manager metadata
 - Python venv, pipx, pyproject, requirements, Poetry, Pipenv, uv, and Conda environment markers

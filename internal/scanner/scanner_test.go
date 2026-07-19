@@ -166,6 +166,58 @@ func TestReadFileUsesSudoFallback(t *testing.T) {
 	}
 }
 
+func TestUserScannerAddsGroupsAndSystemHints(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/etc/passwd", `root:x:0:0:root:/root:/bin/bash
+alice:x:1000:1000:Alice:/home/alice:/bin/zsh
+bob:x:1001:1001:Bob:/home/bob:/usr/sbin/nologin
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+service:x:1200:1200:service:/var/lib/service:/bin/false
+`)
+	write(t, root, "/etc/group", `root:x:0:
+daemon:x:1:
+alice:x:1000:
+bob:x:1001:
+service:x:1200:
+sudo:x:27:alice
+docker:x:998:alice
+video:x:44:alice,bob
+`)
+
+	report := &model.ScanReport{}
+	if err := (UserScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	users := map[string]model.User{}
+	for _, user := range report.Users {
+		users[user.Name] = user
+	}
+	if users["alice"].System || !contains(users["alice"].Groups, "alice") || !contains(users["alice"].Groups, "sudo") || !contains(users["alice"].Groups, "docker") || !contains(users["alice"].Groups, "video") {
+		t.Fatalf("alice groups/system unexpected: %+v", users["alice"])
+	}
+	if !users["bob"].System || !contains(users["bob"].Groups, "video") {
+		t.Fatalf("bob should be system due nologin and retain groups: %+v", users["bob"])
+	}
+	if !users["daemon"].System || !users["service"].System {
+		t.Fatalf("daemon/service should be system users: daemon=%+v service=%+v", users["daemon"], users["service"])
+	}
+	if users["root"].System || !contains(users["root"].Groups, "root") {
+		t.Fatalf("root should remain dedicated non-system user with root group: %+v", users["root"])
+	}
+}
+
+func TestUserScannerContinuesWithoutGroupFile(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/etc/passwd", "alice:x:1000:1000:Alice:/home/alice:/bin/bash\n")
+	report := &model.ScanReport{}
+	if err := (UserScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Users) != 1 || len(report.Users[0].Groups) != 0 {
+		t.Fatalf("unexpected users without group file: %+v", report.Users)
+	}
+}
+
 func TestFilesystemDiffClassifiesSeededRandomLikeApps(t *testing.T) {
 	root := t.TempDir()
 	writeMode(t, root, "/random-seed-42/tools/fake-elf", append([]byte{0x7f, 'E', 'L', 'F'}, []byte("payload")...), 0o755)

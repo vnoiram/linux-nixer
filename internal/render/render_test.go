@@ -75,6 +75,11 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{
 		Host: model.Host{Hostname: "demo"},
+		Users: []model.User{
+			{Name: "root", UID: "0", GID: "0", Home: "/root", Shell: "/bin/bash", Groups: []string{"root"}},
+			{Name: "alice", UID: "1000", GID: "1000", Home: "/home/alice", Shell: "/bin/zsh", Groups: []string{"alice", "docker", "sudo", "video"}},
+			{Name: "daemon", UID: "1", GID: "1", Home: "/usr/sbin", Shell: "/usr/sbin/nologin", Groups: []string{"daemon"}, System: true},
+		},
 		Packages: []model.Package{
 			{Manager: "apt", Name: "curl", Version: "8.0", Source: "apt-mark:manual", NixNames: []string{"curl"}, Decision: model.DecisionCandidate},
 			{Manager: "apt", Name: "excluded", Source: "apt-mark:manual", Decision: model.DecisionExcluded},
@@ -199,6 +204,12 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if strings.Contains(devopsConfig, "super-secret") || strings.Contains(devopsConfig, "excluded") {
 		t.Fatalf("devops config report leaked raw secret or excluded entry:\n%s", devopsConfig)
 	}
+	usersReport := readFile(t, out, "reports/users.md")
+	for _, want := range []string{"# User account findings", "Primary Home Manager user: `alice`", "Human users", "`alice` uid `1000`", "groups `alice, docker, sudo, video`", "Privileged and group-sensitive users", "System users", "`daemon` uid `1`", "`root` uid `0`"} {
+		if !strings.Contains(usersReport, want) {
+			t.Fatalf("users report missing %q:\n%s", want, usersReport)
+		}
+	}
 	packageSources := readFile(t, out, "reports/package-sources.md")
 	for _, want := range []string{"# Package source findings", "Apt packages", "`curl` via apt -> `curl` [candidate] version `8.0` source `apt-mark:manual`", "Apt repositories", "/etc/apt/sources.list", "deb http://archive.ubuntu.com/ubuntu noble main", "Apt keyrings", "/etc/apt/keyrings/vendor.gpg", "Apt preferences", "/etc/apt/preferences.d/pin", "Apt configuration", "/etc/apt/apt.conf.d/99local", "Alternative package ecosystems", "`hello` via snap", "`org.example.App` via flatpak", "`Tool` via appimage", "`hello` via homebrew"} {
 		if !strings.Contains(packageSources, want) {
@@ -297,6 +308,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("configuration should not render raw dconf dump:\n%s", cfg)
 	}
 	reportMD := readFile(t, out, "reports/migration-report.md")
+	if !strings.Contains(reportMD, "## Users") || !strings.Contains(reportMD, "Primary Home Manager user: `alice`") || !strings.Contains(reportMD, "Privileged or group-sensitive user: `alice` groups `alice, docker, sudo, video`") {
+		t.Fatalf("migration report missing user account section:\n%s", reportMD)
+	}
 	if !strings.Contains(reportMD, "## Git sources") || !strings.Contains(reportMD, "/home/alice/app") {
 		t.Fatalf("migration report missing git source section:\n%s", reportMD)
 	}

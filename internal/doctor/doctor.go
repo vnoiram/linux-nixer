@@ -41,6 +41,7 @@ func CheckProjectFiles(project string) []Check {
 		"modules/containers.nix",
 		"reports/package-sources.md",
 		"reports/filesystem.md",
+		"reports/users.md",
 		"reports/containers.md",
 		"reports/git-sources.md",
 		"reports/languages.md",

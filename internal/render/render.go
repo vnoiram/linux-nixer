@@ -40,6 +40,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
 		"reports/package-sources.md":        renderPackageSourcesReport(report),
 		"reports/filesystem.md":             renderFilesystemReport(report),
+		"reports/users.md":                  renderUsersReport(report),
 		"reports/containers.md":             renderContainersReport(report),
 		"reports/git-sources.md":            renderGitSourcesReport(report),
 		"reports/languages.md":              renderLanguagesReport(report),
@@ -237,6 +238,16 @@ func renderReport(report model.ScanReport) string {
 	b.WriteString("## Host\n\n")
 	b.WriteString(fmt.Sprintf("- Distro: %s %s\n", report.Host.Distro, report.Host.Release))
 	b.WriteString(fmt.Sprintf("- Hostname: %s\n\n", report.Host.Hostname))
+	b.WriteString("## Users\n\n")
+	user := primaryUser(report)
+	b.WriteString(fmt.Sprintf("- Primary Home Manager user: `%s` home `%s`\n", user.Name, user.Home))
+	for _, user := range privilegedUsers(report) {
+		b.WriteString(fmt.Sprintf("- Privileged or group-sensitive user: `%s` groups `%s`\n", user.Name, strings.Join(user.Groups, ", ")))
+	}
+	for _, user := range humanUsers(report) {
+		b.WriteString(userLine(user))
+	}
+	b.WriteString("\n")
 	b.WriteString("## Packages\n\n")
 	for _, pkg := range report.Packages {
 		if !reportDecision(pkg.Decision) {
@@ -479,6 +490,34 @@ func renderFilesystemReport(report model.ScanReport) string {
 		b.WriteString("## Stateful data\n\n")
 		for _, finding := range stateful {
 			b.WriteString(fileFindingLine(finding))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func renderUsersReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# User account findings\n\n")
+	primary := primaryUser(report)
+	b.WriteString(fmt.Sprintf("- Primary Home Manager user: `%s` home `%s`\n\n", primary.Name, primary.Home))
+	sections := []struct {
+		title string
+		users []model.User
+	}{
+		{"Human users", humanUsers(report)},
+		{"Privileged and group-sensitive users", privilegedUsers(report)},
+		{"System users", systemUsers(report)},
+	}
+	for _, section := range sections {
+		if len(section.users) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, user := range section.users {
+			b.WriteString(userLine(user))
 		}
 		b.WriteString("\n")
 	}
@@ -864,6 +903,70 @@ func containerComments(report model.ScanReport) []string {
 		}
 	}
 	return lines
+}
+
+func humanUsers(report model.ScanReport) []model.User {
+	var users []model.User
+	for _, user := range report.Users {
+		if !user.System && user.Name != "root" {
+			users = append(users, user)
+		}
+	}
+	sortUsers(users)
+	return users
+}
+
+func systemUsers(report model.ScanReport) []model.User {
+	var users []model.User
+	for _, user := range report.Users {
+		if user.System || user.Name == "root" {
+			users = append(users, user)
+		}
+	}
+	sortUsers(users)
+	return users
+}
+
+func privilegedUsers(report model.ScanReport) []model.User {
+	var users []model.User
+	for _, user := range report.Users {
+		if hasSensitiveGroup(user) {
+			users = append(users, user)
+		}
+	}
+	sortUsers(users)
+	return users
+}
+
+func sortUsers(users []model.User) {
+	sort.Slice(users, func(i, j int) bool {
+		if users[i].Name != users[j].Name {
+			return users[i].Name < users[j].Name
+		}
+		return users[i].UID < users[j].UID
+	})
+}
+
+func hasSensitiveGroup(user model.User) bool {
+	for _, group := range user.Groups {
+		if containsString([]string{"sudo", "wheel", "admin", "docker", "podman", "audio", "video", "input", "plugdev", "dialout"}, group) {
+			return true
+		}
+	}
+	return false
+}
+
+func userLine(user model.User) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("- `%s` uid `%s` gid `%s` home `%s` shell `%s`", user.Name, user.UID, user.GID, user.Home, user.Shell))
+	if len(user.Groups) > 0 {
+		b.WriteString(fmt.Sprintf(" groups `%s`", strings.Join(user.Groups, ", ")))
+	}
+	if user.System {
+		b.WriteString(" system")
+	}
+	b.WriteString("\n")
+	return b.String()
 }
 
 func packagesByManager(report model.ScanReport, managers ...string) []model.Package {
