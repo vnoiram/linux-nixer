@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/vnoiram/linux-nixer/internal/baseline"
 	"github.com/vnoiram/linux-nixer/internal/doctor"
@@ -61,7 +62,7 @@ Usage:
   linux-nixer scan --out scan.json [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
   linux-nixer review --scan scan.json --out reviewed.json [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer generate --scan reviewed.json --out ./nix-config
-  linux-nixer doctor --project ./nix-config [--vm] [--host generated]
+  linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer version`)
 }
@@ -178,6 +179,8 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	project := fs.String("project", "", "generated flake project")
 	vm := fs.Bool("vm", false, "attempt VM validation")
+	boot := fs.Bool("boot", false, "attempt to start the generated VM script")
+	timeout := fs.Duration("timeout", 15*time.Second, "VM boot validation timeout")
 	host := fs.String("host", "", "NixOS configuration name for VM validation")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -185,7 +188,7 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	if *project == "" {
 		return errors.New("doctor requires --project")
 	}
-	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Host: *host})
+	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Boot: *boot, Timeout: *timeout, Host: *host})
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(result)

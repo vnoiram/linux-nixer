@@ -21,6 +21,7 @@ This is an early implementation scaffold. It includes:
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - `doctor --vm` support for building the generated NixOS VM derivation
+- Optional `doctor --boot` check for starting the generated VM script with a timeout
 - Baseline IDs such as `ubuntu:24.04` resolved from local `baselines/` or user cache
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
@@ -71,6 +72,7 @@ VM validation builds the generated NixOS VM derivation when Nix is available:
 
 ```sh
 bin/linux-nixer doctor --project nix-config --vm --host generated
+bin/linux-nixer doctor --project nix-config --vm --boot --timeout 20s --host generated
 ```
 
 Generated projects include:

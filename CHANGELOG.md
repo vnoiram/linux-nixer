@@ -22,4 +22,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Non-interactive review decisions for packages, findings, paths, and managers.
 - Interactive review mode with safe handling for secret-like and stateful findings.
 - VM build validation through `doctor --vm`.
+- Optional VM boot script validation through `doctor --boot`.
 - CI and tag-based release workflow.

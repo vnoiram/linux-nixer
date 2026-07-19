@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Result struct {
@@ -18,8 +19,13 @@ type Result struct {
 type Options struct {
 	Project string
 	VM      bool
+	Boot    bool
 	Host    string
+	Timeout time.Duration
+	Runner  Runner
 }
+
+type Runner func(context.Context, string, ...string) ([]byte, error)
 
 type Check struct {
 	Name    string `json:"name"`
@@ -44,6 +50,16 @@ func CheckProjectFiles(project string) []Check {
 }
 
 func Run(ctx context.Context, opts Options) Result {
+	if opts.Boot {
+		opts.VM = true
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = 15 * time.Second
+	}
+	runner := opts.Runner
+	if runner == nil {
+		runner = defaultRunner
+	}
 	result := Result{Project: opts.Project, OK: true}
 	result.Checks = append(result.Checks, CheckProjectFiles(opts.Project)...)
 	for _, c := range result.Checks {
@@ -51,14 +67,15 @@ func Run(ctx context.Context, opts Options) Result {
 			result.OK = false
 		}
 	}
-	if _, err := exec.LookPath("nix"); err != nil {
-		result.Checks = append(result.Checks, Check{Name: "nix", OK: false, Message: "nix command not found; skipping flake validation"})
-		result.Suggestions = append(result.Suggestions, "Install Nix to run nix flake check and VM validation.")
-		result.OK = false
-		return result
+	if opts.Runner == nil {
+		if _, err := exec.LookPath("nix"); err != nil {
+			result.Checks = append(result.Checks, Check{Name: "nix", OK: false, Message: "nix command not found; skipping flake validation"})
+			result.Suggestions = append(result.Suggestions, "Install Nix to run nix flake check and VM validation.")
+			result.OK = false
+			return result
+		}
 	}
-	cmd := exec.CommandContext(ctx, "nix", "flake", "check", opts.Project)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := runner(ctx, "nix", "flake", "check", opts.Project); err != nil {
 		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: string(out)})
 		result.OK = false
 	} else {
@@ -74,17 +91,48 @@ func Run(ctx context.Context, opts Options) Result {
 			result.OK = false
 		} else {
 			attr := opts.Project + "#nixosConfigurations." + host + ".config.system.build.vm"
-			vmCmd := exec.CommandContext(ctx, "nix", "build", attr)
-			if out, err := vmCmd.CombinedOutput(); err != nil {
+			if out, err := runner(ctx, "nix", "build", attr); err != nil {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: false, Message: string(out)})
 				result.OK = false
 			} else {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: true})
-				result.Suggestions = append(result.Suggestions, "Run ./result/bin/run-"+host+"-vm to boot the generated VM after reviewing secrets and migration notes.")
+				script := vmScriptPath(host)
+				if _, err := os.Stat(script); err != nil {
+					result.Checks = append(result.Checks, Check{Name: "vm script:" + host, OK: false, Message: err.Error()})
+					result.OK = false
+				} else {
+					result.Checks = append(result.Checks, Check{Name: "vm script:" + host, OK: true, Message: script})
+					if opts.Boot {
+						bootCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+						out, err := runner(bootCtx, script)
+						cancel()
+						if err != nil {
+							if bootCtx.Err() == context.DeadlineExceeded {
+								result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: true, Message: "VM process started and reached timeout without immediate failure"})
+							} else {
+								result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: false, Message: string(out)})
+								result.OK = false
+							}
+						} else {
+							result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: true, Message: string(out)})
+						}
+					} else {
+						result.Suggestions = append(result.Suggestions, "Run "+script+" to boot the generated VM after reviewing secrets and migration notes.")
+					}
+				}
 			}
 		}
 	}
 	return result
+}
+
+func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	return cmd.CombinedOutput()
+}
+
+func vmScriptPath(host string) string {
+	return filepath.Join("result", "bin", "run-"+host+"-vm")
 }
 
 func errorMessage(err error) string {
