@@ -143,11 +143,11 @@ func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
 	}
 }
 
-func TestConfigScannerMarksSecretRiskDevOpsConfig(t *testing.T) {
+func TestDevOpsConfigScannerMarksSecretRiskConfig(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/home/alice/.kube/config", "users:\n- token: super-secret\n")
 	report := &model.ScanReport{}
-	if err := (ConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+	if err := (DevOpsConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
 		t.Fatal(err)
 	}
 	if len(report.Items) == 0 {
@@ -156,7 +156,7 @@ func TestConfigScannerMarksSecretRiskDevOpsConfig(t *testing.T) {
 	if report.Items[0].Decision != model.DecisionMigrationNote {
 		t.Fatalf("decision=%q, want migration-note", report.Items[0].Decision)
 	}
-	if len(report.Warnings) == 0 || !strings.Contains(report.Warnings[0].Message, "secret-risk") {
+	if len(report.Warnings) == 0 || report.Warnings[0].Source != "devops-config" || !strings.Contains(report.Warnings[0].Message, "secret-risk") {
 		t.Fatalf("expected secret warning, got %+v", report.Warnings)
 	}
 }
@@ -198,40 +198,108 @@ func TestSudoFallbackDisabledForMountedRootfs(t *testing.T) {
 	}
 }
 
-func TestConfigScannerFindsDevOpsAndProjectConfigs(t *testing.T) {
+func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
-	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[wifi-security]\npsk=secret\n")
-	write(t, root, "/home/alice/project/pyproject.toml", "[project]\nname='demo'\n")
-	write(t, root, "/home/alice/project/.devcontainer/devcontainer.json", "{}")
-	write(t, root, "/home/alice/.gitconfig", "[user]\nname = Alice\n")
-	write(t, root, "/home/alice/project/.envrc", "use flake\n")
+	write(t, root, "/home/alice/.kube/config", "users:\n- token: super-secret\n")
+	write(t, root, "/home/alice/.docker/config.json", `{"auths":{}}`)
+	write(t, root, "/home/alice/.config/helm/repositories.yaml", "repositories: []\n")
+	write(t, root, "/home/alice/.terraformrc", "credentials \"app.terraform.io\" {}\n")
+	write(t, root, "/home/alice/.aws/config", "[default]\nregion=us-east-1\n")
+	write(t, root, "/home/alice/.config/gcloud/configurations/config_default", "[core]\n")
+	write(t, root, "/home/alice/.azure/config", "[cloud]\n")
 
 	report := &model.ScanReport{}
-	if err := (ConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+	if err := (DevOpsConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]model.Decision{}
 	for _, item := range report.Items {
 		seen[item.Path] = item.Decision
 	}
-	if seen["/home/alice/project/pyproject.toml"] != model.DecisionCandidate {
-		t.Fatalf("missing project config in %+v", report.Items)
+	for _, path := range []string{
+		"/home/alice/.kube/config",
+		"/home/alice/.docker/config.json",
+		"/home/alice/.config/helm/repositories.yaml",
+		"/home/alice/.terraformrc",
+		"/home/alice/.config/gcloud/configurations/config_default",
+		"/home/alice/.azure/config",
+	} {
+		if seen[path] != model.DecisionMigrationNote {
+			t.Fatalf("path %s decision=%q, want migration-note in %+v", path, seen[path], report.Items)
+		}
 	}
-	if seen["/home/alice/project/.devcontainer/devcontainer.json"] != model.DecisionCandidate {
-		t.Fatalf("missing devcontainer config in %+v", report.Items)
+	if seen["/home/alice/.aws/config"] != model.DecisionCandidate {
+		t.Fatalf("aws config should remain candidate in %+v", report.Items)
 	}
-	if _, ok := seen["/home/alice/.gitconfig"]; ok {
-		t.Fatalf("user config should be handled by UserConfigScanner, got %+v", report.Items)
+	if len(report.Warnings) == 0 {
+		t.Fatalf("expected secret-risk warnings, got %+v", report.Warnings)
 	}
-	if _, ok := seen["/home/alice/project/.envrc"]; ok {
-		t.Fatalf("direnv config should be handled by UserConfigScanner, got %+v", report.Items)
+}
+
+func TestProjectConfigScannerFindsProjectFiles(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/project/package.json", "{}")
+	write(t, root, "/home/alice/project/pyproject.toml", "[project]\nname='demo'\n")
+	write(t, root, "/home/alice/project/requirements.txt", "ruff\n")
+	write(t, root, "/home/alice/project/go.mod", "module example.com/demo\n")
+	write(t, root, "/home/alice/project/Cargo.toml", "[package]\n")
+	write(t, root, "/home/alice/project/flake.nix", "{}")
+	write(t, root, "/home/alice/project/.devcontainer/devcontainer.json", "{}")
+	write(t, root, "/srv/app/package.json", "{}")
+	write(t, root, "/srv/app/pyproject.toml", "[project]\n")
+	write(t, root, "/srv/app/go.mod", "module example.com/app\n")
+	write(t, root, "/srv/app/Cargo.toml", "[package]\n")
+	write(t, root, "/srv/app/flake.nix", "{}")
+	write(t, root, "/home/alice/project/.envrc", "use flake\n")
+	write(t, root, "/home/alice/.gitconfig", "[user]\nname = Alice\n")
+	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
+
+	report := &model.ScanReport{}
+	if err := (ProjectConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := seen["/etc/udev/rules.d/99-device.rules"]; ok {
-		t.Fatalf("system config should be handled by SystemConfigScanner, got %+v", report.Items)
+	seen := map[string]model.Decision{}
+	for _, item := range report.Items {
+		seen[item.Path] = item.Decision
 	}
-	if _, ok := seen["/etc/NetworkManager/system-connections/home.nmconnection"]; ok {
-		t.Fatalf("network config should be handled by SystemConfigScanner, got %+v", report.Items)
+	for _, path := range []string{
+		"/home/alice/project/package.json",
+		"/home/alice/project/pyproject.toml",
+		"/home/alice/project/requirements.txt",
+		"/home/alice/project/go.mod",
+		"/home/alice/project/Cargo.toml",
+		"/home/alice/project/flake.nix",
+		"/home/alice/project/.devcontainer/devcontainer.json",
+		"/srv/app/package.json",
+		"/srv/app/pyproject.toml",
+		"/srv/app/go.mod",
+		"/srv/app/Cargo.toml",
+		"/srv/app/flake.nix",
+	} {
+		if seen[path] != model.DecisionCandidate {
+			t.Fatalf("missing project config %s in %+v", path, report.Items)
+		}
+	}
+	for _, path := range []string{"/home/alice/project/.envrc", "/home/alice/.gitconfig", "/etc/udev/rules.d/99-device.rules"} {
+		if _, ok := seen[path]; ok {
+			t.Fatalf("non-project config %s should not be handled by ProjectConfigScanner, got %+v", path, report.Items)
+		}
+	}
+}
+
+func TestDefaultRegistryUsesDedicatedConfigScanners(t *testing.T) {
+	reg := DefaultRegistry()
+	names := map[string]bool{}
+	for _, scanner := range reg.scanners {
+		names[scanner.Name()] = true
+	}
+	for _, want := range []string{"system-config", "devops-config", "project-config", "user-config", "desktop"} {
+		if !names[want] {
+			t.Fatalf("default registry missing %q in %+v", want, names)
+		}
+	}
+	if names["config"] {
+		t.Fatalf("default registry should not include legacy config scanner: %+v", names)
 	}
 }
 

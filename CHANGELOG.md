@@ -27,4 +27,5 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Dedicated desktop settings scanner and `reports/desktop.md` output.
 - Dedicated user shell settings scanner and `reports/user-config.md` output.
 - Dedicated system operation settings scanner and `reports/system-config.md` output.
+- Dedicated DevOps and project configuration scanners plus `reports/devops-config.md` output.
 - CI and tag-based release workflow.

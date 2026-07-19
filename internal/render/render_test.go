@@ -89,6 +89,14 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "os-config", Name: "home.nmconnection", Path: "/etc/NetworkManager/system-connections/home.nmconnection", Decision: model.DecisionMigrationNote, Reason: "network connection profile may contain credentials"},
 			{Kind: "os-config", Name: "app", Path: "/etc/nginx/sites-enabled/app", Decision: model.DecisionCandidate, Reason: "web server configuration"},
 			{Kind: "os-config", Name: "ufw.conf", Path: "/etc/ufw/ufw.conf", Decision: model.DecisionExcluded, Reason: "firewall configuration"},
+			{Kind: "devops-config", Name: "config", Path: "/home/alice/.kube/config", Decision: model.DecisionMigrationNote, Reason: "kubernetes configuration may contain credentials"},
+			{Kind: "devops-config", Name: "config.json", Path: "/home/alice/.docker/config.json", Decision: model.DecisionMigrationNote, Reason: "docker client configuration may contain credentials"},
+			{Kind: "devops-config", Name: "repositories.yaml", Path: "/home/alice/.config/helm/repositories.yaml", Decision: model.DecisionMigrationNote, Reason: "helm repository configuration may contain credentials"},
+			{Kind: "devops-config", Name: ".terraformrc", Path: "/home/alice/.terraformrc", Decision: model.DecisionMigrationNote, Reason: "terraform CLI configuration may contain credentials"},
+			{Kind: "devops-config", Name: "config", Path: "/home/alice/.aws/config", Decision: model.DecisionCandidate, Reason: "aws CLI configuration"},
+			{Kind: "devops-config", Name: "config_default", Path: "/home/alice/.config/gcloud/configurations/config_default", Decision: model.DecisionMigrationNote, Reason: "gcloud configuration may contain credentials"},
+			{Kind: "devops-config", Name: "config", Path: "/home/alice/.azure/config", Decision: model.DecisionMigrationNote, Reason: "azure CLI configuration may contain credentials"},
+			{Kind: "devops-config", Name: "excluded", Path: "/home/alice/.kube/excluded", Decision: model.DecisionExcluded, Reason: "kubernetes configuration may contain credentials"},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionCandidate, Reason: "shell or login environment configuration"},
 			{Kind: "shell-plugin", Name: ".oh-my-zsh", Path: "/home/alice/.oh-my-zsh", Decision: model.DecisionCandidate, Reason: "shell plugin manager or plugin tree"},
@@ -136,6 +144,15 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if strings.Contains(systemConfig, "excluded") || strings.Contains(systemConfig, "ufw.conf") {
 		t.Fatalf("system config report included excluded entries:\n%s", systemConfig)
+	}
+	devopsConfig := readFile(t, out, "reports/devops-config.md")
+	for _, want := range []string{"Kubernetes", "/home/alice/.kube/config", "Docker", "/home/alice/.docker/config.json", "Helm", "/home/alice/.config/helm/repositories.yaml", "Terraform", "/home/alice/.terraformrc", "AWS", "/home/alice/.aws/config", "GCP", "/home/alice/.config/gcloud/configurations/config_default", "Azure", "/home/alice/.azure/config"} {
+		if !strings.Contains(devopsConfig, want) {
+			t.Fatalf("devops config report missing %q:\n%s", want, devopsConfig)
+		}
+	}
+	if strings.Contains(devopsConfig, "super-secret") || strings.Contains(devopsConfig, "excluded") {
+		t.Fatalf("devops config report leaked raw secret or excluded entry:\n%s", devopsConfig)
 	}
 	containers := readFile(t, out, "modules/containers.nix")
 	if !strings.Contains(containers, "virtualisation.docker.enable = false;") {
