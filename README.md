@@ -11,11 +11,11 @@ Generated Nix settings only include findings marked `confirmed`. Findings left a
 This is an early implementation scaffold. It includes:
 
 - Go CLI commands: `scan`, `review`, `generate`, `doctor`, `baseline create`
-- Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, common config files, user shell settings, desktop settings, and filesystem findings
+- Registry-based scanners for host/user metadata, apt, language tooling, Git sources, containers, system config files, common config files, user shell settings, desktop settings, and filesystem findings
 - Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
-- Richer generated modules and reports for services, containers, filesystem findings, user shell settings, desktop settings, and development projects
+- Richer generated modules and reports for services, containers, filesystem findings, system config, user shell settings, desktop settings, and development projects
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings
 - Non-interactive review rules for confirming, excluding, or deferring findings
@@ -86,6 +86,7 @@ Generated projects include:
 - `modules/services.nix`
 - `modules/filesystem-findings.nix`
 - `reports/migration-report.md`
+- `reports/system-config.md`
 - `reports/dev-projects.md`
 - `reports/user-config.md`
 - `reports/desktop.md`
@@ -100,7 +101,7 @@ Generated projects include:
 - cargo, gem, and `go install` style user binaries
 - Git checkouts under common source locations
 - Docker/Podman containers and compose files
-- systemd, cron, and devops config markers
+- systemd, cron, network, firewall, web server, kernel/device tuning, and devops config markers
 - shell/user settings such as bash, zsh, fish, profile/env files, direnv, git, ssh, gpg, tmux, starship, shell plugin trees, and `.local/bin` executables
 - desktop environment markers, fonts, themes/icons, autostart entries, GNOME dconf dumps, KDE/i3/sway/input method config, and common terminal/editor settings
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, and stateful data

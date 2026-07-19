@@ -38,6 +38,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/containers.nix":            renderTemplate(containersTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
 		"modules/services.nix":              renderServicesModule(report),
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
+		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
 		"reports/user-config.md":            renderUserConfigReport(report),
 		"reports/desktop.md":                renderDesktopReport(report),
@@ -406,6 +407,51 @@ func renderDevProjectsReport(report model.ScanReport) string {
 	return b.String()
 }
 
+func renderSystemConfigReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# System configuration findings\n\n")
+	sections := []struct {
+		title string
+		match func(model.Item) bool
+	}{
+		{"Network", func(item model.Item) bool { return strings.Contains(item.Reason, "network") }},
+		{"Firewall", func(item model.Item) bool { return strings.Contains(item.Reason, "firewall") }},
+		{"Web servers", func(item model.Item) bool { return strings.Contains(item.Reason, "web server") }},
+		{"Kernel and devices", func(item model.Item) bool {
+			return strings.Contains(item.Reason, "kernel") || strings.Contains(item.Reason, "device")
+		}},
+		{"Core system", func(item model.Item) bool { return item.Kind == "os-config" }},
+	}
+	written := map[string]bool{}
+	for _, section := range sections {
+		items := systemConfigItemsByMatch(report, section.match, written)
+		if len(items) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, item := range items {
+			b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+			if item.Reason != "" {
+				b.WriteString(": ")
+				b.WriteString(item.Reason)
+			}
+			b.WriteString("\n")
+			written[item.Path] = true
+		}
+		b.WriteString("\n")
+	}
+	if len(systemServices(report)) > 0 {
+		b.WriteString("## Services\n\n")
+		for _, service := range systemServices(report) {
+			b.WriteString(fmt.Sprintf("- `%s` %s `%s` [%s]\n", service.Name, service.Manager, service.Path, printableDecision(service.Decision)))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func renderDesktopReport(report model.ScanReport) string {
 	var b strings.Builder
 	b.WriteString("# Desktop findings\n\n")
@@ -537,6 +583,38 @@ func desktopConfigItems(report model.ScanReport) []model.Item {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items
+}
+
+func systemConfigItems(report model.ScanReport) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && item.Kind == "os-config" {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
+}
+
+func systemConfigItemsByMatch(report model.ScanReport, match func(model.Item) bool, written map[string]bool) []model.Item {
+	var items []model.Item
+	for _, item := range systemConfigItems(report) {
+		if !written[item.Path] && match(item) {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func systemServices(report model.ScanReport) []model.Service {
+	var services []model.Service
+	for _, service := range report.Services {
+		if reportDecision(service.Decision) {
+			services = append(services, service)
+		}
+	}
+	sort.Slice(services, func(i, j int) bool { return services[i].Path < services[j].Path })
+	return services
 }
 
 func userConfigItems(report model.ScanReport) []model.Item {

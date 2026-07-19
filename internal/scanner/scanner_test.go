@@ -198,7 +198,7 @@ func TestSudoFallbackDisabledForMountedRootfs(t *testing.T) {
 	}
 }
 
-func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
+func TestConfigScannerFindsDevOpsAndProjectConfigs(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
 	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[wifi-security]\npsk=secret\n")
@@ -215,12 +215,6 @@ func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
 	for _, item := range report.Items {
 		seen[item.Path] = item.Decision
 	}
-	if seen["/etc/udev/rules.d/99-device.rules"] != model.DecisionCandidate {
-		t.Fatalf("missing udev rule in %+v", report.Items)
-	}
-	if seen["/etc/NetworkManager/system-connections/home.nmconnection"] != model.DecisionMigrationNote {
-		t.Fatalf("network secret should be migration note in %+v", report.Items)
-	}
 	if seen["/home/alice/project/pyproject.toml"] != model.DecisionCandidate {
 		t.Fatalf("missing project config in %+v", report.Items)
 	}
@@ -232,6 +226,101 @@ func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
 	}
 	if _, ok := seen["/home/alice/project/.envrc"]; ok {
 		t.Fatalf("direnv config should be handled by UserConfigScanner, got %+v", report.Items)
+	}
+	if _, ok := seen["/etc/udev/rules.d/99-device.rules"]; ok {
+		t.Fatalf("system config should be handled by SystemConfigScanner, got %+v", report.Items)
+	}
+	if _, ok := seen["/etc/NetworkManager/system-connections/home.nmconnection"]; ok {
+		t.Fatalf("network config should be handled by SystemConfigScanner, got %+v", report.Items)
+	}
+}
+
+func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/etc/fstab", "UUID=demo / ext4 defaults 0 1\n")
+	write(t, root, "/etc/hosts", "127.0.0.1 localhost\n")
+	write(t, root, "/etc/sudoers", "root ALL=(ALL) ALL\n")
+	write(t, root, "/etc/locale.conf", "LANG=en_US.UTF-8\n")
+	write(t, root, "/etc/timezone", "UTC\n")
+	write(t, root, "/etc/ssh/sshd_config", "PermitRootLogin no\n")
+	write(t, root, "/etc/sysctl.conf", "vm.swappiness=10\n")
+	write(t, root, "/etc/nftables.conf", "flush ruleset\n")
+	write(t, root, "/etc/ufw/ufw.conf", "ENABLED=yes\n")
+	write(t, root, "/etc/default/ufw", "IPV6=yes\n")
+	write(t, root, "/etc/netplan/01-net.yaml", "network: {}\n")
+	write(t, root, "/etc/NetworkManager/NetworkManager.conf", "[main]\n")
+	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[wifi-security]\npsk=secret\n")
+	write(t, root, "/etc/resolv.conf", "nameserver 1.1.1.1\n")
+	write(t, root, "/etc/systemd/resolved.conf", "[Resolve]\n")
+	write(t, root, "/etc/sysctl.d/99-local.conf", "fs.inotify.max_user_watches=1\n")
+	write(t, root, "/etc/modprobe.d/local.conf", "options test value=1\n")
+	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
+	write(t, root, "/etc/logrotate.d/app", "/var/log/app/*.log {}\n")
+	write(t, root, "/etc/nginx/sites-enabled/app", "server {}\n")
+	write(t, root, "/etc/apache2/sites-enabled/app.conf", "<VirtualHost *:80>\n")
+	write(t, root, "/etc/systemd/system/custom.service", "[Service]\n")
+	write(t, root, "/etc/systemd/system/custom.timer", "[Timer]\n")
+	write(t, root, "/home/alice/.config/systemd/user/user.service", "[Service]\n")
+	write(t, root, "/etc/cron.d/job", "* * * * * root true\n")
+	write(t, root, "/var/spool/cron/crontabs/alice", "* * * * * true\n")
+
+	report := &model.ScanReport{}
+	if err := (SystemConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]model.Item{}
+	for _, item := range report.Items {
+		seen[item.Path] = item
+	}
+	for path, reason := range map[string]string{
+		"/etc/fstab":           "filesystem mount configuration",
+		"/etc/hosts":           "system configuration",
+		"/etc/sudoers":         "privilege configuration",
+		"/etc/locale.conf":     "localization configuration",
+		"/etc/timezone":        "localization configuration",
+		"/etc/ssh/sshd_config": "ssh daemon configuration",
+		"/etc/sysctl.conf":     "kernel or device tuning",
+		"/etc/nftables.conf":   "firewall configuration",
+		"/etc/ufw/ufw.conf":    "firewall configuration",
+		"/etc/default/ufw":     "firewall configuration",
+		"/etc/netplan":         "network configuration",
+		"/etc/NetworkManager/NetworkManager.conf":                  "network configuration",
+		"/etc/resolv.conf":                                         "network configuration",
+		"/etc/systemd/resolved.conf":                               "network configuration",
+		"/etc/sysctl.d/99-local.conf":                              "kernel or device tuning",
+		"/etc/modprobe.d/local.conf":                               "kernel or device tuning",
+		"/etc/udev/rules.d/99-device.rules":                        "kernel or device tuning",
+		"/etc/logrotate.d/app":                                     "log rotation configuration",
+		"/etc/netplan/01-net.yaml":                                 "network configuration",
+		"/etc/nginx/sites-enabled/app":                             "web server configuration",
+		"/etc/apache2/sites-enabled/app.conf":                      "web server configuration",
+		"/etc/NetworkManager/system-connections/home.nmconnection": "network connection profile may contain credentials",
+	} {
+		item, ok := seen[path]
+		if !ok {
+			t.Fatalf("missing %s in %+v", path, report.Items)
+		}
+		if item.Kind != "os-config" || item.Reason != reason {
+			t.Fatalf("item %s=%+v, want os-config reason %q", path, item, reason)
+		}
+	}
+	if seen["/etc/NetworkManager/system-connections/home.nmconnection"].Decision != model.DecisionMigrationNote {
+		t.Fatalf("network secret should be migration note in %+v", report.Items)
+	}
+	services := map[string]string{}
+	for _, service := range report.Services {
+		services[service.Path] = service.Manager
+	}
+	for path, manager := range map[string]string{
+		"/etc/systemd/system/custom.service":            "systemd",
+		"/etc/systemd/system/custom.timer":              "systemd",
+		"/home/alice/.config/systemd/user/user.service": "systemd",
+		"/etc/cron.d/job":                               "cron",
+		"/var/spool/cron/crontabs/alice":                "cron",
+	} {
+		if services[path] != manager {
+			t.Fatalf("service %s manager=%q, want %q in %+v", path, services[path], manager, report.Services)
+		}
 	}
 }
 

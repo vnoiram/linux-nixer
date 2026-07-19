@@ -45,6 +45,7 @@ func DefaultRegistry() Registry {
 		LanguageScanner{},
 		GitScanner{},
 		ContainerScanner{},
+		SystemConfigScanner{},
 		ConfigScanner{},
 		UserConfigScanner{},
 		DesktopScanner{},

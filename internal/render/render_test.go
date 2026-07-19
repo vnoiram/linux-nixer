@@ -85,7 +85,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		},
 		Items: []model.Item{
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
-			{Kind: "os-config", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate},
+			{Kind: "os-config", Name: "99-device.rules", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate, Reason: "kernel or device tuning"},
+			{Kind: "os-config", Name: "home.nmconnection", Path: "/etc/NetworkManager/system-connections/home.nmconnection", Decision: model.DecisionMigrationNote, Reason: "network connection profile may contain credentials"},
+			{Kind: "os-config", Name: "app", Path: "/etc/nginx/sites-enabled/app", Decision: model.DecisionCandidate, Reason: "web server configuration"},
+			{Kind: "os-config", Name: "ufw.conf", Path: "/etc/ufw/ufw.conf", Decision: model.DecisionExcluded, Reason: "firewall configuration"},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionCandidate, Reason: "shell or login environment configuration"},
 			{Kind: "shell-plugin", Name: ".oh-my-zsh", Path: "/home/alice/.oh-my-zsh", Decision: model.DecisionCandidate, Reason: "shell plugin manager or plugin tree"},
@@ -122,8 +125,17 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if !strings.Contains(services, "custom.service") || !strings.Contains(services, "99-device.rules") {
 		t.Fatalf("services module missing service/config TODOs:\n%s", services)
 	}
-	if strings.Contains(services, "excluded") {
+	if strings.Contains(services, "excluded") || strings.Contains(services, "ufw.conf") {
 		t.Fatalf("services module included excluded service:\n%s", services)
+	}
+	systemConfig := readFile(t, out, "reports/system-config.md")
+	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service"} {
+		if !strings.Contains(systemConfig, want) {
+			t.Fatalf("system config report missing %q:\n%s", want, systemConfig)
+		}
+	}
+	if strings.Contains(systemConfig, "excluded") || strings.Contains(systemConfig, "ufw.conf") {
+		t.Fatalf("system config report included excluded entries:\n%s", systemConfig)
 	}
 	containers := readFile(t, out, "modules/containers.nix")
 	if !strings.Contains(containers, "virtualisation.docker.enable = false;") {

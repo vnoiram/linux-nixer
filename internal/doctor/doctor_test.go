@@ -140,6 +140,7 @@ func writeGeneratedProject(t *testing.T, host string) string {
 		"users/home.nix",
 		"modules/containers.nix",
 		"reports/migration-report.md",
+		"reports/system-config.md",
 	}
 	for _, rel := range files {
 		path := filepath.Join(project, rel)

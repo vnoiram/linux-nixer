@@ -13,56 +13,7 @@ type ConfigScanner struct{}
 func (ConfigScanner) Name() string { return "config" }
 
 func (ConfigScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
-	for _, path := range []string{
-		"/etc/fstab",
-		"/etc/hosts",
-		"/etc/sudoers",
-		"/etc/locale.conf",
-		"/etc/timezone",
-		"/etc/ssh/sshd_config",
-		"/etc/sysctl.conf",
-		"/etc/nftables.conf",
-		"/etc/ufw/ufw.conf",
-		"/etc/default/ufw",
-		"/etc/netplan",
-		"/etc/NetworkManager/NetworkManager.conf",
-		"/etc/resolv.conf",
-		"/etc/systemd/resolved.conf",
-	} {
-		if existsWithSudo(ctx, opts, report, "config", path) {
-			report.Items = append(report.Items, model.Item{Kind: "os-config", Name: filepath.Base(path), Path: path, Decision: model.DecisionCandidate})
-		}
-	}
-	for _, pattern := range []string{
-		"/etc/sysctl.d/*.conf",
-		"/etc/modprobe.d/*.conf",
-		"/etc/udev/rules.d/*.rules",
-		"/etc/logrotate.d/*",
-		"/etc/netplan/*.yaml",
-		"/etc/NetworkManager/system-connections/*",
-		"/etc/nginx/sites-enabled/*",
-		"/etc/apache2/sites-enabled/*",
-	} {
-		for _, path := range glob(opts.Root, pattern) {
-			decision := model.DecisionCandidate
-			reason := ""
-			if strings.Contains(path, "/NetworkManager/system-connections/") {
-				decision = model.DecisionMigrationNote
-				reason = "network connection profile may contain credentials"
-			}
-			report.Items = append(report.Items, model.Item{Kind: "os-config", Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: decision, Reason: reason})
-		}
-	}
-	for _, pattern := range []string{"/etc/systemd/system/*.service", "/etc/systemd/system/*.timer", "/home/*/.config/systemd/user/*.service"} {
-		for _, path := range glob(opts.Root, pattern) {
-			report.Services = append(report.Services, model.Service{Manager: "systemd", Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: model.DecisionCandidate})
-		}
-	}
-	for _, pattern := range []string{"/etc/cron.d/*", "/var/spool/cron/crontabs/*"} {
-		for _, path := range glob(opts.Root, pattern) {
-			report.Services = append(report.Services, model.Service{Manager: "cron", Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: model.DecisionCandidate})
-		}
-	}
+	_ = ctx
 	scanDevOpsConfigs(opts, report)
 	scanProjectConfigs(opts, report)
 	return nil
