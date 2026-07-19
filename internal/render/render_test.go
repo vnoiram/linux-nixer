@@ -89,7 +89,20 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Manager: "homebrew", Name: "hello", Source: "/home/linuxbrew/.linuxbrew/Cellar/hello", Decision: model.DecisionCandidate},
 		},
 		Services: []model.Service{
-			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", Decision: model.DecisionCandidate},
+			{
+				Manager:          "systemd",
+				Name:             "custom.service",
+				Path:             "/etc/systemd/system/custom.service",
+				Description:      "Custom app",
+				User:             "app",
+				WorkingDirectory: "/srv/app",
+				ExecStart:        "/opt/vendor/bin/app --token=super-secret",
+				EnvironmentFiles: []string{"/etc/default/custom"},
+				WantedBy:         []string{"multi-user.target"},
+				Decision:         model.DecisionCandidate,
+			},
+			{Manager: "systemd", Name: "custom.timer", Path: "/etc/systemd/system/custom.timer", Description: "Custom timer", Schedule: "OnCalendar=daily", Decision: model.DecisionCandidate},
+			{Manager: "cron", Name: "job", Path: "/etc/cron.d/job", User: "root", ExecStart: "/usr/local/bin/job", Schedule: "15 2 * * *", Decision: model.DecisionCandidate},
 			{Manager: "cron", Name: "excluded", Path: "/etc/cron.d/excluded", Decision: model.DecisionExcluded},
 		},
 		Containers: []model.Container{
@@ -187,13 +200,13 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("services module included excluded service:\n%s", services)
 	}
 	systemConfig := readFile(t, out, "reports/system-config.md")
-	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service"} {
+	for _, want := range []string{"Kernel and devices", "/etc/udev/rules.d/99-device.rules", "Network", "/etc/NetworkManager/system-connections/home.nmconnection", "Web servers", "/etc/nginx/sites-enabled/app", "Services", "custom.service", "Custom app", "user `app`", "working directory `/srv/app`", "exec `/opt/vendor/bin/app --token=<redacted>`", "environment files `/etc/default/custom`", "wanted by `multi-user.target`", "custom.timer", "schedule `OnCalendar=daily`", "job", "schedule `15 2 * * *`"} {
 		if !strings.Contains(systemConfig, want) {
 			t.Fatalf("system config report missing %q:\n%s", want, systemConfig)
 		}
 	}
-	if strings.Contains(systemConfig, "excluded") || strings.Contains(systemConfig, "ufw.conf") {
-		t.Fatalf("system config report included excluded entries:\n%s", systemConfig)
+	if strings.Contains(systemConfig, "excluded") || strings.Contains(systemConfig, "ufw.conf") || strings.Contains(systemConfig, "super-secret") {
+		t.Fatalf("system config report included excluded entries or raw secret:\n%s", systemConfig)
 	}
 	devopsConfig := readFile(t, out, "reports/devops-config.md")
 	for _, want := range []string{"Kubernetes", "/home/alice/.kube/config", "Docker", "/home/alice/.docker/config.json", "Helm", "/home/alice/.config/helm/repositories.yaml", "Terraform", "/home/alice/.terraformrc", "AWS", "/home/alice/.aws/config", "GCP", "/home/alice/.config/gcloud/configurations/config_default", "Azure", "/home/alice/.azure/config"} {
@@ -281,6 +294,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Recreate apt repository `/etc/apt/sources.list`",
 		"Confirm `prettier` from pnpm as a Home Manager package",
 		"Translate systemd service `custom.service`",
+		"exec `/opt/vendor/bin/app --token=<redacted>`",
+		"user `app`",
+		"schedule `15 2 * * *`",
 		"Translate compose `/srv/app/compose.yml`",
 		"backup dirty changes before migration",
 		"Decide how to recreate `/usr/local/bin/tool`",
@@ -292,7 +308,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			t.Fatalf("migration checklist missing %q:\n%s", want, checklist)
 		}
 	}
-	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY"} {
+	for _, unwanted := range []string{"`excluded`", "/tmp/excluded", "redis:7", "PRIVATE KEY", "super-secret"} {
 		if strings.Contains(checklist, unwanted) {
 			t.Fatalf("migration checklist included unwanted %q:\n%s", unwanted, checklist)
 		}

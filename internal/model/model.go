@@ -105,11 +105,18 @@ type Desktop struct {
 }
 
 type Service struct {
-	Manager  string   `json:"manager"`
-	Name     string   `json:"name"`
-	Path     string   `json:"path,omitempty"`
-	Enabled  bool     `json:"enabled,omitempty"`
-	Decision Decision `json:"decision,omitempty"`
+	Manager          string   `json:"manager"`
+	Name             string   `json:"name"`
+	Path             string   `json:"path,omitempty"`
+	Enabled          bool     `json:"enabled,omitempty"`
+	Description      string   `json:"description,omitempty"`
+	User             string   `json:"user,omitempty"`
+	WorkingDirectory string   `json:"workingDirectory,omitempty"`
+	ExecStart        string   `json:"execStart,omitempty"`
+	EnvironmentFiles []string `json:"environmentFiles,omitempty"`
+	WantedBy         []string `json:"wantedBy,omitempty"`
+	Schedule         string   `json:"schedule,omitempty"`
+	Decision         Decision `json:"decision,omitempty"`
 }
 
 type FileFinding struct {

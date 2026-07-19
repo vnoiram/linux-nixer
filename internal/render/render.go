@@ -555,7 +555,7 @@ func writeServiceChecklist(b *strings.Builder, report model.ScanReport) {
 		if !manualDecision(service.Decision) {
 			continue
 		}
-		items = append(items, fmt.Sprintf("Translate %s service `%s` from `%s` into a NixOS service/module or document manual setup.", service.Manager, service.Name, service.Path))
+		items = append(items, serviceChecklistItem(service))
 	}
 	for _, item := range systemConfigItems(report) {
 		if manualDecision(item.Decision) {
@@ -563,6 +563,27 @@ func writeServiceChecklist(b *strings.Builder, report model.ScanReport) {
 		}
 	}
 	writeChecklistSection(b, "Services", items)
+}
+
+func serviceChecklistItem(service model.Service) string {
+	action := fmt.Sprintf("Translate %s service `%s` from `%s` into a NixOS service/module or document manual setup.", service.Manager, service.Name, service.Path)
+	var details []string
+	if service.ExecStart != "" {
+		details = append(details, "exec `"+redactSecretLikeText(service.ExecStart)+"`")
+	}
+	if service.User != "" {
+		details = append(details, "user `"+service.User+"`")
+	}
+	if service.WorkingDirectory != "" {
+		details = append(details, "working directory `"+service.WorkingDirectory+"`")
+	}
+	if service.Schedule != "" {
+		details = append(details, "schedule `"+service.Schedule+"`")
+	}
+	if len(details) > 0 {
+		action += " Review " + strings.Join(details, ", ") + "."
+	}
+	return action
 }
 
 func writeContainerChecklist(b *strings.Builder, report model.ScanReport) {
@@ -1055,11 +1076,43 @@ func renderSystemConfigReport(report model.ScanReport) string {
 	if len(systemServices(report)) > 0 {
 		b.WriteString("## Services\n\n")
 		for _, service := range systemServices(report) {
-			b.WriteString(fmt.Sprintf("- `%s` %s `%s` [%s]\n", service.Name, service.Manager, service.Path, printableDecision(service.Decision)))
+			b.WriteString(fmt.Sprintf("- `%s` %s `%s` [%s]", service.Name, service.Manager, service.Path, printableDecision(service.Decision)))
+			if service.Description != "" {
+				b.WriteString(fmt.Sprintf(": %s", service.Description))
+			}
+			b.WriteString("\n")
+			for _, detail := range serviceDetails(service) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
 		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func serviceDetails(service model.Service) []string {
+	var details []string
+	if service.User != "" {
+		details = append(details, fmt.Sprintf("user `%s`", service.User))
+	}
+	if service.WorkingDirectory != "" {
+		details = append(details, fmt.Sprintf("working directory `%s`", service.WorkingDirectory))
+	}
+	if service.ExecStart != "" {
+		details = append(details, fmt.Sprintf("exec `%s`", redactSecretLikeText(service.ExecStart)))
+	}
+	if len(service.EnvironmentFiles) > 0 {
+		details = append(details, fmt.Sprintf("environment files `%s`", strings.Join(service.EnvironmentFiles, "`, `")))
+	}
+	if len(service.WantedBy) > 0 {
+		details = append(details, fmt.Sprintf("wanted by `%s`", strings.Join(service.WantedBy, "`, `")))
+	}
+	if service.Schedule != "" {
+		details = append(details, fmt.Sprintf("schedule `%s`", service.Schedule))
+	}
+	return details
 }
 
 func renderDevOpsConfigReport(report model.ScanReport) string {
@@ -1329,6 +1382,30 @@ func shellProgramFromPath(path string) string {
 func serviceNameAttr(name string) string {
 	name = strings.TrimSuffix(name, ".service")
 	return name
+}
+
+func redactSecretLikeText(text string) string {
+	var out []string
+	for _, field := range strings.Fields(text) {
+		lower := strings.ToLower(field)
+		switch {
+		case strings.Contains(lower, "password="),
+			strings.Contains(lower, "passwd="),
+			strings.Contains(lower, "token="),
+			strings.Contains(lower, "secret="),
+			strings.Contains(lower, "api_key="),
+			strings.Contains(lower, "apikey="),
+			strings.Contains(lower, "access_key="):
+			if key, _, ok := strings.Cut(field, "="); ok {
+				out = append(out, key+"=<redacted>")
+			} else {
+				out = append(out, "<redacted>")
+			}
+		default:
+			out = append(out, field)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func humanUsers(report model.ScanReport) []model.User {

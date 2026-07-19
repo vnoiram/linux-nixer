@@ -654,11 +654,20 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/logrotate.d/app", "/var/log/app/*.log {}\n")
 	write(t, root, "/etc/nginx/sites-enabled/app", "server {}\n")
 	write(t, root, "/etc/apache2/sites-enabled/app.conf", "<VirtualHost *:80>\n")
-	write(t, root, "/etc/systemd/system/custom.service", "[Service]\n")
-	write(t, root, "/etc/systemd/system/custom.timer", "[Timer]\n")
-	write(t, root, "/home/alice/.config/systemd/user/user.service", "[Service]\n")
-	write(t, root, "/etc/cron.d/job", "* * * * * root true\n")
-	write(t, root, "/var/spool/cron/crontabs/alice", "* * * * * true\n")
+	write(t, root, "/etc/systemd/system/custom.service", `[Unit]
+Description=Custom app
+[Service]
+User=app
+WorkingDirectory=/srv/app
+EnvironmentFile=-/etc/default/custom
+ExecStart=/opt/vendor/bin/app --token=super-secret
+[Install]
+WantedBy=multi-user.target
+`)
+	write(t, root, "/etc/systemd/system/custom.timer", "[Unit]\nDescription=Custom timer\n[Timer]\nOnCalendar=daily\n")
+	write(t, root, "/home/alice/.config/systemd/user/user.service", "[Unit]\nDescription=User app\n[Service]\nExecStart=/home/alice/bin/app\n")
+	write(t, root, "/etc/cron.d/job", "15 2 * * * root /usr/local/bin/job\n")
+	write(t, root, "/var/spool/cron/crontabs/alice", "*/5 * * * * /home/alice/bin/task\n")
 
 	report := &model.ScanReport{}
 	if err := (SystemConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -703,9 +712,9 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	if seen["/etc/NetworkManager/system-connections/home.nmconnection"].Decision != model.DecisionMigrationNote {
 		t.Fatalf("network secret should be migration note in %+v", report.Items)
 	}
-	services := map[string]string{}
+	services := map[string]model.Service{}
 	for _, service := range report.Services {
-		services[service.Path] = service.Manager
+		services[service.Path] = service
 	}
 	for path, manager := range map[string]string{
 		"/etc/systemd/system/custom.service":            "systemd",
@@ -714,9 +723,28 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 		"/etc/cron.d/job":                               "cron",
 		"/var/spool/cron/crontabs/alice":                "cron",
 	} {
-		if services[path] != manager {
-			t.Fatalf("service %s manager=%q, want %q in %+v", path, services[path], manager, report.Services)
+		if services[path].Manager != manager {
+			t.Fatalf("service %s manager=%q, want %q in %+v", path, services[path].Manager, manager, report.Services)
 		}
+	}
+	custom := services["/etc/systemd/system/custom.service"]
+	if custom.Description != "Custom app" || custom.User != "app" || custom.WorkingDirectory != "/srv/app" || custom.ExecStart != "/opt/vendor/bin/app --token=super-secret" {
+		t.Fatalf("custom systemd details missing: %+v", custom)
+	}
+	if len(custom.EnvironmentFiles) != 1 || custom.EnvironmentFiles[0] != "/etc/default/custom" || len(custom.WantedBy) != 1 || custom.WantedBy[0] != "multi-user.target" {
+		t.Fatalf("custom systemd lists missing: %+v", custom)
+	}
+	if services["/etc/systemd/system/custom.timer"].Schedule != "OnCalendar=daily" {
+		t.Fatalf("timer schedule missing: %+v", services["/etc/systemd/system/custom.timer"])
+	}
+	if services["/home/alice/.config/systemd/user/user.service"].Description != "User app" || services["/home/alice/.config/systemd/user/user.service"].ExecStart != "/home/alice/bin/app" {
+		t.Fatalf("user systemd details missing: %+v", services["/home/alice/.config/systemd/user/user.service"])
+	}
+	if services["/etc/cron.d/job"].Schedule != "15 2 * * *" || services["/etc/cron.d/job"].User != "root" || services["/etc/cron.d/job"].ExecStart != "/usr/local/bin/job" {
+		t.Fatalf("cron.d details missing: %+v", services["/etc/cron.d/job"])
+	}
+	if services["/var/spool/cron/crontabs/alice"].Schedule != "*/5 * * * *" || services["/var/spool/cron/crontabs/alice"].User != "alice" || services["/var/spool/cron/crontabs/alice"].ExecStart != "/home/alice/bin/task" {
+		t.Fatalf("spool cron details missing: %+v", services["/var/spool/cron/crontabs/alice"])
 	}
 }
 

@@ -16,6 +16,7 @@ This is an early implementation scaffold. It includes:
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
 - Richer generated modules and reports for package sources, services, containers, language ecosystems, filesystem findings, system config, DevOps config, user shell settings, desktop settings, and development projects
+- Service detail reporting for systemd units, timers, and cron schedules
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Conservative Nix option rendering for detected users, safe shell enables, and selected confirmed Home Manager program enables
 - Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings

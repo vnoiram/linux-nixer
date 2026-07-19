@@ -15,6 +15,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Reusable JSON policy files for scan and review rules.
 - Command-specific CLI help with examples and flag notes.
 - Dedicated secrets scanner for common credential files and token-bearing configs.
+- Service detail reporting for systemd units, timers, and cron schedules.
 
 ## [0.1.0] - 2026-07-19
 
