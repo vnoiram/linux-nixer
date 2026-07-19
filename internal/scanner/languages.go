@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vnoiram/linux-nixer/internal/mapping"
 	"github.com/vnoiram/linux-nixer/internal/model"
 )
 
@@ -34,7 +35,7 @@ func scanNPM(ctx context.Context, opts Options, report *model.ScanReport) {
 			}
 			if json.Unmarshal([]byte(out), &parsed) == nil {
 				for name, dep := range parsed.Dependencies {
-					report.Languages.NPM = append(report.Languages.NPM, model.Package{Manager: "npm", Name: name, Version: dep.Version, Decision: model.DecisionCandidate})
+					report.Languages.NPM = append(report.Languages.NPM, model.Package{Manager: "npm", Name: name, Version: dep.Version, NixNames: mapping.Candidates("npm", name), Decision: model.DecisionCandidate})
 				}
 			}
 		}
@@ -49,7 +50,7 @@ func scanNPM(ctx context.Context, opts Options, report *model.ScanReport) {
 			Version string `json:"version"`
 		}
 		if json.Unmarshal(text, &pkg) == nil && pkg.Name != "" {
-			report.Languages.NPM = append(report.Languages.NPM, model.Package{Manager: "npm", Name: pkg.Name, Version: pkg.Version, Source: displayPath(opts.Root, pkgJSON), Decision: model.DecisionCandidate})
+			report.Languages.NPM = append(report.Languages.NPM, model.Package{Manager: "npm", Name: pkg.Name, Version: pkg.Version, Source: displayPath(opts.Root, pkgJSON), NixNames: mapping.Candidates("npm", pkg.Name), Decision: model.DecisionCandidate})
 		}
 	}
 }
@@ -58,7 +59,7 @@ func scanPipx(opts Options, report *model.ScanReport) {
 	for _, meta := range glob(opts.Root, "/home/*/.local/pipx/venvs/*/pipx_metadata.json") {
 		app := filepath.Base(filepath.Dir(meta))
 		env := model.PythonEnv{Path: displayPath(opts.Root, filepath.Dir(meta)), Kind: "pipx"}
-		env.Packages = append(env.Packages, model.Package{Manager: "pipx", Name: app, Decision: model.DecisionCandidate})
+		env.Packages = append(env.Packages, model.Package{Manager: "pipx", Name: app, NixNames: mapping.Candidates("pipx", app), Decision: model.DecisionCandidate})
 		report.Languages.Python = append(report.Languages.Python, env)
 	}
 }
@@ -92,17 +93,20 @@ func scanVersionManagers(opts Options, report *model.ScanReport) {
 func scanInstalledBins(opts Options, report *model.ScanReport) {
 	for _, bin := range glob(opts.Root, "/home/*/.cargo/bin/*") {
 		if isRegularExecutable(bin) {
-			report.Languages.Cargo = append(report.Languages.Cargo, model.Package{Manager: "cargo", Name: filepath.Base(bin), Source: displayPath(opts.Root, bin), Decision: model.DecisionCandidate})
+			name := filepath.Base(bin)
+			report.Languages.Cargo = append(report.Languages.Cargo, model.Package{Manager: "cargo", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("cargo", name), Decision: model.DecisionCandidate})
 		}
 	}
 	for _, bin := range glob(opts.Root, "/home/*/go/bin/*") {
 		if isRegularExecutable(bin) {
-			report.Languages.Go = append(report.Languages.Go, model.Package{Manager: "go-install", Name: filepath.Base(bin), Source: displayPath(opts.Root, bin), Decision: model.DecisionCandidate})
+			name := filepath.Base(bin)
+			report.Languages.Go = append(report.Languages.Go, model.Package{Manager: "go-install", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("go-install", name), Decision: model.DecisionCandidate})
 		}
 	}
 	for _, bin := range glob(opts.Root, "/home/*/.gem/ruby/*/bin/*") {
 		if isRegularExecutable(bin) {
-			report.Languages.Gem = append(report.Languages.Gem, model.Package{Manager: "gem", Name: filepath.Base(bin), Source: displayPath(opts.Root, bin), Decision: model.DecisionCandidate})
+			name := filepath.Base(bin)
+			report.Languages.Gem = append(report.Languages.Gem, model.Package{Manager: "gem", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("gem", name), Decision: model.DecisionCandidate})
 		}
 	}
 }

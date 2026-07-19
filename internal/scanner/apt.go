@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/vnoiram/linux-nixer/internal/mapping"
 	"github.com/vnoiram/linux-nixer/internal/model"
 )
 
@@ -29,7 +30,7 @@ func (AptScanner) Scan(ctx context.Context, opts Options, report *model.ScanRepo
 				Manager:  "apt",
 				Name:     name,
 				Version:  version,
-				NixNames: aptNixCandidates(name),
+				NixNames: mapping.Candidates("apt", name),
 				Decision: model.DecisionCandidate,
 			})
 		}
@@ -82,25 +83,4 @@ func findAptSources(opts Options, report *model.ScanReport) {
 			Reason:   "apt repository source",
 		})
 	}
-}
-
-func aptNixCandidates(name string) []string {
-	known := map[string]string{
-		"build-essential": "gcc",
-		"curl":            "curl",
-		"git":             "git",
-		"jq":              "jq",
-		"neovim":          "neovim",
-		"nodejs":          "nodejs",
-		"python3":         "python3",
-		"ripgrep":         "ripgrep",
-		"tmux":            "tmux",
-		"vim":             "vim",
-		"wget":            "wget",
-		"zsh":             "zsh",
-	}
-	if v, ok := known[name]; ok {
-		return []string{v}
-	}
-	return nil
 }

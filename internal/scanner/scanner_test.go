@@ -149,12 +149,51 @@ func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 	seen := map[string]bool{}
 	for _, pkg := range report.Packages {
 		seen[pkg.Manager+":"+pkg.Name] = true
+		if pkg.Manager == "appimage" && len(pkg.NixNames) != 0 {
+			t.Fatalf("appimage should not get nix mapping: %+v", pkg)
+		}
 	}
 	for _, want := range []string{"flatpak:org.example.App", "appimage:Tool", "homebrew:hello"} {
 		if !seen[want] {
 			t.Fatalf("missing %s in %+v", want, report.Packages)
 		}
 	}
+}
+
+func TestLanguageScannerAddsNixCandidatesForKnownCLIs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/usr/local/lib/node_modules/typescript/package.json", `{"name":"typescript","version":"5.0.0"}`)
+	write(t, root, "/home/alice/.local/pipx/venvs/ruff/pipx_metadata.json", `{}`)
+	writeMode(t, root, "/home/alice/.cargo/bin/starship", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/home/alice/go/bin/gopls", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/home/alice/.gem/ruby/3.3.0/bin/bundler", []byte("#!/bin/sh\n"), 0o755)
+
+	report := &model.ScanReport{}
+	if err := (LanguageScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPkgMapping(t, report.Languages.NPM, "typescript", "nodePackages.typescript")
+	if len(report.Languages.Python) != 1 {
+		t.Fatalf("python envs=%d, want 1", len(report.Languages.Python))
+	}
+	assertPkgMapping(t, report.Languages.Python[0].Packages, "ruff", "ruff")
+	assertPkgMapping(t, report.Languages.Cargo, "starship", "starship")
+	assertPkgMapping(t, report.Languages.Go, "gopls", "gopls")
+	assertPkgMapping(t, report.Languages.Gem, "bundler", "bundler")
+}
+
+func assertPkgMapping(t *testing.T, packages []model.Package, name, want string) {
+	t.Helper()
+	for _, pkg := range packages {
+		if pkg.Name == name {
+			if len(pkg.NixNames) != 1 || pkg.NixNames[0] != want {
+				t.Fatalf("%s nixNames=%v, want [%s]", name, pkg.NixNames, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("package %s missing from %+v", name, packages)
 }
 
 func write(t *testing.T, root, path, content string) {

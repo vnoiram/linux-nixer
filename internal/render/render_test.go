@@ -146,6 +146,7 @@ func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
 			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
 			{Manager: "apt", Name: "git", NixNames: []string{"git"}, Decision: model.DecisionCandidate},
 			{Manager: "apt", Name: "vim", NixNames: []string{"vim"}, Decision: model.DecisionExcluded},
+			{Manager: "apt", Name: "unknown", Decision: model.DecisionCandidate},
 		},
 		Languages: model.Languages{
 			NPM: []model.Package{
@@ -185,6 +186,9 @@ func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
 	reportMD := readFile(t, out, "reports/migration-report.md")
 	if !strings.Contains(reportMD, "`git` via apt -> `git` [candidate]") {
 		t.Fatalf("candidate package missing from report:\n%s", reportMD)
+	}
+	if !strings.Contains(reportMD, "`unknown` via apt (no nix mapping) [candidate]") {
+		t.Fatalf("unmapped package missing no mapping marker:\n%s", reportMD)
 	}
 }
 

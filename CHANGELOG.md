@@ -15,6 +15,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - NixOS + Home Manager flake rendering.
 - Richer generated modules for service, container, and filesystem findings.
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables.
+- Shared conservative Nix package mapping for apt and common language CLI package managers.
 - Development project report generation.
 - Baseline manifest creation.
 - Non-interactive review decisions for packages, findings, paths, and managers.

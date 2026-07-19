@@ -236,6 +236,8 @@ func renderReport(report model.ScanReport) string {
 		b.WriteString(fmt.Sprintf("- `%s` via %s", pkg.Name, pkg.Manager))
 		if len(pkg.NixNames) > 0 {
 			b.WriteString(fmt.Sprintf(" -> `%s`", pkg.NixNames[0]))
+		} else {
+			b.WriteString(" (no nix mapping)")
 		}
 		if pkg.Decision != "" {
 			b.WriteString(fmt.Sprintf(" [%s]", pkg.Decision))
@@ -300,17 +302,32 @@ func writeLanguagePackages(b *strings.Builder, report model.ScanReport) {
 	for _, section := range sections {
 		for _, pkg := range section.pkgs {
 			if reportDecision(pkg.Decision) {
-				b.WriteString(fmt.Sprintf("- `%s` via %s [%s]\n", pkg.Name, pkg.Manager, printableDecision(pkg.Decision)))
+				b.WriteString(languagePackageLine(pkg, ""))
 			}
 		}
 	}
 	for _, env := range report.Languages.Python {
 		for _, pkg := range env.Packages {
 			if reportDecision(pkg.Decision) {
-				b.WriteString(fmt.Sprintf("- `%s` via %s in `%s` [%s]\n", pkg.Name, pkg.Manager, env.Path, printableDecision(pkg.Decision)))
+				b.WriteString(languagePackageLine(pkg, env.Path))
 			}
 		}
 	}
+}
+
+func languagePackageLine(pkg model.Package, envPath string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("- `%s` via %s", pkg.Name, pkg.Manager))
+	if envPath != "" {
+		b.WriteString(fmt.Sprintf(" in `%s`", envPath))
+	}
+	if len(pkg.NixNames) > 0 {
+		b.WriteString(fmt.Sprintf(" -> `%s`", pkg.NixNames[0]))
+	} else {
+		b.WriteString(" (no nix mapping)")
+	}
+	b.WriteString(fmt.Sprintf(" [%s]\n", printableDecision(pkg.Decision)))
+	return b.String()
 }
 
 func renderServicesModule(report model.ScanReport) string {

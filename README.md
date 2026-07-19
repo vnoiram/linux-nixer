@@ -17,6 +17,7 @@ This is an early implementation scaffold. It includes:
 - Nix flake project rendering
 - Richer generated modules for services, containers, filesystem findings, and development project reports
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
+- Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - `doctor --vm` support for building the generated NixOS VM derivation
@@ -91,6 +92,8 @@ Generated projects include:
 - systemd, cron, shell/git/ssh/gpg/devops config markers
 - desktop markers, fonts, themes, autostart entries
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, and stateful data
+
+Package mapping is intentionally conservative. apt and common language CLI tools get static Nix candidates when known; snap, flatpak, AppImage, and Homebrew findings are reported without automatic Nix replacements by default.
 
 ## Development
 
