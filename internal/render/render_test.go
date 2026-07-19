@@ -87,6 +87,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "dev-project", Path: "/home/alice/app/pyproject.toml", Decision: model.DecisionCandidate, Reason: "project dependency or development environment file"},
 			{Kind: "os-config", Path: "/etc/udev/rules.d/99-device.rules", Decision: model.DecisionCandidate},
 			{Kind: "user-config", Path: "/home/alice/.gitconfig", Decision: model.DecisionCandidate},
+			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionCandidate, Reason: "shell or login environment configuration"},
+			{Kind: "shell-plugin", Name: ".oh-my-zsh", Path: "/home/alice/.oh-my-zsh", Decision: model.DecisionCandidate, Reason: "shell plugin manager or plugin tree"},
+			{Kind: "user-bin", Name: "tool", Path: "/home/alice/.local/bin/tool", Decision: model.DecisionCandidate, Reason: "user-local executable"},
+			{Kind: "direnv", Name: ".envrc", Path: "/home/alice/app/.envrc", Decision: model.DecisionCandidate, Reason: "direnv project environment file"},
 			{Kind: "desktop-config", Name: "settings.json", Path: "/home/alice/.config/Code/User/settings.json", Decision: model.DecisionCandidate, Reason: "desktop environment configuration"},
 		},
 		Desktop: model.Desktop{
@@ -139,12 +143,26 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("filesystem module leaked secret/excluded finding:\n%s", fs)
 	}
 	dev := readFile(t, out, "reports/dev-projects.md")
-	if !strings.Contains(dev, "/home/alice/app/pyproject.toml") {
+	if !strings.Contains(dev, "/home/alice/app/pyproject.toml") || !strings.Contains(dev, "/home/alice/app/.envrc") {
 		t.Fatalf("dev project report missing project:\n%s", dev)
 	}
 	home := readFile(t, out, "users/home.nix")
-	if !strings.Contains(home, "/home/alice/.gitconfig") || !strings.Contains(home, "/home/alice/.config/Code/User/settings.json") {
-		t.Fatalf("home module missing user/desktop config TODO:\n%s", home)
+	for _, want := range []string{"/home/alice/.gitconfig", "/home/alice/.zshrc", "/home/alice/.oh-my-zsh", "/home/alice/.local/bin/tool", "/home/alice/app/.envrc", "/home/alice/.config/Code/User/settings.json"} {
+		if !strings.Contains(home, want) {
+			t.Fatalf("home module missing TODO %q:\n%s", want, home)
+		}
+	}
+	if strings.Contains(home, "alias ll") {
+		t.Fatalf("home module should not render raw config content:\n%s", home)
+	}
+	userConfig := readFile(t, out, "reports/user-config.md")
+	for _, want := range []string{"Shell configuration", "/home/alice/.zshrc", "Shell plugins", "/home/alice/.oh-my-zsh", "User-local executables", "/home/alice/.local/bin/tool", "User tool configuration", "/home/alice/.gitconfig", "Direnv", "/home/alice/app/.envrc"} {
+		if !strings.Contains(userConfig, want) {
+			t.Fatalf("user config report missing %q:\n%s", want, userConfig)
+		}
+	}
+	if strings.Contains(userConfig, "alias ll") {
+		t.Fatalf("user config report should not render raw config content:\n%s", userConfig)
 	}
 	if strings.Contains(home, "color-scheme") {
 		t.Fatalf("home module should not render raw dconf dump:\n%s", home)

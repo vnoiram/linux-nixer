@@ -39,6 +39,7 @@ func Project(out string, report model.ScanReport) error {
 		"modules/services.nix":              renderServicesModule(report),
 		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
 		"reports/dev-projects.md":           renderDevProjectsReport(report),
+		"reports/user-config.md":            renderUserConfigReport(report),
 		"reports/desktop.md":                renderDesktopReport(report),
 		"reports/migration-report.md":       renderReport(report),
 	}
@@ -270,6 +271,10 @@ func renderReport(report model.ScanReport) string {
 	for _, item := range desktopConfigItems(report) {
 		b.WriteString(fmt.Sprintf("- `%s` %s [%s]\n", item.Path, item.Kind, printableDecision(item.Decision)))
 	}
+	b.WriteString("\n## User config\n\n")
+	for _, item := range userConfigItems(report) {
+		b.WriteString(fmt.Sprintf("- `%s` %s [%s]\n", item.Path, item.Kind, printableDecision(item.Decision)))
+	}
 	b.WriteString("\n## Dev projects\n\n")
 	for _, item := range devProjectItems(report) {
 		b.WriteString(fmt.Sprintf("- `%s` %s\n", item.Path, item.Kind))
@@ -453,10 +458,44 @@ func renderDesktopReport(report model.ScanReport) string {
 	return b.String()
 }
 
+func renderUserConfigReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# User configuration findings\n\n")
+	sections := []struct {
+		title string
+		kinds []string
+	}{
+		{"Shell configuration", []string{"shell-config"}},
+		{"Shell plugins", []string{"shell-plugin"}},
+		{"User-local executables", []string{"user-bin"}},
+		{"User tool configuration", []string{"user-config"}},
+		{"Direnv", []string{"direnv"}},
+	}
+	for _, section := range sections {
+		items := userConfigItemsByKind(report, section.kinds...)
+		if len(items) == 0 {
+			continue
+		}
+		b.WriteString("## ")
+		b.WriteString(section.title)
+		b.WriteString("\n\n")
+		for _, item := range items {
+			b.WriteString(fmt.Sprintf("- `%s` %s [%s]", item.Path, item.Name, printableDecision(item.Decision)))
+			if item.Reason != "" {
+				b.WriteString(": ")
+				b.WriteString(item.Reason)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func todoComments(report model.ScanReport) []string {
 	var lines []string
 	for _, item := range report.Items {
-		if includeDecision(item.Decision) && (item.Kind == "user-config" || item.Kind == "direnv" || item.Kind == "desktop-config") {
+		if includeDecision(item.Decision) && isHomeTODOItem(item) {
 			lines = append(lines, comment(fmt.Sprintf("%s at %s %s", item.Kind, item.Path, item.Reason)))
 		}
 	}
@@ -498,6 +537,39 @@ func desktopConfigItems(report model.ScanReport) []model.Item {
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items
+}
+
+func userConfigItems(report model.ScanReport) []model.Item {
+	return userConfigItemsByKind(report, "user-config", "shell-config", "shell-plugin", "user-bin", "direnv")
+}
+
+func userConfigItemsByKind(report model.ScanReport, kinds ...string) []model.Item {
+	var items []model.Item
+	for _, item := range report.Items {
+		if reportDecision(item.Decision) && containsString(kinds, item.Kind) {
+			items = append(items, item)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+	return items
+}
+
+func isHomeTODOItem(item model.Item) bool {
+	return item.Kind == "user-config" ||
+		item.Kind == "shell-config" ||
+		item.Kind == "shell-plugin" ||
+		item.Kind == "user-bin" ||
+		item.Kind == "direnv" ||
+		item.Kind == "desktop-config"
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func isServiceLikeItem(item model.Item) bool {

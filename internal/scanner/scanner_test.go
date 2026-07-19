@@ -204,6 +204,8 @@ func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
 	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[wifi-security]\npsk=secret\n")
 	write(t, root, "/home/alice/project/pyproject.toml", "[project]\nname='demo'\n")
 	write(t, root, "/home/alice/project/.devcontainer/devcontainer.json", "{}")
+	write(t, root, "/home/alice/.gitconfig", "[user]\nname = Alice\n")
+	write(t, root, "/home/alice/project/.envrc", "use flake\n")
 
 	report := &model.ScanReport{}
 	if err := (ConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -224,6 +226,78 @@ func TestConfigScannerFindsOperationalAndProjectConfigs(t *testing.T) {
 	}
 	if seen["/home/alice/project/.devcontainer/devcontainer.json"] != model.DecisionCandidate {
 		t.Fatalf("missing devcontainer config in %+v", report.Items)
+	}
+	if _, ok := seen["/home/alice/.gitconfig"]; ok {
+		t.Fatalf("user config should be handled by UserConfigScanner, got %+v", report.Items)
+	}
+	if _, ok := seen["/home/alice/project/.envrc"]; ok {
+		t.Fatalf("direnv config should be handled by UserConfigScanner, got %+v", report.Items)
+	}
+}
+
+func TestUserConfigScannerFindsShellAndUserConfigs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/.bashrc", "alias ll='ls -la'\n")
+	write(t, root, "/home/alice/.bash_profile", ". ~/.bashrc\n")
+	write(t, root, "/home/alice/.profile", "export PATH=$HOME/.local/bin:$PATH\n")
+	write(t, root, "/home/alice/.zshrc", "source ~/.zinit/bin/zinit.zsh\n")
+	write(t, root, "/home/alice/.zprofile", "export EDITOR=nvim\n")
+	write(t, root, "/home/alice/.config/fish/config.fish", "set -gx EDITOR nvim\n")
+	write(t, root, "/home/alice/.config/fish/functions/f.fish", "function f\nend\n")
+	write(t, root, "/home/alice/.config/fish/conf.d/path.fish", "fish_add_path ~/.local/bin\n")
+	write(t, root, "/home/alice/.oh-my-zsh/.keep", "")
+	write(t, root, "/home/alice/.zinit/.keep", "")
+	write(t, root, "/home/alice/.antigen/.keep", "")
+	writeMode(t, root, "/home/alice/.local/bin/tool", []byte("#!/bin/sh\n"), 0o755)
+	write(t, root, "/home/alice/.pam_environment", "EDITOR=nvim\n")
+	write(t, root, "/home/alice/.config/environment.d/editor.conf", "EDITOR=nvim\n")
+	write(t, root, "/home/alice/.direnvrc", "layout_python\n")
+	write(t, root, "/home/alice/project/.envrc", "use flake\n")
+	write(t, root, "/home/alice/.gitconfig", "[user]\nname = Alice\n")
+	write(t, root, "/home/alice/.gitignore_global", "*.swp\n")
+	write(t, root, "/home/alice/.ssh/config", "Host example\n  HostName example.com\n")
+	write(t, root, "/home/alice/.gnupg/gpg.conf", "use-agent\n")
+	write(t, root, "/home/alice/.tmux.conf", "set -g mouse on\n")
+	write(t, root, "/home/alice/.config/starship.toml", "[character]\n")
+
+	report := &model.ScanReport{}
+	if err := (UserConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	for _, item := range report.Items {
+		seen[item.Path] = item.Kind
+		if item.Decision != model.DecisionCandidate {
+			t.Fatalf("user config decision=%q, want candidate", item.Decision)
+		}
+	}
+	for path, kind := range map[string]string{
+		"/home/alice/.bashrc":                           "shell-config",
+		"/home/alice/.bash_profile":                     "shell-config",
+		"/home/alice/.profile":                          "shell-config",
+		"/home/alice/.zshrc":                            "shell-config",
+		"/home/alice/.zprofile":                         "shell-config",
+		"/home/alice/.config/fish/config.fish":          "shell-config",
+		"/home/alice/.config/fish/functions/f.fish":     "shell-config",
+		"/home/alice/.config/fish/conf.d/path.fish":     "shell-config",
+		"/home/alice/.oh-my-zsh":                        "shell-plugin",
+		"/home/alice/.zinit":                            "shell-plugin",
+		"/home/alice/.antigen":                          "shell-plugin",
+		"/home/alice/.local/bin/tool":                   "user-bin",
+		"/home/alice/.pam_environment":                  "shell-config",
+		"/home/alice/.config/environment.d/editor.conf": "shell-config",
+		"/home/alice/.direnvrc":                         "shell-config",
+		"/home/alice/project/.envrc":                    "direnv",
+		"/home/alice/.gitconfig":                        "user-config",
+		"/home/alice/.gitignore_global":                 "user-config",
+		"/home/alice/.ssh/config":                       "user-config",
+		"/home/alice/.gnupg/gpg.conf":                   "user-config",
+		"/home/alice/.tmux.conf":                        "user-config",
+		"/home/alice/.config/starship.toml":             "user-config",
+	} {
+		if seen[path] != kind {
+			t.Fatalf("path %s kind=%q, want %q in %+v", path, seen[path], kind, report.Items)
+		}
 	}
 }
 

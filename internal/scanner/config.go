@@ -63,11 +63,6 @@ func (ConfigScanner) Scan(ctx context.Context, opts Options, report *model.ScanR
 			report.Services = append(report.Services, model.Service{Manager: "cron", Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: model.DecisionCandidate})
 		}
 	}
-	for _, pattern := range []string{"/home/*/.ssh/config", "/home/*/.gitconfig", "/home/*/.gnupg/gpg.conf", "/home/*/.config/starship.toml", "/home/*/.tmux.conf"} {
-		for _, path := range glob(opts.Root, pattern) {
-			report.Items = append(report.Items, model.Item{Kind: "user-config", Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: model.DecisionCandidate})
-		}
-	}
 	scanDevOpsConfigs(opts, report)
 	scanProjectConfigs(opts, report)
 	return nil
@@ -99,7 +94,6 @@ func scanProjectConfigs(opts Options, report *model.ScanReport) {
 		"/home/*/**/go.mod",
 		"/home/*/**/Cargo.toml",
 		"/home/*/**/flake.nix",
-		"/home/*/**/.envrc",
 		"/home/*/**/.devcontainer/devcontainer.json",
 		"/srv/**/package.json",
 		"/srv/**/pyproject.toml",
@@ -111,9 +105,6 @@ func scanProjectConfigs(opts Options, report *model.ScanReport) {
 		kind := "dev-project"
 		decision := model.DecisionCandidate
 		reason := "project dependency or development environment file"
-		if filepath.Base(path) == ".envrc" {
-			kind = "direnv"
-		}
 		report.Items = append(report.Items, model.Item{Kind: kind, Name: filepath.Base(path), Path: displayPath(opts.Root, path), Decision: decision, Reason: reason})
 	}
 }
