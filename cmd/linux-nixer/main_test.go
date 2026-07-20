@@ -557,7 +557,7 @@ func TestRunSummaryWritesMarkdown(t *testing.T) {
 	}
 
 	got := stdout.String()
-	for _, want := range []string{"# Review summary", "Total findings: 2", "Pending findings: 1", "system packages: 1"} {
+	for _, want := range []string{"# Review summary", "Total findings: 2", "Pending findings: 1", "## Review focus", "Nix candidate coverage gaps: 0 unmapped packages", "## Next actions", "system packages: 1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q:\n%s", want, got)
 		}
@@ -582,15 +582,16 @@ func TestRunSummaryWritesJSON(t *testing.T) {
 	}
 
 	var got struct {
-		Total     int `json:"total"`
-		NixImpact struct {
+		Total               int `json:"total"`
+		GeneratedCandidates int `json:"generatedCandidates"`
+		NixImpact           struct {
 			SystemPackages int `json:"systemPackages"`
 		} `json:"nixImpact"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("invalid json summary: %v\n%s", err, stdout.String())
 	}
-	if got.Total != 1 || got.NixImpact.SystemPackages != 1 {
+	if got.Total != 1 || got.NixImpact.SystemPackages != 1 || got.GeneratedCandidates != 1 {
 		t.Fatalf("unexpected json summary: %+v", got)
 	}
 }

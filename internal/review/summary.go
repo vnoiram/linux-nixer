@@ -9,12 +9,16 @@ import (
 )
 
 type Summary struct {
-	Total             int             `json:"total"`
-	Pending           int             `json:"pending"`
-	ProtectedFindings int             `json:"protectedFindings"`
-	Decisions         map[string]int  `json:"decisions"`
-	Domains           []DomainSummary `json:"domains"`
-	NixImpact         NixImpact       `json:"nixImpact"`
+	Total                     int             `json:"total"`
+	Pending                   int             `json:"pending"`
+	ProtectedFindings         int             `json:"protectedFindings"`
+	UnmappedPackages          int             `json:"unmappedPackages"`
+	ManualMigrationNotes      int             `json:"manualMigrationNotes"`
+	SecretOrProtectedFindings int             `json:"secretOrProtectedFindings"`
+	GeneratedCandidates       int             `json:"generatedCandidates"`
+	Decisions                 map[string]int  `json:"decisions"`
+	Domains                   []DomainSummary `json:"domains"`
+	NixImpact                 NixImpact       `json:"nixImpact"`
 }
 
 type DomainSummary struct {
@@ -22,6 +26,8 @@ type DomainSummary struct {
 	Total             int            `json:"total"`
 	Pending           int            `json:"pending"`
 	ProtectedFindings int            `json:"protectedFindings,omitempty"`
+	UnmappedPackages  int            `json:"unmappedPackages,omitempty"`
+	MigrationNotes    int            `json:"migrationNotes,omitempty"`
 	Decisions         map[string]int `json:"decisions"`
 }
 
@@ -50,8 +56,9 @@ func Summarize(report model.ScanReport) Summary {
 			ConfirmedContainers:     confirmedContainers(report),
 		},
 	}
+	s.GeneratedCandidates = generatedCandidates(s.NixImpact)
 
-	addDomain := func(domain string, decisions []model.Decision, protected int) {
+	addDomain := func(domain string, decisions []model.Decision, protected, unmapped int) {
 		if len(decisions) == 0 {
 			return
 		}
@@ -59,12 +66,17 @@ func Summarize(report model.ScanReport) Summary {
 			Domain:            domain,
 			Total:             len(decisions),
 			ProtectedFindings: protected,
+			UnmappedPackages:  unmapped,
 			Decisions:         emptyDecisionCounts(),
 		}
 		for _, decision := range decisions {
 			key := decisionKey(decision)
 			d.Decisions[key]++
 			s.Decisions[key]++
+			if decision == model.DecisionMigrationNote {
+				d.MigrationNotes++
+				s.ManualMigrationNotes++
+			}
 			if isPending(decision) {
 				d.Pending++
 				s.Pending++
@@ -72,18 +84,20 @@ func Summarize(report model.ScanReport) Summary {
 		}
 		s.Total += d.Total
 		s.ProtectedFindings += protected
+		s.UnmappedPackages += unmapped
 		s.Domains = append(s.Domains, d)
 	}
 
-	addDomain("packages", packageDecisions(report.Packages), 0)
-	addDomain("language-packages", languagePackageDecisions(report), 0)
-	addDomain("git-sources", gitSourceDecisions(report.GitSources), 0)
-	addDomain("containers", containerDecisions(report.Containers), 0)
-	addDomain("services", serviceDecisions(report.Services), 0)
-	addDomain("filesystem-findings", fileFindingDecisions(report.FilesystemDiff), protectedFileFindings(report.FilesystemDiff, false))
-	addDomain("stateful-data", fileFindingDecisions(report.StatefulData), protectedFileFindings(report.StatefulData, true))
-	addDomain("config-items", itemDecisions(report.Items), 0)
-	addDomain("desktop-autostart", fileFindingDecisions(report.Desktop.Autostart), protectedFileFindings(report.Desktop.Autostart, false))
+	addDomain("packages", packageDecisions(report.Packages), 0, unmappedPackages(report.Packages))
+	addDomain("language-packages", languagePackageDecisions(report), 0, unmappedLanguagePackages(report))
+	addDomain("git-sources", gitSourceDecisions(report.GitSources), 0, 0)
+	addDomain("containers", containerDecisions(report.Containers), 0, 0)
+	addDomain("services", serviceDecisions(report.Services), 0, 0)
+	addDomain("filesystem-findings", fileFindingDecisions(report.FilesystemDiff), protectedFileFindings(report.FilesystemDiff, false), 0)
+	addDomain("stateful-data", fileFindingDecisions(report.StatefulData), protectedFileFindings(report.StatefulData, true), 0)
+	addDomain("config-items", itemDecisions(report.Items), 0, 0)
+	addDomain("desktop-autostart", fileFindingDecisions(report.Desktop.Autostart), protectedFileFindings(report.Desktop.Autostart, false), 0)
+	s.SecretOrProtectedFindings = s.ProtectedFindings
 
 	return s
 }
@@ -95,6 +109,12 @@ func FormatSummaryMarkdown(s Summary) string {
 	fmt.Fprintf(&b, "Pending findings: %d\n", s.Pending)
 	fmt.Fprintf(&b, "Protected findings: %d\n\n", s.ProtectedFindings)
 
+	b.WriteString("## Review focus\n\n")
+	fmt.Fprintf(&b, "- Nix candidate coverage gaps: %d unmapped packages\n", s.UnmappedPackages)
+	fmt.Fprintf(&b, "- Manual migration notes: %d\n", s.ManualMigrationNotes)
+	fmt.Fprintf(&b, "- Secret/stateful/protected findings: %d\n", s.SecretOrProtectedFindings)
+	fmt.Fprintf(&b, "- Generated Nix candidates: %d\n\n", s.GeneratedCandidates)
+
 	b.WriteString("## Decisions\n\n")
 	for _, key := range decisionKeys() {
 		fmt.Fprintf(&b, "- %s: %d\n", key, s.Decisions[key])
@@ -105,6 +125,12 @@ func FormatSummaryMarkdown(s Summary) string {
 		fmt.Fprintf(&b, "- %s: total=%d pending=%d", domain.Domain, domain.Total, domain.Pending)
 		if domain.ProtectedFindings > 0 {
 			fmt.Fprintf(&b, " protected=%d", domain.ProtectedFindings)
+		}
+		if domain.UnmappedPackages > 0 {
+			fmt.Fprintf(&b, " unmapped=%d", domain.UnmappedPackages)
+		}
+		if domain.MigrationNotes > 0 {
+			fmt.Fprintf(&b, " migration-notes=%d", domain.MigrationNotes)
 		}
 		b.WriteString("\n")
 	}
@@ -118,7 +144,29 @@ func FormatSummaryMarkdown(s Summary) string {
 	fmt.Fprintf(&b, "- systemd services: %d\n", s.NixImpact.SystemdServices)
 	fmt.Fprintf(&b, "- container runtime enables: %d\n", s.NixImpact.ContainerRuntimeEnables)
 	fmt.Fprintf(&b, "- confirmed containers: %d\n", s.NixImpact.ConfirmedContainers)
+	writeNextActions(&b, s)
 	return b.String()
+}
+
+func writeNextActions(b *strings.Builder, s Summary) {
+	b.WriteString("\n## Next actions\n\n")
+	if s.Pending > 0 {
+		fmt.Fprintf(b, "- Resolve %d pending candidate/todo findings with `linux-nixer review --interactive` or a repeatable policy.\n", s.Pending)
+	} else {
+		b.WriteString("- No pending candidate/todo findings remain.\n")
+	}
+	if s.UnmappedPackages > 0 {
+		fmt.Fprintf(b, "- Decide package, replacement, manual install, or exclusion strategy for %d unmapped packages.\n", s.UnmappedPackages)
+	}
+	if s.ManualMigrationNotes > 0 {
+		fmt.Fprintf(b, "- Review `%s` for %d manual migration notes before switching systems.\n", "reports/migration-checklist.md", s.ManualMigrationNotes)
+	}
+	if s.SecretOrProtectedFindings > 0 {
+		fmt.Fprintf(b, "- Back up or restore %d secret/stateful/protected findings outside generated Nix.\n", s.SecretOrProtectedFindings)
+	}
+	if s.GeneratedCandidates > 0 {
+		fmt.Fprintf(b, "- Review generated Nix output for %d confirmed items before applying it.\n", s.GeneratedCandidates)
+	}
 }
 
 func emptyDecisionCounts() map[string]int {
@@ -159,6 +207,16 @@ func packageDecisions(pkgs []model.Package) []model.Decision {
 	return decisions
 }
 
+func unmappedPackages(pkgs []model.Package) int {
+	count := 0
+	for _, pkg := range pkgs {
+		if reportableUnmappedPackage(pkg) {
+			count++
+		}
+	}
+	return count
+}
+
 func languagePackageDecisions(report model.ScanReport) []model.Decision {
 	var decisions []model.Decision
 	for _, pkgs := range [][]model.Package{report.Languages.NPM, report.Languages.Conda, report.Languages.Cargo, report.Languages.Gem, report.Languages.Go} {
@@ -168,6 +226,21 @@ func languagePackageDecisions(report model.ScanReport) []model.Decision {
 		decisions = append(decisions, packageDecisions(env.Packages)...)
 	}
 	return decisions
+}
+
+func unmappedLanguagePackages(report model.ScanReport) int {
+	count := 0
+	for _, pkgs := range [][]model.Package{report.Languages.NPM, report.Languages.Conda, report.Languages.Cargo, report.Languages.Gem, report.Languages.Go} {
+		count += unmappedPackages(pkgs)
+	}
+	for _, env := range report.Languages.Python {
+		count += unmappedPackages(env.Packages)
+	}
+	return count
+}
+
+func reportableUnmappedPackage(pkg model.Package) bool {
+	return pkg.Decision != model.DecisionExcluded && pkg.Decision != model.DecisionMigrationNote && len(pkg.NixNames) == 0
 }
 
 func gitSourceDecisions(items []model.GitSource) []model.Decision {
@@ -218,6 +291,17 @@ func protectedFileFindings(items []model.FileFinding, force bool) int {
 		}
 	}
 	return count
+}
+
+func generatedCandidates(impact NixImpact) int {
+	return impact.SystemPackages +
+		impact.HomePackages +
+		impact.Users +
+		impact.HostShellPrograms +
+		impact.HomePrograms +
+		impact.SystemdServices +
+		impact.ContainerRuntimeEnables +
+		impact.ConfirmedContainers
 }
 
 func systemPackageNames(report model.ScanReport) []string {

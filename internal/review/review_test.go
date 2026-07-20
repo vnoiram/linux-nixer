@@ -187,6 +187,15 @@ func TestSummarizeCountsDecisionsDomainsProtectedFindingsAndNixImpact(t *testing
 	if got.ProtectedFindings != 2 {
 		t.Fatalf("protected=%d, want 2", got.ProtectedFindings)
 	}
+	if got.UnmappedPackages != 1 {
+		t.Fatalf("unmapped=%d, want 1", got.UnmappedPackages)
+	}
+	if got.ManualMigrationNotes != 2 {
+		t.Fatalf("manual migration notes=%d, want 2", got.ManualMigrationNotes)
+	}
+	if got.SecretOrProtectedFindings != 2 {
+		t.Fatalf("secret/protected=%d, want 2", got.SecretOrProtectedFindings)
+	}
 	if got.Decisions[string(model.DecisionConfirmed)] != 6 {
 		t.Fatalf("confirmed=%d, want 6", got.Decisions[string(model.DecisionConfirmed)])
 	}
@@ -211,6 +220,12 @@ func TestSummarizeCountsDecisionsDomainsProtectedFindingsAndNixImpact(t *testing
 	if got.NixImpact.SystemdServices != 1 || got.NixImpact.ContainerRuntimeEnables != 1 || got.NixImpact.ConfirmedContainers != 1 {
 		t.Fatalf("unexpected nix service/container impact: %+v", got.NixImpact)
 	}
+	if got.GeneratedCandidates != 9 {
+		t.Fatalf("generated candidates=%d, want 9", got.GeneratedCandidates)
+	}
+	if got.Domains[0].Domain != "packages" || got.Domains[0].UnmappedPackages != 1 {
+		t.Fatalf("package domain unmapped missing: %+v", got.Domains[0])
+	}
 }
 
 func TestFormatSummaryMarkdownOmitsFindingDetails(t *testing.T) {
@@ -222,7 +237,7 @@ func TestFormatSummaryMarkdownOmitsFindingDetails(t *testing.T) {
 
 	got := FormatSummaryMarkdown(Summarize(report))
 
-	for _, want := range []string{"# Review summary", "Protected findings: 1", "filesystem-findings"} {
+	for _, want := range []string{"# Review summary", "## Review focus", "Protected findings: 1", "Secret/stateful/protected findings: 1", "## Next actions", "filesystem-findings"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary missing %q:\n%s", want, got)
 		}

@@ -106,7 +106,7 @@ bin/linux-nixer summary --scan reviewed.json --json
 bin/linux-nixer summary --scan reviewed.json --fail-on-pending
 ```
 
-`--fail-on-pending` exits non-zero when `candidate` or `todo` findings remain. `migration-note` findings are treated as expected manual migration work and do not fail the gate.
+The summary includes review focus and next actions for unmapped packages, manual migration notes, protected findings, and generated Nix impact. `--fail-on-pending` exits non-zero when `candidate` or `todo` findings remain. `migration-note` findings are treated as expected manual migration work and do not fail the gate.
 
 Validate scan or reviewed JSON before generating Nix:
 

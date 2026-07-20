@@ -218,7 +218,7 @@ Policy:
 `
 
 const summaryHelp = `linux-nixer summary
-Summarize reviewed scan decisions for humans or automation.
+Summarize reviewed scan decisions, review focus, and next actions for humans or automation.
 
 Usage:
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
