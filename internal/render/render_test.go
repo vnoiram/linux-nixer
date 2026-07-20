@@ -507,16 +507,18 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		Host: model.Host{Hostname: "demo"},
 		Users: []model.User{
 			{Name: "root", UID: "0", GID: "0", Home: "/root", Shell: "/bin/bash", Groups: []string{"root"}},
-			{Name: "alice", UID: "1000", GID: "1000", Home: "/home/alice", Shell: "/bin/zsh", Groups: []string{"alice", "docker", "sudo", "video"}},
+			{Name: "alice", UID: "1000", GID: "1000", Home: "/home/alice", Shell: "/bin/zsh", Groups: []string{"alice", "docker", "sudo", "video", "networkmanager", "unknown"}},
 			{Name: "daemon", UID: "1", GID: "1", Home: "/usr/sbin", Shell: "/usr/sbin/nologin", Groups: []string{"daemon"}, System: true},
 		},
 		Services: []model.Service{
-			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", User: "app", WorkingDirectory: "/srv/app", ExecStart: "/opt/app/bin/app --serve", WantedBy: []string{"multi-user.target"}, Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "backup.timer", Path: "/etc/systemd/system/backup.timer", Schedule: "OnCalendar=daily", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "secret.service", Path: "/etc/systemd/system/secret.service", ExecStart: "/opt/app/bin/app --token=super-secret", EnvironmentFiles: []string{"/etc/default/secret"}, Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "candidate.service", Path: "/etc/systemd/system/candidate.service", Decision: model.DecisionCandidate},
 		},
 		Items: []model.Item{
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionConfirmed, Reason: "shell or login environment configuration"},
-			{Kind: "user-config", Name: ".gitconfig", Path: "/home/alice/.gitconfig", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
+			{Kind: "user-config", Name: ".gitconfig", Path: "/home/alice/.gitconfig", Decision: model.DecisionConfirmed, Reason: "user tool configuration", Details: map[string]string{"sections": "2", "secret-refs": "1"}},
 			{Kind: "user-config", Name: ".tmux.conf", Path: "/home/alice/.tmux.conf", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
 			{Kind: "user-config", Name: "starship.toml", Path: "/home/alice/.config/starship.toml", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
 			{Kind: "shell-config", Name: ".bashrc", Path: "/home/alice/.bashrc", Decision: model.DecisionCandidate, Reason: "candidate shell config"},
@@ -537,6 +539,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		`isNormalUser = true;`,
 		`home = "/home/alice";`,
 		`"docker"`,
+		`"networkmanager"`,
 		`"sudo"`,
 		`"video"`,
 		`shell = pkgs.zsh;`,
@@ -545,7 +548,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			t.Fatalf("configuration missing %q:\n%s", want, cfg)
 		}
 	}
-	for _, notWant := range []string{`users.users."root"`, `users.users."daemon"`} {
+	for _, notWant := range []string{`users.users."root"`, `users.users."daemon"`, `"unknown"`} {
 		if strings.Contains(cfg, notWant) {
 			t.Fatalf("configuration should not contain %q:\n%s", notWant, cfg)
 		}
@@ -557,6 +560,9 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			t.Fatalf("home missing %q:\n%s", want, home)
 		}
 	}
+	if !strings.Contains(home, "details: secret-refs `1`, sections `2`") {
+		t.Fatalf("home TODO missing safe details:\n%s", home)
+	}
 	for _, notWant := range []string{`programs.bash.enable = true;`, `PRIVATE KEY`, `programs.fish.enable = true;`} {
 		if strings.Contains(home, notWant) {
 			t.Fatalf("home should not contain %q:\n%s", notWant, home)
@@ -564,15 +570,30 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 	}
 
 	services := readFile(t, out, "modules/services.nix")
-	if !strings.Contains(services, `systemd.services."custom".enable = true;`) {
-		t.Fatalf("services missing generated systemd hint:\n%s", services)
+	for _, want := range []string{
+		`systemd.services."custom" = {`,
+		`wantedBy = [`,
+		`"multi-user.target"`,
+		`User = "app";`,
+		`WorkingDirectory = "/srv/app";`,
+		`ExecStart = "/opt/app/bin/app --serve";`,
+		`systemd.timers."backup" = {`,
+		`timerConfig.OnCalendar = "daily";`,
+		`secret.service ExecStart contains secret-like text and was not generated`,
+		`secret.service environment files require manual migration`,
+	} {
+		if !strings.Contains(services, want) {
+			t.Fatalf("services missing %q:\n%s", want, services)
+		}
 	}
-	if strings.Contains(services, `systemd.services."candidate".enable = true;`) {
-		t.Fatalf("services should not generate candidate systemd hint:\n%s", services)
+	for _, notWant := range []string{`systemd.services."candidate" =`, `--token=super-secret`, `EnvironmentFile`} {
+		if strings.Contains(services, notWant) {
+			t.Fatalf("services should not contain %q:\n%s", notWant, services)
+		}
 	}
 
 	reportMD := readFile(t, out, "reports/migration-report.md")
-	for _, want := range []string{"## Generated Nix summary", "user option: `users.users.alice`", "host shell option: `programs.zsh.enable`", "Home Manager option: `programs.git.enable`", "service hint: `systemd.services.custom.enable`"} {
+	for _, want := range []string{"## Generated Nix summary", "user option: `users.users.alice`", "generated systemd services: `1`", "generated systemd timers: `1`", "host shell option: `programs.zsh.enable`", "Home Manager option: `programs.git.enable`", "service hint: `systemd.services.custom.enable`"} {
 		if !strings.Contains(reportMD, want) {
 			t.Fatalf("migration report missing generated Nix summary %q:\n%s", want, reportMD)
 		}

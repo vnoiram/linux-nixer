@@ -424,16 +424,20 @@ func writeGeneratedNixSummary(b *strings.Builder, report model.ScanReport) {
 	for _, user := range nixUsers(report) {
 		lines = append(lines, fmt.Sprintf("- user option: `users.users.%s`", user.Name))
 	}
+	if count := len(generatedSystemdServices(report)); count > 0 {
+		lines = append(lines, fmt.Sprintf("- generated systemd services: `%d`", count))
+	}
+	if count := len(generatedSystemdTimers(report)); count > 0 {
+		lines = append(lines, fmt.Sprintf("- generated systemd timers: `%d`", count))
+	}
 	for _, shell := range generatedHostShells(report) {
 		lines = append(lines, fmt.Sprintf("- host shell option: `programs.%s.enable`", shell))
 	}
 	for _, program := range generatedHomePrograms(report) {
 		lines = append(lines, fmt.Sprintf("- Home Manager option: `programs.%s.enable`", program))
 	}
-	for _, service := range report.Services {
-		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
-			lines = append(lines, fmt.Sprintf("- service hint: `systemd.services.%s.enable`", serviceNameAttr(service.Name)))
-		}
+	for _, service := range generatedSystemdServices(report) {
+		lines = append(lines, fmt.Sprintf("- service hint: `systemd.services.%s.enable`", serviceNameAttr(service.Name)))
 	}
 	if len(lines) == 0 {
 		return
@@ -917,9 +921,17 @@ func renderServicesModule(report model.ScanReport) string {
 		b.WriteString(comment(fmt.Sprintf("%s %s at %s [%s]", service.Manager, service.Name, service.Path, printableDecision(service.Decision))))
 		b.WriteString("\n")
 		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
-			b.WriteString("  # Generated hint: ")
-			b.WriteString(comment(fmt.Sprintf("systemd.services.%s.enable = true;", quote(serviceNameAttr(service.Name)))))
-			b.WriteString("\n")
+			if rendered := renderSystemdServiceOption(service); rendered != "" {
+				b.WriteString(rendered)
+			}
+			if rendered := renderSystemdTimerOption(service); rendered != "" {
+				b.WriteString(rendered)
+			}
+			for _, note := range serviceGenerationNotes(service) {
+				b.WriteString("  # TODO service detail: ")
+				b.WriteString(comment(note))
+				b.WriteString("\n")
+			}
 		}
 	}
 	for _, item := range report.Items {
@@ -932,6 +944,60 @@ func renderServicesModule(report model.ScanReport) string {
 	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func renderSystemdServiceOption(service model.Service) string {
+	if strings.HasSuffix(service.Name, ".timer") || service.ExecStart == "" || secretLikeText(service.ExecStart) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("  systemd.services.%s = {\n", quote(serviceNameAttr(service.Name))))
+	if len(service.WantedBy) > 0 {
+		b.WriteString("    wantedBy = ")
+		b.WriteString(nixStringList(service.WantedBy, 4))
+		b.WriteString(";\n")
+	}
+	b.WriteString("    serviceConfig = {\n")
+	if service.User != "" {
+		b.WriteString(fmt.Sprintf("      User = %s;\n", quote(service.User)))
+	}
+	if service.WorkingDirectory != "" {
+		b.WriteString(fmt.Sprintf("      WorkingDirectory = %s;\n", quote(service.WorkingDirectory)))
+	}
+	b.WriteString(fmt.Sprintf("      ExecStart = %s;\n", quote(service.ExecStart)))
+	b.WriteString("    };\n")
+	b.WriteString("  };\n")
+	return b.String()
+}
+
+func renderSystemdTimerOption(service model.Service) string {
+	if !strings.HasSuffix(service.Name, ".timer") || service.Schedule == "" || secretLikeText(service.Schedule) {
+		return ""
+	}
+	onCalendar := timerOnCalendar(service.Schedule)
+	if onCalendar == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("  systemd.timers.%s = {\n", quote(timerNameAttr(service.Name))))
+	b.WriteString("    wantedBy = [ \"timers.target\" ];\n")
+	b.WriteString(fmt.Sprintf("    timerConfig.OnCalendar = %s;\n", quote(onCalendar)))
+	b.WriteString("  };\n")
+	return b.String()
+}
+
+func serviceGenerationNotes(service model.Service) []string {
+	var notes []string
+	if service.ExecStart != "" && secretLikeText(service.ExecStart) {
+		notes = append(notes, fmt.Sprintf("%s ExecStart contains secret-like text and was not generated", service.Name))
+	}
+	if len(service.EnvironmentFiles) > 0 {
+		notes = append(notes, fmt.Sprintf("%s environment files require manual migration: %s", service.Name, strings.Join(service.EnvironmentFiles, ", ")))
+	}
+	if strings.HasSuffix(service.Name, ".timer") && service.Schedule != "" && timerOnCalendar(service.Schedule) == "" {
+		notes = append(notes, fmt.Sprintf("%s schedule requires manual migration: %s", service.Name, service.Schedule))
+	}
+	return notes
 }
 
 func renderFilesystemModule(report model.ScanReport) string {
@@ -1581,7 +1647,14 @@ func todoComments(report model.ScanReport) []string {
 	var lines []string
 	for _, item := range report.Items {
 		if includeDecision(item.Decision) && isHomeTODOItem(item) {
-			lines = append(lines, comment(fmt.Sprintf("%s at %s %s", item.Kind, item.Path, item.Reason)))
+			summary := fmt.Sprintf("%s at %s %s", item.Kind, item.Path, item.Reason)
+			if details := itemDetails(item); len(details) > 0 {
+				if len(details) > 4 {
+					details = details[:4]
+				}
+				summary += " details: " + strings.Join(details, ", ")
+			}
+			lines = append(lines, comment(summary))
 		}
 	}
 	for _, env := range report.Languages.Python {
@@ -1662,8 +1735,28 @@ func generatedHomePrograms(report model.ScanReport) []string {
 	return out
 }
 
+func generatedSystemdServices(report model.ScanReport) []model.Service {
+	var services []model.Service
+	for _, service := range report.Services {
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" && renderSystemdServiceOption(service) != "" {
+			services = append(services, service)
+		}
+	}
+	return services
+}
+
+func generatedSystemdTimers(report model.ScanReport) []model.Service {
+	var timers []model.Service
+	for _, service := range report.Services {
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" && renderSystemdTimerOption(service) != "" {
+			timers = append(timers, service)
+		}
+	}
+	return timers
+}
+
 func nixUserGroups(user model.User) []string {
-	allowed := []string{"sudo", "wheel", "docker", "podman", "audio", "video", "input", "plugdev", "dialout"}
+	allowed := []string{"sudo", "wheel", "docker", "podman", "audio", "video", "input", "plugdev", "dialout", "networkmanager"}
 	var groups []string
 	for _, group := range user.Groups {
 		if containsString(allowed, group) {
@@ -1719,6 +1812,23 @@ func shellProgramFromPath(path string) string {
 func serviceNameAttr(name string) string {
 	name = strings.TrimSuffix(name, ".service")
 	return name
+}
+
+func timerNameAttr(name string) string {
+	name = strings.TrimSuffix(name, ".timer")
+	return name
+}
+
+func timerOnCalendar(schedule string) string {
+	schedule = strings.TrimSpace(schedule)
+	if value, ok := strings.CutPrefix(schedule, "OnCalendar="); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func secretLikeText(text string) bool {
+	return redactSecretLikeText(text) != text
 }
 
 func redactSecretLikeText(text string) string {
