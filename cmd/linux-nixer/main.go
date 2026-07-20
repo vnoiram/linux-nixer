@@ -22,6 +22,8 @@ import (
 )
 
 var version = "0.1.0-dev"
+var commit = "unknown"
+var date = "unknown"
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
@@ -55,6 +57,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "policy":
 		return runPolicy(args[1:], stdout)
 	case "version", "--version", "-v":
+		if len(args) > 1 && args[1] == "--full" {
+			fmt.Fprintf(stdout, "version=%s commit=%s built=%s\n", version, commit, date)
+			return nil
+		}
 		fmt.Fprintln(stdout, version)
 		return nil
 	case "help":
@@ -81,7 +87,7 @@ Usage:
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer policy init --out linux-nixer-policy.json
   linux-nixer help <command>
-  linux-nixer version`)
+  linux-nixer version [--full]`)
 }
 
 func commandHelp(w io.Writer, topic []string) error {

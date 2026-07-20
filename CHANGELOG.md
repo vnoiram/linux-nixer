@@ -8,6 +8,11 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 
 ### Added
 
+- Local release validation script (`scripts/release-check.sh`, `make release-check`) covering changelog, format, vet, test, cross-arch build, and archive smoke test in one command reused by CI.
+- Changelog entry check (`scripts/check-changelog.sh`, `make changelog-check`) gating releases on a matching `CHANGELOG.md` version heading.
+- Commit and build date metadata embedded in release binaries, surfaced via `linux-nixer version --full`.
+- Confirmed containers with a known name and image render as `virtualisation.oci-containers.containers` entries with safe ports and volumes.
+- Interactive review filtering (`--pending-only`), a skip-rest-of-section command, and per-section progress indicators.
 - Build-time version injection for release binaries.
 - Release tag validation and archive smoke tests in the GitHub Actions release workflow.
 - Scan JSON validation for schema, decisions, and protected findings.

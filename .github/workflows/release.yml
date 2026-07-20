@@ -18,44 +18,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Validate release tag
-        run: |
-          set -eu
-          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
-            echo "release tag must be vMAJOR.MINOR.PATCH or a SemVer prerelease, got: $GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-      - name: Test
-        run: go test ./...
-      - name: Build release archives
-        run: |
-          set -eu
-          mkdir -p dist
-          for arch in amd64 arm64; do
-            GOOS=linux GOARCH="$arch" go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist/linux-nixer" ./cmd/linux-nixer
-            tar -C dist -czf "dist/linux-nixer-${GITHUB_REF_NAME}-linux-${arch}.tar.gz" linux-nixer
-            rm "dist/linux-nixer"
-          done
-          cd dist
-          sha256sum *.tar.gz > checksums.txt
-      - name: Smoke test release archives
-        run: |
-          set -eu
-          for arch in amd64 arm64; do
-            work="dist/smoke-${arch}"
-            mkdir -p "$work"
-            tar -C "$work" -xzf "dist/linux-nixer-${GITHUB_REF_NAME}-linux-${arch}.tar.gz"
-            grep -a -F "$GITHUB_REF_NAME" "$work/linux-nixer" >/dev/null
-            if [ "$arch" = "amd64" ]; then
-              actual="$("$work/linux-nixer" version)"
-              if [ "$actual" != "$GITHUB_REF_NAME" ]; then
-                echo "version mismatch for ${arch}: got ${actual}, want ${GITHUB_REF_NAME}" >&2
-                exit 1
-              fi
-            fi
-            test -x "$work/linux-nixer"
-            rm -rf "$work"
-          done
+      - name: Release check (changelog, format, vet, test, build, smoke test)
+        run: scripts/release-check.sh "$GITHUB_REF_NAME"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -47,7 +47,9 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
   - Doctor checks generated project structure and optionally validates/builds Nix VM artifacts.
 - Release:
   - CI runs Go checks.
-  - Tag-based release builds Linux amd64/arm64 archives, injects version metadata, smoke-tests artifacts, produces checksums, and creates a GitHub Release.
+  - Tag-based release builds Linux amd64/arm64 archives, injects version/commit/build-date metadata, smoke-tests artifacts, produces checksums, and creates a GitHub Release.
+  - `scripts/release-check.sh` (`make release-check`) runs the full release validation locally: changelog heading check, format/vet/test, cross-arch build, checksums, and archive smoke test. The release workflow calls the same script, so a passing local run mirrors CI.
+  - `scripts/check-changelog.sh` (`make changelog-check`) gates releases on `CHANGELOG.md` having a matching `## [version]` heading.
 
 ## Detection scope
 

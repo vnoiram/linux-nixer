@@ -58,6 +58,21 @@ func TestRunVersionWritesBuildVersion(t *testing.T) {
 	}
 }
 
+func TestRunVersionFullPrintsMetadata(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	version, commit, date = "v9.8.7", "abc1234", "2026-07-21T00:00:00Z"
+	t.Cleanup(func() { version, commit, date = oldVersion, oldCommit, oldDate })
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"version", "--full"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != "version=v9.8.7 commit=abc1234 built=2026-07-21T00:00:00Z" {
+		t.Fatalf("version --full=%q, want version=v9.8.7 commit=abc1234 built=2026-07-21T00:00:00Z", got)
+	}
+}
+
 func TestRunHelpIncludesCaptureSummaryAndVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"help"}, strings.NewReader(""), &stdout, &stdout)

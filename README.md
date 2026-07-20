@@ -186,13 +186,12 @@ In restricted environments, `GOCACHE` may need to point at a writable directory.
 
 ## Release
 
-Versions use SemVer and annotated tags:
+Versions use SemVer and annotated tags. Before tagging, add a `## [vX.Y.Z]` entry to `CHANGELOG.md` and run the same validation the release workflow runs:
 
 ```sh
-make build VERSION=v0.1.0
-bin/linux-nixer version
+make release-check VERSION=v0.1.0
 git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-Pushing a `v*` tag runs the release workflow. Tags must match `vMAJOR.MINOR.PATCH` or a SemVer prerelease such as `v0.1.0-rc.1`. The workflow injects the tag into `linux-nixer version`, builds Linux `amd64` and `arm64` tarballs, smoke-tests the archives, creates checksums, and uploads them to a GitHub Release.
+`make release-check` (`scripts/release-check.sh`) checks that `CHANGELOG.md` has a matching version heading, runs format/vet/test, builds Linux `amd64`/`arm64` archives with version, commit, and build-date metadata into `dist/`, and smoke-tests them — `linux-nixer version` and `linux-nixer version --full` included. Pushing a `v*` tag runs the release workflow, which calls the exact same script before creating checksums and a GitHub Release, so a clean local `make release-check` run is a strong signal the tag will release cleanly. Tags must match `vMAJOR.MINOR.PATCH` or a SemVer prerelease such as `v0.1.0-rc.1`.
