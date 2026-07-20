@@ -497,6 +497,9 @@ func writePackageChecklist(b *strings.Builder, report model.ScanReport) {
 		} else {
 			items = append(items, fmt.Sprintf("Find or package a Nix equivalent for `%s` via %s, or keep it as a documented manual install.", pkg.Name, pkg.Manager))
 		}
+		if len(pkg.Details) > 0 {
+			items[len(items)-1] = appendPackageChecklistDetails(items[len(items)-1], pkg)
+		}
 	}
 	writeChecklistSection(b, "Packages", items)
 }
@@ -863,7 +866,43 @@ func packageLine(pkg model.Package) string {
 		b.WriteString(fmt.Sprintf(" source `%s`", pkg.Source))
 	}
 	b.WriteString("\n")
+	for _, detail := range packageDetails(pkg) {
+		b.WriteString("  - ")
+		b.WriteString(detail)
+		b.WriteString("\n")
+	}
 	return b.String()
+}
+
+func packageDetails(pkg model.Package) []string {
+	if len(pkg.Details) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(pkg.Details))
+	for key := range pkg.Details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	details := make([]string, 0, len(keys))
+	for _, key := range keys {
+		value := redactSecretLikeText(pkg.Details[key])
+		if value == "" {
+			continue
+		}
+		details = append(details, fmt.Sprintf("%s `%s`", key, value))
+	}
+	return details
+}
+
+func appendPackageChecklistDetails(action string, pkg model.Package) string {
+	details := packageDetails(pkg)
+	if len(details) == 0 {
+		return action
+	}
+	if len(details) > 4 {
+		details = details[:4]
+	}
+	return strings.TrimSuffix(action, ".") + ". Review " + strings.Join(details, ", ") + "."
 }
 
 func renderServicesModule(report model.ScanReport) string {

@@ -12,10 +12,10 @@ This is an early implementation scaffold. It includes:
 
 - Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`, `policy init`
 - Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, secrets, system config files, DevOps/project config, user shell settings, desktop settings, hardware/peripheral settings, and filesystem findings
-- Dedicated package ecosystem scanners for snap, flatpak, AppImage, and Homebrew on Linux
+- Dedicated package ecosystem scanners and safe detail summaries for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
 - Nix flake project rendering
-- Richer generated modules and reports for package sources, services, containers, language ecosystems, filesystem findings, system config, DevOps config, user shell settings, desktop settings, hardware/peripheral settings, and development projects
+- Richer generated modules and reports for package sources, alternative package ecosystems, services, containers, language ecosystems, filesystem findings, system config, DevOps config, user shell settings, desktop settings, hardware/peripheral settings, and development projects
 - Service detail reporting for systemd units, timers, and cron schedules
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Conservative Nix option rendering for detected users, safe shell enables, and selected confirmed Home Manager program enables
@@ -153,7 +153,7 @@ Generated projects include:
 
 - apt/dpkg packages, manual install hints, apt repositories, keyrings, preferences, and apt config
 - Linux users, login shells, home directories, system-user hints, supplementary groups, and privileged group membership
-- snap, flatpak, AppImage, and Homebrew on Linux
+- snap, flatpak, AppImage, and Homebrew on Linux, including safe origin/scope/channel/location markers
 - npm/pnpm/yarn global packages and local node package manager metadata
 - Python venv, pipx, pyproject, requirements, Poetry, Pipenv, uv, and Conda environment markers
 - version managers such as asdf, mise, nvm, fnm, volta, pyenv, rbenv, sdkman, and conda

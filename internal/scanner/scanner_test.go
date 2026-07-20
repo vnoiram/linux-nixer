@@ -1428,23 +1428,50 @@ func TestContainerScannerMountedRootFindsComposeWithoutRuntimeCommands(t *testin
 func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/var/lib/flatpak/app/org.example.App/current/active/files/bin/app", "")
-	writeMode(t, root, "/home/alice/Applications/Tool.AppImage", []byte("appimage"), 0o755)
-	write(t, root, "/home/linuxbrew/.linuxbrew/Cellar/hello/1.0/INSTALL_RECEIPT.json", "{}")
+	write(t, root, "/var/lib/flatpak/app/org.example.App/current/active/metadata", "[Application]\nruntime=org.gnome.Platform/x86_64/46\nsdk=org.gnome.Sdk/x86_64/46\ncommand=secret-command\n")
+	write(t, root, "/snap/hello", "snap")
+	writeMode(t, root, "/home/alice/Applications/Tool-1.2.3.AppImage", []byte("appimage"), 0o755)
+	write(t, root, "/home/alice/Applications/Tool-1.2.3.desktop", "[Desktop Entry]\nExec=/home/alice/Applications/Tool-1.2.3.AppImage --token secret-value\n")
+	write(t, root, "/home/linuxbrew/.linuxbrew/Cellar/hello/1.0/INSTALL_RECEIPT.json", `{"source":{"tap":"homebrew/core"},"runtime_dependencies":[{},{}],"installed_on_request":true}`)
 
 	report := &model.ScanReport{}
 	if err := (PackageEcosystemScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
+	seen := map[string]model.Package{}
 	for _, pkg := range report.Packages {
-		seen[pkg.Manager+":"+pkg.Name] = true
+		seen[pkg.Manager+":"+pkg.Name] = pkg
 		if pkg.Manager == "appimage" && len(pkg.NixNames) != 0 {
 			t.Fatalf("appimage should not get nix mapping: %+v", pkg)
 		}
 	}
-	for _, want := range []string{"flatpak:org.example.App", "appimage:Tool", "homebrew:hello"} {
-		if !seen[want] {
+	for _, want := range []string{"snap:hello", "flatpak:org.example.App", "appimage:Tool-1.2.3", "homebrew:hello"} {
+		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing %s in %+v", want, report.Packages)
+		}
+	}
+	if seen["snap:hello"].Details["mount"] != "present" || seen["snap:hello"].Details["source-kind"] != "snap-file" {
+		t.Fatalf("snap details missing: %+v", seen["snap:hello"])
+	}
+	flatpak := seen["flatpak:org.example.App"]
+	if flatpak.Details["scope"] != "system" || flatpak.Details["current"] != "present" || flatpak.Details["runtime"] != "org.gnome.Platform" || flatpak.Details["sdk"] != "present" || flatpak.Details["command"] != "present" {
+		t.Fatalf("flatpak details missing: %+v", flatpak)
+	}
+	appimage := seen["appimage:Tool-1.2.3"]
+	if appimage.Details["location"] != "user-applications" || appimage.Details["executable"] != "present" || appimage.Details["filename-version"] != "1.2.3" || appimage.Details["desktop-entry"] != "present" {
+		t.Fatalf("appimage details missing: %+v", appimage)
+	}
+	brew := seen["homebrew:hello"]
+	if brew.Details["prefix"] != "/home/linuxbrew/.linuxbrew" || brew.Details["version-count"] != "1" || brew.Details["current-version"] != "1.0" || brew.Details["tap"] != "present" || brew.Details["dependency-count"] != "2" || brew.Details["installed-on-request"] != "true" {
+		t.Fatalf("homebrew details missing: %+v", brew)
+	}
+	for _, pkg := range report.Packages {
+		for _, value := range pkg.Details {
+			for _, leaked := range []string{"secret-value", "secret-command", "homebrew/core"} {
+				if strings.Contains(value, leaked) {
+					t.Fatalf("package details leaked %q in %+v", leaked, pkg)
+				}
+			}
 		}
 	}
 }

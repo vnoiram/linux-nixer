@@ -46,12 +46,13 @@ type User struct {
 }
 
 type Package struct {
-	Manager  string   `json:"manager"`
-	Name     string   `json:"name"`
-	Version  string   `json:"version,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	NixNames []string `json:"nixNames,omitempty"`
-	Decision Decision `json:"decision,omitempty"`
+	Manager  string            `json:"manager"`
+	Name     string            `json:"name"`
+	Version  string            `json:"version,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	NixNames []string          `json:"nixNames,omitempty"`
+	Decision Decision          `json:"decision,omitempty"`
+	Details  map[string]string `json:"details,omitempty"`
 }
 
 type Languages struct {

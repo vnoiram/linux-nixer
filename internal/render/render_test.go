@@ -83,10 +83,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		Packages: []model.Package{
 			{Manager: "apt", Name: "curl", Version: "8.0", Source: "apt-mark:manual", NixNames: []string{"curl"}, Decision: model.DecisionCandidate},
 			{Manager: "apt", Name: "excluded", Source: "apt-mark:manual", Decision: model.DecisionExcluded},
-			{Manager: "snap", Name: "hello", Version: "1.0", Source: "/snap/hello", Decision: model.DecisionCandidate},
-			{Manager: "flatpak", Name: "org.example.App", Source: "flathub", Decision: model.DecisionCandidate},
-			{Manager: "appimage", Name: "Tool", Source: "/home/alice/Applications/Tool.AppImage", Decision: model.DecisionMigrationNote},
-			{Manager: "homebrew", Name: "hello", Source: "/home/linuxbrew/.linuxbrew/Cellar/hello", Decision: model.DecisionCandidate},
+			{Manager: "snap", Name: "hello", Version: "1.0", Source: "/snap/hello", Decision: model.DecisionCandidate, Details: map[string]string{"tracking": "latest/stable", "revision": "42"}},
+			{Manager: "flatpak", Name: "org.example.App", Source: "flathub", Decision: model.DecisionCandidate, Details: map[string]string{"scope": "user", "runtime": "org.gnome.Platform", "command": "present"}},
+			{Manager: "appimage", Name: "Tool", Source: "/home/alice/Applications/Tool.AppImage", Decision: model.DecisionMigrationNote, Details: map[string]string{"location": "user-applications", "desktop-entry": "present", "executable": "present"}},
+			{Manager: "homebrew", Name: "hello", Source: "/home/linuxbrew/.linuxbrew/Cellar/hello", Decision: model.DecisionCandidate, Details: map[string]string{"prefix": "/home/linuxbrew/.linuxbrew", "version-count": "1", "dependency-count": "2", "tap": "present"}},
 		},
 		Services: []model.Service{
 			{
@@ -266,7 +266,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		}
 	}
 	packageSources := readFile(t, out, "reports/package-sources.md")
-	for _, want := range []string{"# Package source findings", "Apt packages", "`curl` via apt -> `curl` [candidate] version `8.0` source `apt-mark:manual`", "Apt repositories", "/etc/apt/sources.list", "deb http://archive.ubuntu.com/ubuntu noble main", "Apt keyrings", "/etc/apt/keyrings/vendor.gpg", "Apt preferences", "/etc/apt/preferences.d/pin", "Apt configuration", "/etc/apt/apt.conf.d/99local", "Alternative package ecosystems", "`hello` via snap", "`org.example.App` via flatpak", "`Tool` via appimage", "`hello` via homebrew"} {
+	for _, want := range []string{"# Package source findings", "Apt packages", "`curl` via apt -> `curl` [candidate] version `8.0` source `apt-mark:manual`", "Apt repositories", "/etc/apt/sources.list", "deb http://archive.ubuntu.com/ubuntu noble main", "Apt keyrings", "/etc/apt/keyrings/vendor.gpg", "Apt preferences", "/etc/apt/preferences.d/pin", "Apt configuration", "/etc/apt/apt.conf.d/99local", "Alternative package ecosystems", "`hello` via snap", "revision `42`", "tracking `latest/stable`", "`org.example.App` via flatpak", "runtime `org.gnome.Platform`", "scope `user`", "`Tool` via appimage", "desktop-entry `present`", "location `user-applications`", "`hello` via homebrew", "dependency-count `2`", "prefix `/home/linuxbrew/.linuxbrew`"} {
 		if !strings.Contains(packageSources, want) {
 			t.Fatalf("package sources report missing %q:\n%s", want, packageSources)
 		}
@@ -333,6 +333,9 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"## Before applying Nix",
 		"Confirm whether `curl` via apt should be promoted to `confirmed`",
 		"Find or package a Nix equivalent for `hello` via snap",
+		"Review revision `42`, tracking `latest/stable`",
+		"Find or package a Nix equivalent for `org.example.App` via flatpak",
+		"Review command `present`, runtime `org.gnome.Platform`, scope `user`",
 		"Recreate apt repository `/etc/apt/sources.list`",
 		"Confirm `prettier` from pnpm as a Home Manager package",
 		"Translate systemd service `custom.service`",
