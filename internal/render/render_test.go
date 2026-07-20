@@ -149,13 +149,13 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 			{Kind: "os-config", Name: "client.conf", Path: "/etc/openvpn/client.conf", Decision: model.DecisionCandidate, Reason: "network configuration", Details: map[string]string{"remotes": "1", "routes": "1", "secret-refs": "1"}},
 			{Kind: "os-config", Name: "app", Path: "/etc/nginx/sites-enabled/app", Decision: model.DecisionCandidate, Reason: "web server configuration"},
 			{Kind: "os-config", Name: "ufw.conf", Path: "/etc/ufw/ufw.conf", Decision: model.DecisionExcluded, Reason: "firewall configuration"},
-			{Kind: "devops-config", Name: "config", Path: "/home/alice/.kube/config", Decision: model.DecisionMigrationNote, Reason: "kubernetes configuration may contain credentials"},
-			{Kind: "devops-config", Name: "config.json", Path: "/home/alice/.docker/config.json", Decision: model.DecisionMigrationNote, Reason: "docker client configuration may contain credentials"},
-			{Kind: "devops-config", Name: "repositories.yaml", Path: "/home/alice/.config/helm/repositories.yaml", Decision: model.DecisionMigrationNote, Reason: "helm repository configuration may contain credentials"},
-			{Kind: "devops-config", Name: ".terraformrc", Path: "/home/alice/.terraformrc", Decision: model.DecisionMigrationNote, Reason: "terraform CLI configuration may contain credentials"},
-			{Kind: "devops-config", Name: "config", Path: "/home/alice/.aws/config", Decision: model.DecisionCandidate, Reason: "aws CLI configuration"},
-			{Kind: "devops-config", Name: "config_default", Path: "/home/alice/.config/gcloud/configurations/config_default", Decision: model.DecisionMigrationNote, Reason: "gcloud configuration may contain credentials"},
-			{Kind: "devops-config", Name: "config", Path: "/home/alice/.azure/config", Decision: model.DecisionMigrationNote, Reason: "azure CLI configuration may contain credentials"},
+			{Kind: "devops-config", Name: "config", Path: "/home/alice/.kube/config", Decision: model.DecisionMigrationNote, Reason: "kubernetes configuration may contain credentials", Details: map[string]string{"contexts": "1", "clusters": "1", "users": "1", "current-context": "present", "secret-refs": "1"}},
+			{Kind: "devops-config", Name: "config.json", Path: "/home/alice/.docker/config.json", Decision: model.DecisionMigrationNote, Reason: "docker client configuration may contain credentials", Details: map[string]string{"registries": "1", "credential-store": "present", "credential-helpers": "1", "secret-refs": "1"}},
+			{Kind: "devops-config", Name: "repositories.yaml", Path: "/home/alice/.config/helm/repositories.yaml", Decision: model.DecisionMigrationNote, Reason: "helm repository configuration may contain credentials", Details: map[string]string{"repositories": "2", "repository-schemes": "https,oci", "secret-refs": "1"}},
+			{Kind: "devops-config", Name: ".terraformrc", Path: "/home/alice/.terraformrc", Decision: model.DecisionMigrationNote, Reason: "terraform CLI configuration may contain credentials", Details: map[string]string{"credential-hosts": "1", "credential-helper": "present", "plugin-cache": "present", "secret-refs": "1"}},
+			{Kind: "devops-config", Name: "config", Path: "/home/alice/.aws/config", Decision: model.DecisionCandidate, Reason: "aws CLI configuration", Details: map[string]string{"profiles": "2", "regions": "2", "sso-settings": "2"}},
+			{Kind: "devops-config", Name: "config_default", Path: "/home/alice/.config/gcloud/configurations/config_default", Decision: model.DecisionMigrationNote, Reason: "gcloud configuration may contain credentials", Details: map[string]string{"sections": "2", "properties": "3", "project": "present", "account": "present"}},
+			{Kind: "devops-config", Name: "config", Path: "/home/alice/.azure/config", Decision: model.DecisionMigrationNote, Reason: "azure CLI configuration may contain credentials", Details: map[string]string{"sections": "2", "settings": "3", "cloud": "present", "subscription": "present", "tenant": "present"}},
 			{Kind: "devops-config", Name: "excluded", Path: "/home/alice/.kube/excluded", Decision: model.DecisionExcluded, Reason: "kubernetes configuration may contain credentials"},
 			{Kind: "cicd-config", Name: "ci.yml", Path: "/home/alice/app/.github/workflows/ci.yml", Decision: model.DecisionCandidate, Reason: "github actions workflow", Details: map[string]string{"jobs": "1", "secret-refs": "1", "triggers": "push,workflow_dispatch"}},
 			{Kind: "cicd-config", Name: "deploy-prod.sh", Path: "/srv/app/scripts/deploy-prod.sh", Decision: model.DecisionCandidate, Reason: "deploy or release script", Details: map[string]string{"shebang": "/bin/sh", "targets": "deploy,release"}},
@@ -231,12 +231,12 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		t.Fatalf("system config report included excluded entries or raw secret:\n%s", systemConfig)
 	}
 	devopsConfig := readFile(t, out, "reports/devops-config.md")
-	for _, want := range []string{"Kubernetes", "/home/alice/.kube/config", "Docker", "/home/alice/.docker/config.json", "Helm", "/home/alice/.config/helm/repositories.yaml", "Terraform", "/home/alice/.terraformrc", "AWS", "/home/alice/.aws/config", "GCP", "/home/alice/.config/gcloud/configurations/config_default", "Azure", "/home/alice/.azure/config", "CI/CD", "/home/alice/app/.github/workflows/ci.yml", "triggers `push,workflow_dispatch`", "/srv/app/scripts/deploy-prod.sh", "targets `deploy,release`"} {
+	for _, want := range []string{"Kubernetes", "/home/alice/.kube/config", "contexts `1`", "current-context `present`", "Docker", "/home/alice/.docker/config.json", "credential-store `present`", "registries `1`", "Helm", "/home/alice/.config/helm/repositories.yaml", "repositories `2`", "repository-schemes `https,oci`", "Terraform", "/home/alice/.terraformrc", "credential-hosts `1`", "plugin-cache `present`", "AWS", "/home/alice/.aws/config", "profiles `2`", "regions `2`", "GCP", "/home/alice/.config/gcloud/configurations/config_default", "project `present`", "Azure", "/home/alice/.azure/config", "subscription `present`", "CI/CD", "/home/alice/app/.github/workflows/ci.yml", "triggers `push,workflow_dispatch`", "/srv/app/scripts/deploy-prod.sh", "targets `deploy,release`"} {
 		if !strings.Contains(devopsConfig, want) {
 			t.Fatalf("devops config report missing %q:\n%s", want, devopsConfig)
 		}
 	}
-	if strings.Contains(devopsConfig, "super-secret") || strings.Contains(devopsConfig, "excluded") {
+	if strings.Contains(devopsConfig, "super-secret") || strings.Contains(devopsConfig, "excluded") || strings.Contains(devopsConfig, "secret-project") {
 		t.Fatalf("devops config report leaked raw secret or excluded entry:\n%s", devopsConfig)
 	}
 	backupSync := readFile(t, out, "reports/backup-sync.md")
@@ -348,6 +348,10 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Translate compose `/srv/app/compose.yml`",
 		"Review CI/CD configuration `/home/alice/app/.github/workflows/ci.yml`",
 		"Review jobs `1`, secret-refs `1`, triggers `push,workflow_dispatch`",
+		"Review DevOps provider configuration `/home/alice/.kube/config`",
+		"Review clusters `1`, contexts `1`, current-context `present`, secret-refs `1`",
+		"Review DevOps provider configuration `/home/alice/.docker/config.json`",
+		"Review credential-helpers `1`, credential-store `present`, registries `1`, secret-refs `1`",
 		"backup dirty changes before migration",
 		"Decide how to recreate `/usr/local/bin/tool`",
 		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",

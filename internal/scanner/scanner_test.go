@@ -534,13 +534,13 @@ func TestSudoFallbackDisabledForMountedRootfs(t *testing.T) {
 
 func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "/home/alice/.kube/config", "users:\n- token: super-secret\n")
-	write(t, root, "/home/alice/.docker/config.json", `{"auths":{}}`)
-	write(t, root, "/home/alice/.config/helm/repositories.yaml", "repositories: []\n")
-	write(t, root, "/home/alice/.terraformrc", "credentials \"app.terraform.io\" {}\n")
-	write(t, root, "/home/alice/.aws/config", "[default]\nregion=us-east-1\n")
-	write(t, root, "/home/alice/.config/gcloud/configurations/config_default", "[core]\n")
-	write(t, root, "/home/alice/.azure/config", "[cloud]\n")
+	write(t, root, "/home/alice/.kube/config", "current-context: prod\nclusters:\n- name: prod\n  cluster:\n    server: https://k8s.example.test\ncontexts:\n- name: prod\n  context:\n    namespace: default\nusers:\n- name: alice\n  user:\n    token: super-secret\n    exec:\n      command: oidc-login\n")
+	write(t, root, "/home/alice/.docker/config.json", `{"auths":{"registry.example.test":{"auth":"secret-value"}},"credsStore":"pass","credHelpers":{"ghcr.io":"pass"},"currentContext":"desktop-linux","plugins":{"scan":{}}}`)
+	write(t, root, "/home/alice/.config/helm/repositories.yaml", "repositories:\n- name: stable\n  url: https://charts.example.test\n  password: super-secret\n- name: oci\n  url: oci://registry.example.test/charts\n")
+	write(t, root, "/home/alice/.terraformrc", "credentials \"app.terraform.io\" { token = \"super-secret\" }\ncredentials_helper \"helper\" {}\nplugin_cache_dir = \"/home/alice/.terraform.d/plugin-cache\"\nprovider_installation {}\n")
+	write(t, root, "/home/alice/.aws/config", "[default]\nregion=us-east-1\n[profile prod]\nregion=ap-northeast-1\nsso_start_url=https://example.test/start\nsso_region=us-east-1\n")
+	write(t, root, "/home/alice/.config/gcloud/configurations/config_default", "[core]\nproject = secret-project\naccount = alice@example.test\n[compute]\nzone = asia-northeast1-a\n")
+	write(t, root, "/home/alice/.azure/config", "[cloud]\nname = AzureCloud\n[defaults]\nsubscription = secret-subscription\ntenant = secret-tenant\n")
 	write(t, root, "/home/alice/app/.github/workflows/ci.yml", "on: [push, pull_request]\njobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n      - run: echo ${{ secrets.DEPLOY_TOKEN }}\n")
 	write(t, root, "/home/alice/app/.gitlab-ci.yml", "stages:\n  - test\ntest:\n  stage: test\n  script: echo $DEPLOY_TOKEN\n")
 	write(t, root, "/srv/app/Jenkinsfile", "pipeline { agent any stages { stage('Deploy') { steps { sh 'deploy' } } } environment { TOKEN='secret-value' } }\n")
@@ -570,6 +570,34 @@ func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 	if seen["/home/alice/.aws/config"].Decision != model.DecisionCandidate {
 		t.Fatalf("aws config should remain candidate in %+v", report.Items)
 	}
+	kube := seen["/home/alice/.kube/config"]
+	if kube.Details["contexts"] != "1" || kube.Details["clusters"] != "1" || kube.Details["users"] != "1" || kube.Details["current-context"] != "present" || kube.Details["namespace"] != "present" || kube.Details["exec-auth"] != "present" || kube.Details["secret-refs"] != "1" {
+		t.Fatalf("kubernetes config details missing: %+v", kube)
+	}
+	docker := seen["/home/alice/.docker/config.json"]
+	if docker.Details["registries"] != "1" || docker.Details["credential-store"] != "present" || docker.Details["credential-helpers"] != "1" || docker.Details["current-context"] != "present" || docker.Details["plugins"] != "1" || docker.Details["secret-refs"] != "1" {
+		t.Fatalf("docker client details missing: %+v", docker)
+	}
+	helm := seen["/home/alice/.config/helm/repositories.yaml"]
+	if helm.Details["repositories"] != "2" || helm.Details["repository-schemes"] != "https,oci" || helm.Details["secret-refs"] != "1" {
+		t.Fatalf("helm details missing: %+v", helm)
+	}
+	tf := seen["/home/alice/.terraformrc"]
+	if tf.Details["credential-hosts"] != "1" || tf.Details["credential-helper"] != "present" || tf.Details["plugin-cache"] != "present" || tf.Details["provider-installation"] != "present" || tf.Details["secret-refs"] != "1" {
+		t.Fatalf("terraform details missing: %+v", tf)
+	}
+	aws := seen["/home/alice/.aws/config"]
+	if aws.Details["profiles"] != "2" || aws.Details["regions"] != "2" || aws.Details["sso-settings"] != "2" {
+		t.Fatalf("aws details missing: %+v", aws)
+	}
+	gcloud := seen["/home/alice/.config/gcloud/configurations/config_default"]
+	if gcloud.Details["sections"] != "2" || gcloud.Details["properties"] != "3" || gcloud.Details["project"] != "present" || gcloud.Details["account"] != "present" {
+		t.Fatalf("gcloud details missing: %+v", gcloud)
+	}
+	azure := seen["/home/alice/.azure/config"]
+	if azure.Details["sections"] != "2" || azure.Details["settings"] != "3" || azure.Details["cloud"] != "present" || azure.Details["subscription"] != "present" || azure.Details["tenant"] != "present" {
+		t.Fatalf("azure details missing: %+v", azure)
+	}
 	gha := seen["/home/alice/app/.github/workflows/ci.yml"]
 	if gha.Kind != "cicd-config" || gha.Reason != "github actions workflow" || gha.Details["jobs"] != "1" || gha.Details["uses"] != "1" || gha.Details["secret-refs"] != "1" || gha.Details["triggers"] != "pull_request,push" {
 		t.Fatalf("github actions details missing: %+v", gha)
@@ -590,10 +618,12 @@ func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 	if makefile.Kind != "cicd-config" || !strings.Contains(makefile.Details["targets"], "deploy") || !strings.Contains(makefile.Details["targets"], "build") {
 		t.Fatalf("makefile automation details missing: %+v", makefile)
 	}
-	for _, item := range []model.Item{gha, gitlab, jenkins, deploy, makefile} {
+	for _, item := range []model.Item{kube, docker, helm, tf, aws, gcloud, azure, gha, gitlab, jenkins, deploy, makefile} {
 		for _, value := range item.Details {
-			if strings.Contains(value, "secret-value") || strings.Contains(value, "DEPLOY_TOKEN") {
-				t.Fatalf("cicd details leaked secret value in %+v", item)
+			for _, leaked := range []string{"secret-value", "super-secret", "DEPLOY_TOKEN", "k8s.example.test", "registry.example.test", "charts.example.test", "secret-project", "alice@example.test", "secret-subscription", "secret-tenant"} {
+				if strings.Contains(value, leaked) {
+					t.Fatalf("devops details leaked %q in %+v", leaked, item)
+				}
 			}
 		}
 	}

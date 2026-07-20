@@ -617,9 +617,17 @@ func writeContainerChecklist(b *strings.Builder, report model.ScanReport) {
 func writeDevOpsChecklist(b *strings.Builder, report model.ScanReport) {
 	var items []string
 	for _, item := range devOpsConfigItems(report) {
-		if !manualDecision(item.Decision) || item.Kind != "cicd-config" {
+		if !manualDecision(item.Decision) {
 			continue
 		}
+		action := devOpsChecklistItem(item)
+		items = append(items, action)
+	}
+	writeChecklistSection(b, "DevOps and CI/CD", items)
+}
+
+func devOpsChecklistItem(item model.Item) string {
+	if item.Kind == "cicd-config" {
 		action := fmt.Sprintf("Review CI/CD configuration `%s` and decide whether to recreate it as GitHub Actions, a flake app, a dev shell command, or documented manual automation.", item.Path)
 		details := itemDetails(item)
 		if len(details) > 0 {
@@ -628,9 +636,17 @@ func writeDevOpsChecklist(b *strings.Builder, report model.ScanReport) {
 			}
 			action += " Review " + strings.Join(details, ", ") + "."
 		}
-		items = append(items, action)
+		return action
 	}
-	writeChecklistSection(b, "DevOps and CI/CD", items)
+	action := fmt.Sprintf("Review DevOps provider configuration `%s` and recreate contexts, profiles, registries, credentials, and cloud defaults manually or through a secrets manager.", item.Path)
+	details := itemDetails(item)
+	if len(details) > 0 {
+		if len(details) > 4 {
+			details = details[:4]
+		}
+		action += " Review " + strings.Join(details, ", ") + "."
+	}
+	return action
 }
 
 func writeGitChecklist(b *strings.Builder, report model.ScanReport) {

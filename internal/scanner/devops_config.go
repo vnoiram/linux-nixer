@@ -3,6 +3,7 @@ package scanner
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -46,6 +47,7 @@ func (DevOpsConfigScanner) Scan(ctx context.Context, opts Options, report *model
 				Path:     display,
 				Decision: decision,
 				Reason:   devOpsConfigReason(display),
+				Details:  devOpsProviderDetails(display, readLocalDevOpsFile(path)),
 			})
 			if secretRisk {
 				report.Warnings = append(report.Warnings, model.Warning{
@@ -171,6 +173,303 @@ func readLocalDevOpsFile(path string) string {
 		return ""
 	}
 	return string(b)
+}
+
+func devOpsProviderDetails(path, content string) map[string]string {
+	switch {
+	case strings.Contains(path, "/.kube/"):
+		return kubeConfigDetails(content)
+	case strings.Contains(path, "/.docker/"):
+		return dockerClientConfigDetails(content)
+	case strings.Contains(path, "/helm/"):
+		return helmRepoDetails(content)
+	case strings.Contains(path, ".terraformrc"):
+		return terraformConfigDetails(content)
+	case strings.Contains(path, "/.aws/"):
+		return awsConfigDetails(content)
+	case strings.Contains(path, "/gcloud/"):
+		return gcloudConfigDetails(content)
+	case strings.Contains(path, "/.azure/"):
+		return azureConfigDetails(content)
+	default:
+		return nil
+	}
+}
+
+func kubeConfigDetails(content string) map[string]string {
+	details := map[string]string{}
+	contexts, clusters, users, secretRefs := 0, 0, 0, 0
+	currentContext, namespace, execAuth, authProvider := false, false, false, false
+	section := ""
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripDevOpsComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		if isSecretReference(line) {
+			secretRefs++
+		}
+		switch line {
+		case "contexts:":
+			section = "contexts"
+			continue
+		case "clusters:":
+			section = "clusters"
+			continue
+		case "users:":
+			section = "users"
+			continue
+		}
+		if isTopLevelYAMLKey(line) {
+			section = ""
+		}
+		if strings.HasPrefix(line, "- name:") {
+			switch section {
+			case "contexts":
+				contexts++
+			case "clusters":
+				clusters++
+			case "users":
+				users++
+			}
+		}
+		lower := strings.ToLower(line)
+		switch {
+		case strings.HasPrefix(lower, "current-context:"):
+			currentContext = true
+		case strings.HasPrefix(lower, "namespace:"):
+			namespace = true
+		case strings.HasPrefix(lower, "exec:"):
+			execAuth = true
+		case strings.HasPrefix(lower, "auth-provider:"):
+			authProvider = true
+		}
+	}
+	setPositiveDetail(details, "contexts", contexts)
+	setPositiveDetail(details, "clusters", clusters)
+	setPositiveDetail(details, "users", users)
+	setPositiveDetail(details, "secret-refs", secretRefs)
+	setPresentDetail(details, "current-context", currentContext)
+	setPresentDetail(details, "namespace", namespace)
+	setPresentDetail(details, "exec-auth", execAuth)
+	setPresentDetail(details, "auth-provider", authProvider)
+	return emptyDevOpsDetails(details)
+}
+
+func dockerClientConfigDetails(content string) map[string]string {
+	details := map[string]string{}
+	var cfg struct {
+		Auths          map[string]json.RawMessage `json:"auths"`
+		CredsStore     string                     `json:"credsStore"`
+		CredHelpers    map[string]string          `json:"credHelpers"`
+		CurrentContext string                     `json:"currentContext"`
+		Plugins        map[string]json.RawMessage `json:"plugins"`
+	}
+	if json.Unmarshal([]byte(content), &cfg) == nil {
+		setPositiveDetail(details, "registries", len(cfg.Auths))
+		setPresentDetail(details, "credential-store", cfg.CredsStore != "")
+		setPositiveDetail(details, "credential-helpers", len(cfg.CredHelpers))
+		setPresentDetail(details, "current-context", cfg.CurrentContext != "")
+		setPositiveDetail(details, "plugins", len(cfg.Plugins))
+		setPositiveDetail(details, "secret-refs", dockerAuthSecretRefs(cfg.Auths))
+	}
+	if _, ok := details["secret-refs"]; !ok {
+		setPositiveDetail(details, "secret-refs", countSecretReferences(content))
+	}
+	return emptyDevOpsDetails(details)
+}
+
+func dockerAuthSecretRefs(auths map[string]json.RawMessage) int {
+	secretRefs := 0
+	for _, raw := range auths {
+		var auth struct {
+			Auth          string `json:"auth"`
+			IdentityToken string `json:"identitytoken"`
+		}
+		if json.Unmarshal(raw, &auth) != nil {
+			continue
+		}
+		if auth.Auth != "" || auth.IdentityToken != "" {
+			secretRefs++
+		}
+	}
+	return secretRefs
+}
+
+func helmRepoDetails(content string) map[string]string {
+	details := map[string]string{}
+	repos, secretRefs := 0, 0
+	schemes := map[string]bool{}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripDevOpsComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		if isSecretReference(line) {
+			secretRefs++
+		}
+		if strings.HasPrefix(line, "- name:") {
+			repos++
+		}
+		if strings.HasPrefix(strings.ToLower(line), "url:") {
+			value := strings.TrimSpace(strings.TrimPrefix(line, "url:"))
+			if scheme := devOpsURIScheme(value); scheme != "" {
+				schemes[scheme] = true
+			}
+		}
+	}
+	setPositiveDetail(details, "repositories", repos)
+	setPositiveDetail(details, "secret-refs", secretRefs)
+	if len(schemes) > 0 {
+		details["repository-schemes"] = strings.Join(sortedDevOpsKeys(schemes), ",")
+	}
+	return emptyDevOpsDetails(details)
+}
+
+func terraformConfigDetails(content string) map[string]string {
+	details := map[string]string{}
+	hosts, secretRefs := 0, 0
+	credentialHelper, pluginCache, providerInstallation := false, false, false
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripDevOpsComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if isSecretReference(line) {
+			secretRefs++
+		}
+		if strings.HasPrefix(lower, "credentials ") {
+			hosts++
+		}
+		if strings.Contains(lower, "credentials_helper") {
+			credentialHelper = true
+		}
+		if strings.Contains(lower, "plugin_cache_dir") {
+			pluginCache = true
+		}
+		if strings.Contains(lower, "provider_installation") {
+			providerInstallation = true
+		}
+	}
+	setPositiveDetail(details, "credential-hosts", hosts)
+	setPositiveDetail(details, "secret-refs", secretRefs)
+	setPresentDetail(details, "credential-helper", credentialHelper)
+	setPresentDetail(details, "plugin-cache", pluginCache)
+	setPresentDetail(details, "provider-installation", providerInstallation)
+	return emptyDevOpsDetails(details)
+}
+
+func awsConfigDetails(content string) map[string]string {
+	details := map[string]string{}
+	profiles, regions, sso, secretRefs := 0, 0, 0, 0
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripDevOpsComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			profiles++
+		}
+		if strings.HasPrefix(lower, "region") {
+			regions++
+		}
+		if strings.HasPrefix(lower, "sso_") {
+			sso++
+		}
+		if isSecretReference(line) {
+			secretRefs++
+		}
+	}
+	setPositiveDetail(details, "profiles", profiles)
+	setPositiveDetail(details, "regions", regions)
+	setPositiveDetail(details, "sso-settings", sso)
+	setPositiveDetail(details, "secret-refs", secretRefs)
+	return emptyDevOpsDetails(details)
+}
+
+func gcloudConfigDetails(content string) map[string]string {
+	details := map[string]string{}
+	sections, properties, secretRefs := 0, 0, 0
+	project, account := false, false
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripDevOpsComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			sections++
+			continue
+		}
+		if strings.Contains(line, "=") {
+			properties++
+		}
+		if strings.HasPrefix(lower, "project") {
+			project = true
+		}
+		if strings.HasPrefix(lower, "account") {
+			account = true
+		}
+		if isSecretReference(line) {
+			secretRefs++
+		}
+	}
+	setPositiveDetail(details, "sections", sections)
+	setPositiveDetail(details, "properties", properties)
+	setPositiveDetail(details, "secret-refs", secretRefs)
+	setPresentDetail(details, "project", project)
+	setPresentDetail(details, "account", account)
+	return emptyDevOpsDetails(details)
+}
+
+func azureConfigDetails(content string) map[string]string {
+	details := map[string]string{}
+	sections, settings, secretRefs := 0, 0, 0
+	cloud, subscription, tenant := false, false, false
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripDevOpsComment(sc.Text()))
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			sections++
+			if strings.Contains(lower, "cloud") {
+				cloud = true
+			}
+			continue
+		}
+		if strings.Contains(line, "=") {
+			settings++
+		}
+		if strings.HasPrefix(lower, "cloud") {
+			cloud = true
+		}
+		if strings.Contains(lower, "subscription") {
+			subscription = true
+		}
+		if strings.Contains(lower, "tenant") {
+			tenant = true
+		}
+		if isSecretReference(line) {
+			secretRefs++
+		}
+	}
+	setPositiveDetail(details, "sections", sections)
+	setPositiveDetail(details, "settings", settings)
+	setPositiveDetail(details, "secret-refs", secretRefs)
+	setPresentDetail(details, "cloud", cloud)
+	setPresentDetail(details, "subscription", subscription)
+	setPresentDetail(details, "tenant", tenant)
+	return emptyDevOpsDetails(details)
 }
 
 func cicdWorkflowReason(path string) string {
@@ -421,6 +720,20 @@ func setPositiveDetail(details map[string]string, key string, value int) {
 	if value > 0 {
 		details[key] = strconv.Itoa(value)
 	}
+}
+
+func setPresentDetail(details map[string]string, key string, present bool) {
+	if present {
+		details[key] = "present"
+	}
+}
+
+func devOpsURIScheme(value string) string {
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	if before, _, ok := strings.Cut(value, ":"); ok && before != "" {
+		return strings.ToLower(before)
+	}
+	return ""
 }
 
 func sortedDevOpsKeys(values map[string]bool) []string {
