@@ -61,7 +61,7 @@ func TestApplyExcludesPathPrefixAndKeepsSecretsAsMigrationNotes(t *testing.T) {
 func TestInteractiveAppliesChoices(t *testing.T) {
 	report := model.ScanReport{
 		Packages: []model.Package{
-			{Manager: "apt", Name: "curl"},
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Details: map[string]string{"source": "apt-mark:manual"}},
 			{Manager: "apt", Name: "git"},
 			{Manager: "apt", Name: "vim"},
 			{Manager: "apt", Name: "tmux"},
@@ -88,6 +88,11 @@ func TestInteractiveAppliesChoices(t *testing.T) {
 	if !strings.Contains(out.String(), "choose c=confirmed") {
 		t.Fatalf("interactive prompt missing choices: %s", out.String())
 	}
+	for _, want := range []string{"generates: package curl", "review: no nix mapping", "detail: source=apt-mark:manual"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("interactive output missing %q: %s", want, out.String())
+		}
+	}
 }
 
 func TestInteractiveProtectsSecretAndStatefulData(t *testing.T) {
@@ -112,6 +117,52 @@ func TestInteractiveProtectsSecretAndStatefulData(t *testing.T) {
 	}
 	if strings.Count(out.String(), "protected finding cannot be confirmed") != 2 {
 		t.Fatalf("expected protected warning twice, got: %s", out.String())
+	}
+	if strings.Count(out.String(), "protected: cannot be confirmed") != 2 {
+		t.Fatalf("expected protected note twice, got: %s", out.String())
+	}
+}
+
+func TestInteractiveShowsSafeContextNotes(t *testing.T) {
+	report := model.ScanReport{
+		GitSources: []model.GitSource{
+			{Path: "/home/alice/app", Remote: "https://example.test/app.git", Dirty: true, Build: []string{"submodules", "flake.nix"}},
+		},
+		Containers: []model.Container{
+			{Runtime: "docker", Name: "web", Image: "nginx", Ports: []string{"8080:80"}, Mounts: []string{"volume:data:/data"}, Env: map[string]string{"TOKEN": ""}},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", User: "app", WorkingDirectory: "/srv/app", ExecStart: "/opt/app --token=super-secret", EnvironmentFiles: []string{"/etc/default/app"}},
+		},
+		Items: []model.Item{
+			{Kind: "credential-store", Path: "/home/alice/.password-store", Reason: "credential or key store marker; migrate manually", Details: map[string]string{"store": "password-store", "token": "token=super-secret"}},
+		},
+	}
+	in := strings.NewReader("s\ns\ns\ns\n")
+	var out bytes.Buffer
+
+	Interactive(in, &out, report, Options{})
+	got := out.String()
+
+	for _, want := range []string{
+		"review: dirty working tree",
+		"detail: build-hints=submodules,flake.nix",
+		"generates: docker runtime enable when confirmed",
+		"detail: ports=8080:80",
+		"detail: env-keys=1",
+		"generates: systemd service options when confirmed and safe",
+		"detail: exec=/opt/app --token=<redacted>",
+		"review: environment files require manual migration",
+		"detail: store=password-store",
+		"detail: token=token=<redacted>",
+		"review: manual migration recommended",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("interactive output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "super-secret") {
+		t.Fatalf("interactive output leaked secret:\n%s", got)
 	}
 }
 

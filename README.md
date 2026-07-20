@@ -96,7 +96,7 @@ bin/linux-nixer review \
   --exclude-path /home/alice/Downloads
 ```
 
-Interactive review accepts `c` confirmed, `k` candidate, `t` todo, `m` migration-note, `x` excluded, `s` skip, and `q` quit. Secret-like and stateful findings cannot be confirmed interactively; they remain migration notes unless excluded.
+Interactive review shows safe context notes such as Nix mapping impact, limited details, unmapped-package markers, and protected-finding reasons. It accepts `c` confirmed, `k` candidate, `t` todo, `m` migration-note, `x` excluded, `s` skip, and `q` quit. Secret-like and stateful findings cannot be confirmed interactively; they remain migration notes unless excluded.
 
 Summarize reviewed decisions before generating Nix:
 

@@ -205,7 +205,7 @@ Flags:
   --out PATH                   Write reviewed scan JSON.
   --policy PATH                Load repeatable review policy from PATH.
   --auto-safe                  Confirm high-confidence safe findings.
-  --interactive                Prompt for each finding with c/k/t/m/x/s/q choices.
+  --interactive                Prompt for each finding with c/k/t/m/x/s/q choices and safe context notes.
   --confirm-kind KIND          Mark findings of kind/category as confirmed. Repeatable.
   --exclude-kind KIND          Mark findings of kind/category as excluded. Repeatable.
   --todo-kind KIND             Mark findings of kind/category as todo. Repeatable.

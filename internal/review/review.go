@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -104,7 +105,7 @@ func (s *interactiveSession) reviewPackages(section string, pkgs []model.Package
 		if s.quit {
 			return
 		}
-		s.reviewDecision(section, i+1, packageSummary(pkg), pkg.Decision, false, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision(section, i+1, packageSummary(pkg), packageNotes(pkg), pkg.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
@@ -113,7 +114,7 @@ func (s *interactiveSession) reviewGitSources(items []model.GitSource, set func(
 		if s.quit {
 			return
 		}
-		s.reviewDecision("git sources", i+1, fmt.Sprintf("%s remote=%s commit=%s", item.Path, item.Remote, item.Commit), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision("git sources", i+1, fmt.Sprintf("%s remote=%s commit=%s", item.Path, item.Remote, item.Commit), gitSourceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
@@ -126,7 +127,7 @@ func (s *interactiveSession) reviewContainers(items []model.Container, set func(
 		if name == "" {
 			name = item.Compose
 		}
-		s.reviewDecision("containers", i+1, fmt.Sprintf("%s %s image=%s", item.Runtime, name, item.Image), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision("containers", i+1, fmt.Sprintf("%s %s image=%s", item.Runtime, name, item.Image), containerNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
@@ -135,7 +136,7 @@ func (s *interactiveSession) reviewServices(items []model.Service, set func(int,
 		if s.quit {
 			return
 		}
-		s.reviewDecision("services", i+1, fmt.Sprintf("%s %s %s", item.Manager, item.Name, item.Path), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision("services", i+1, fmt.Sprintf("%s %s %s", item.Manager, item.Name, item.Path), serviceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
@@ -144,7 +145,8 @@ func (s *interactiveSession) reviewFiles(section string, items []model.FileFindi
 		if s.quit {
 			return
 		}
-		s.reviewDecision(section, i+1, fmt.Sprintf("%s %s %s", item.Category, item.Path, item.Reason), item.Decision, item.SecretRisk || forceMigrationNote, func(decision model.Decision) { set(i, decision) })
+		protected := item.SecretRisk || forceMigrationNote
+		s.reviewDecision(section, i+1, fmt.Sprintf("%s %s %s", item.Category, item.Path, item.Reason), fileFindingNotes(item, protected), item.Decision, protected, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
@@ -153,15 +155,20 @@ func (s *interactiveSession) reviewItems(items []model.Item, set func(int, model
 		if s.quit {
 			return
 		}
-		s.reviewDecision("config/items", i+1, fmt.Sprintf("%s %s %s", item.Kind, item.Path, item.Reason), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision("config/items", i+1, fmt.Sprintf("%s %s %s", item.Kind, item.Path, item.Reason), itemNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
-func (s *interactiveSession) reviewDecision(section string, index int, summary string, current model.Decision, protected bool, set func(model.Decision)) {
+func (s *interactiveSession) reviewDecision(section string, index int, summary string, notes []string, current model.Decision, protected bool, set func(model.Decision)) {
 	if current == "" {
 		current = model.DecisionCandidate
 	}
 	fmt.Fprintf(s.out, "\n[%s #%d]\n%s\ncurrent: %s\n", section, index, summary, current)
+	for _, note := range notes {
+		if note != "" {
+			fmt.Fprintf(s.out, "%s\n", note)
+		}
+	}
 	fmt.Fprint(s.out, "choose c=confirmed k=candidate t=todo m=migration-note x=excluded s=skip q=quit: ")
 	if !s.in.Scan() {
 		s.quit = true
@@ -215,6 +222,161 @@ func packageSummary(pkg model.Package) string {
 		summary += " nix=" + strings.Join(pkg.NixNames, ",")
 	}
 	return summary
+}
+
+func packageNotes(pkg model.Package) []string {
+	var notes []string
+	if len(pkg.NixNames) > 0 {
+		notes = append(notes, "generates: package "+pkg.NixNames[0])
+	} else {
+		notes = append(notes, "review: no nix mapping")
+	}
+	notes = append(notes, detailNotes(pkg.Details)...)
+	return notes
+}
+
+func gitSourceNotes(item model.GitSource) []string {
+	var notes []string
+	if item.Dirty {
+		notes = append(notes, "review: dirty working tree")
+	}
+	if len(item.Build) > 0 {
+		notes = append(notes, "detail: build-hints="+strings.Join(item.Build, ","))
+	}
+	return notes
+}
+
+func containerNotes(item model.Container) []string {
+	var notes []string
+	switch item.Runtime {
+	case "docker":
+		notes = append(notes, "generates: docker runtime enable when confirmed")
+	case "podman":
+		notes = append(notes, "generates: podman runtime enable when confirmed")
+	case "compose":
+		notes = append(notes, "review: compose file requires manual service/container translation")
+	}
+	if len(item.Ports) > 0 {
+		notes = append(notes, "detail: ports="+strings.Join(item.Ports, ","))
+	}
+	if len(item.Mounts) > 0 {
+		notes = append(notes, "detail: mounts="+strings.Join(item.Mounts, ","))
+	}
+	if len(item.Env) > 0 {
+		notes = append(notes, fmt.Sprintf("detail: env-keys=%d", len(item.Env)))
+	}
+	return limitNotes(notes, 6)
+}
+
+func serviceNotes(item model.Service) []string {
+	var notes []string
+	if item.Manager == "systemd" {
+		if strings.HasSuffix(item.Name, ".timer") {
+			notes = append(notes, "generates: systemd timer options when confirmed and safe")
+		} else {
+			notes = append(notes, "generates: systemd service options when confirmed and safe")
+		}
+	}
+	if item.User != "" {
+		notes = append(notes, "detail: user="+item.User)
+	}
+	if item.WorkingDirectory != "" {
+		notes = append(notes, "detail: working-directory="+item.WorkingDirectory)
+	}
+	if item.Schedule != "" {
+		notes = append(notes, "detail: schedule="+item.Schedule)
+	}
+	if item.ExecStart != "" {
+		notes = append(notes, "detail: exec="+redactSecretLikeText(item.ExecStart))
+	}
+	if len(item.EnvironmentFiles) > 0 {
+		notes = append(notes, "review: environment files require manual migration")
+	}
+	return limitNotes(notes, 6)
+}
+
+func fileFindingNotes(item model.FileFinding, protected bool) []string {
+	var notes []string
+	if protected {
+		notes = append(notes, "protected: cannot be confirmed")
+	}
+	if item.Size > 0 {
+		notes = append(notes, fmt.Sprintf("detail: size=%d", item.Size))
+	}
+	if item.SHA256 != "" {
+		notes = append(notes, "detail: sha256="+item.SHA256)
+	}
+	if item.Mode != "" {
+		notes = append(notes, "detail: mode="+item.Mode)
+	}
+	if item.Owner != "" {
+		notes = append(notes, "detail: owner="+item.Owner)
+	}
+	return limitNotes(notes, 6)
+}
+
+func itemNotes(item model.Item) []string {
+	var notes []string
+	notes = append(notes, detailNotes(item.Details)...)
+	lower := strings.ToLower(item.Kind + " " + item.Reason)
+	if strings.Contains(lower, "credential") || strings.Contains(lower, "secret") || strings.Contains(lower, "security") || strings.Contains(lower, "stateful") {
+		notes = append(notes, "review: manual migration recommended")
+	}
+	return limitNotes(notes, 6)
+}
+
+func detailNotes(details map[string]string) []string {
+	if len(details) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(details))
+	for key := range details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var notes []string
+	for _, key := range keys {
+		value := redactSecretLikeText(details[key])
+		if value == "" {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("detail: %s=%s", key, value))
+		if len(notes) == 4 {
+			break
+		}
+	}
+	return notes
+}
+
+func limitNotes(notes []string, limit int) []string {
+	if len(notes) > limit {
+		return notes[:limit]
+	}
+	return notes
+}
+
+func redactSecretLikeText(text string) string {
+	var out []string
+	for _, field := range strings.Fields(text) {
+		lower := strings.ToLower(field)
+		switch {
+		case strings.Contains(lower, "password="),
+			strings.Contains(lower, "passwd="),
+			strings.Contains(lower, "token="),
+			strings.Contains(lower, "secret="),
+			strings.Contains(lower, "api_key="),
+			strings.Contains(lower, "apikey="),
+			strings.Contains(lower, "access_key="):
+			if key, _, ok := strings.Cut(field, "="); ok {
+				out = append(out, key+"=<redacted>")
+			} else {
+				out = append(out, "<redacted>")
+			}
+		default:
+			out = append(out, field)
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func applyLanguagePackages(pkgs *[]model.Package, opts Options) {
