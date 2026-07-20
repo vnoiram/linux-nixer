@@ -947,7 +947,7 @@ func renderServicesModule(report model.ScanReport) string {
 }
 
 func renderSystemdServiceOption(service model.Service) string {
-	if strings.HasSuffix(service.Name, ".timer") || service.ExecStart == "" || secretLikeText(service.ExecStart) {
+	if strings.HasSuffix(service.Name, ".timer") || service.ExecStart == "" || secretLikeText(service.ExecStart) || len(service.EnvironmentFiles) > 0 {
 		return ""
 	}
 	var b strings.Builder

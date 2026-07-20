@@ -389,14 +389,14 @@ func decidePackage(pkg model.Package, opts Options) model.Decision {
 	if pathExcluded(pkg.Source, opts.ExcludePathPrefixes) {
 		return model.DecisionExcluded
 	}
+	if pkg.Decision != "" && pkg.Decision != model.DecisionCandidate {
+		return pkg.Decision
+	}
 	if contains(opts.ConfirmManagers, pkg.Manager) {
 		return model.DecisionConfirmed
 	}
-	if opts.AutoSafe && len(pkg.NixNames) > 0 && (pkg.Decision == "" || pkg.Decision == model.DecisionCandidate) {
+	if opts.AutoSafe && len(pkg.NixNames) > 0 {
 		return model.DecisionConfirmed
-	}
-	if pkg.Decision != "" {
-		return pkg.Decision
 	}
 	return model.DecisionCandidate
 }
@@ -408,6 +408,9 @@ func decideFinding(kind, path string, current model.Decision, secretRisk bool, o
 	if pathExcluded(path, opts.ExcludePathPrefixes) {
 		return model.DecisionExcluded
 	}
+	if current != "" && current != model.DecisionCandidate {
+		return current
+	}
 	switch {
 	case contains(opts.ConfirmKinds, kind):
 		return model.DecisionConfirmed
@@ -417,8 +420,6 @@ func decideFinding(kind, path string, current model.Decision, secretRisk bool, o
 		return model.DecisionTODO
 	case contains(opts.MigrationNoteKinds, kind):
 		return model.DecisionMigrationNote
-	case current != "":
-		return current
 	case opts.AutoSafe && (kind == "config" || kind == "os-config" || kind == "user-config" || kind == "service"):
 		return model.DecisionCandidate
 	default:

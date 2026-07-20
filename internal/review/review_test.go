@@ -42,6 +42,39 @@ func TestApplyAutoSafePromotesCandidateMappedPackages(t *testing.T) {
 	}
 }
 
+func TestApplyPreservesReviewedDecisions(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "excluded", NixNames: []string{"excluded"}, Decision: model.DecisionExcluded},
+			{Manager: "apt", Name: "todo", NixNames: []string{"todo"}, Decision: model.DecisionTODO},
+			{Manager: "apt", Name: "note", NixNames: []string{"note"}, Decision: model.DecisionMigrationNote},
+			{Manager: "apt", Name: "confirmed", Decision: model.DecisionConfirmed},
+		},
+		Items: []model.Item{
+			{Kind: "service", Path: "/etc/systemd/system/excluded.service", Decision: model.DecisionExcluded},
+			{Kind: "service", Path: "/etc/systemd/system/todo.service", Decision: model.DecisionTODO},
+			{Kind: "service", Path: "/etc/systemd/system/note.service", Decision: model.DecisionMigrationNote},
+			{Kind: "service", Path: "/etc/systemd/system/confirmed.service", Decision: model.DecisionConfirmed},
+		},
+	}
+
+	got := Apply(report, Options{
+		AutoSafe:        true,
+		ConfirmManagers: []string{"apt"},
+		ConfirmKinds:    []string{"service"},
+	})
+
+	wants := []model.Decision{model.DecisionExcluded, model.DecisionTODO, model.DecisionMigrationNote, model.DecisionConfirmed}
+	for i, want := range wants {
+		if got.Packages[i].Decision != want {
+			t.Fatalf("package %d decision=%q, want %q", i, got.Packages[i].Decision, want)
+		}
+		if got.Items[i].Decision != want {
+			t.Fatalf("item %d decision=%q, want %q", i, got.Items[i].Decision, want)
+		}
+	}
+}
+
 func TestApplyExcludesPathPrefixAndKeepsSecretsAsMigrationNotes(t *testing.T) {
 	report := model.ScanReport{
 		FilesystemDiff: []model.FileFinding{

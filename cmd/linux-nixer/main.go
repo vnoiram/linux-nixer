@@ -420,14 +420,14 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote summary: %s\n", summaryPath)
 
+	if *failOnPending && summary.Pending > 0 {
+		return fmt.Errorf("capture summary has %d pending findings", summary.Pending)
+	}
+
 	if err := render.Project(nixConfigPath, reviewed); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote nix config: %s\n", nixConfigPath)
-
-	if *failOnPending && summary.Pending > 0 {
-		return fmt.Errorf("capture summary has %d pending findings", summary.Pending)
-	}
 	return nil
 }
 
@@ -586,6 +586,10 @@ func runGenerate(args []string, stdout io.Writer) error {
 	if err := readJSON(*scanPath, &report); err != nil {
 		return err
 	}
+	result := validate.ScanReport(report)
+	if !result.OK {
+		return fmt.Errorf("generate requires valid reviewed scan JSON: validation failed with %d errors", len(result.Errors))
+	}
 	return render.Project(*out, report)
 }
 
@@ -661,6 +665,11 @@ func runPolicy(args []string, stdout io.Writer) error {
 	out := fs.String("out", "", "output policy JSON")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	if *out == "-" {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(policy.Template())
 	}
 	if err := policy.WriteTemplate(*out); err != nil {
 		return err

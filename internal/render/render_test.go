@@ -514,6 +514,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", User: "app", WorkingDirectory: "/srv/app", ExecStart: "/opt/app/bin/app --serve", WantedBy: []string{"multi-user.target"}, Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "backup.timer", Path: "/etc/systemd/system/backup.timer", Schedule: "OnCalendar=daily", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "secret.service", Path: "/etc/systemd/system/secret.service", ExecStart: "/opt/app/bin/app --token=super-secret", EnvironmentFiles: []string{"/etc/default/secret"}, Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "envfile.service", Path: "/etc/systemd/system/envfile.service", ExecStart: "/opt/app/bin/app --serve", EnvironmentFiles: []string{"/etc/default/envfile"}, Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "candidate.service", Path: "/etc/systemd/system/candidate.service", Decision: model.DecisionCandidate},
 		},
 		Items: []model.Item{
@@ -581,12 +582,13 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		`timerConfig.OnCalendar = "daily";`,
 		`secret.service ExecStart contains secret-like text and was not generated`,
 		`secret.service environment files require manual migration`,
+		`envfile.service environment files require manual migration`,
 	} {
 		if !strings.Contains(services, want) {
 			t.Fatalf("services missing %q:\n%s", want, services)
 		}
 	}
-	for _, notWant := range []string{`systemd.services."candidate" =`, `--token=super-secret`, `EnvironmentFile`} {
+	for _, notWant := range []string{`systemd.services."candidate" =`, `systemd.services."envfile" =`, `--token=super-secret`, `EnvironmentFile`} {
 		if strings.Contains(services, notWant) {
 			t.Fatalf("services should not contain %q:\n%s", notWant, services)
 		}

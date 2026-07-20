@@ -283,6 +283,27 @@ func TestRunPolicyInitWritesParseablePolicy(t *testing.T) {
 	}
 }
 
+func TestRunPolicyInitWritesStdoutForDash(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "init", "--out", "-"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got policypkg.Policy
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("policy init stdout was not JSON: %v\n%s", err, stdout.String())
+	}
+	if got.SchemaVersion != policypkg.SchemaVersion {
+		t.Fatalf("schemaVersion=%q, want %q", got.SchemaVersion, policypkg.SchemaVersion)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "-")); !os.IsNotExist(statErr) {
+		t.Fatalf("policy init --out - should not create '-' file, stat err=%v", statErr)
+	}
+}
+
 func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	project := t.TempDir()
 	root := filepath.Join(project, "root")
@@ -529,12 +550,37 @@ Version: 1.0
 		filepath.Join(out, "scan.json"),
 		filepath.Join(out, "reviewed.json"),
 		filepath.Join(out, "summary.md"),
-		filepath.Join(out, "nix-config", "flake.nix"),
-		filepath.Join(out, "nix-config", "reports", "migration-checklist.md"),
 	} {
 		if _, statErr := os.Stat(path); statErr != nil {
 			t.Fatalf("expected artifact after failed gate %s: %v", path, statErr)
 		}
+	}
+	if _, statErr := os.Stat(filepath.Join(out, "nix-config", "flake.nix")); !os.IsNotExist(statErr) {
+		t.Fatalf("nix config should not be generated after failed pending gate, stat err=%v", statErr)
+	}
+}
+
+func TestRunGenerateRejectsInvalidScan(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	out := filepath.Join(dir, "nix-config")
+	writeScan(t, scanPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionConfirmed},
+		},
+	})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"generate", "--scan", scanPath, "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected generate to reject invalid scan")
+	}
+	if !strings.Contains(err.Error(), "validation failed") {
+		t.Fatalf("unexpected generate error: %v", err)
+	}
+	if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+		t.Fatalf("generate should not create output for invalid scan, stat err=%v", statErr)
 	}
 }
 
