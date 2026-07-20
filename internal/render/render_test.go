@@ -284,6 +284,24 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	if !strings.Contains(containers, "/srv/app/compose.yml") || !strings.Contains(containers, "postgres:16") {
 		t.Fatalf("containers module missing TODOs:\n%s", containers)
 	}
+	for _, want := range []string{
+		`virtualisation.oci-containers.backend = "podman";`,
+		"virtualisation.oci-containers.containers.db = {",
+		`image = "postgres:16";`,
+		`"127.0.0.1:5432:5432/tcp"`,
+		`"pgdata:/var/lib/postgresql/data"`,
+		"# TODO container detail: db environment keys require manual values: POSTGRES_PASSWORD",
+	} {
+		if !strings.Contains(containers, want) {
+			t.Fatalf("containers module missing %q:\n%s", want, containers)
+		}
+	}
+	if strings.Contains(containers, "POSTGRES_PASSWORD\" =") || strings.Contains(containers, "environment = {") {
+		t.Fatalf("containers module rendered an env value:\n%s", containers)
+	}
+	if strings.Contains(containers, "oci-containers.containers.excluded") || strings.Contains(containers, "redis:7") {
+		t.Fatalf("containers module rendered an excluded container:\n%s", containers)
+	}
 	containerReport := readFile(t, out, "reports/containers.md")
 	for _, want := range []string{"Runtime containers", "podman container `db` image `postgres:16`", "postgres@sha256:demo", "127.0.0.1:5432->5432/tcp", "volume:pgdata:/var/lib/postgresql/data", "POSTGRES_PASSWORD", "Compose files", "/srv/app/compose.yml"} {
 		if !strings.Contains(containerReport, want) {
@@ -440,6 +458,39 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	}
 	if !strings.Contains(reportMD, "/opt/vendor/bin/app") || !strings.Contains(reportMD, "sha256 `abc123`") || !strings.Contains(reportMD, "/var/lib/postgresql") || !strings.Contains(reportMD, "postgresql data directory") {
 		t.Fatalf("migration report missing filesystem metadata:\n%s", reportMD)
+	}
+}
+
+func TestProjectSkipsUnsafeContainerPortsAndMounts(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Containers: []model.Container{
+			{
+				Runtime:  "docker",
+				Name:     "app",
+				Image:    "myapp:latest",
+				Ports:    []string{"5432"},
+				Mounts:   []string{"tmpfs::/tmp/x"},
+				Decision: model.DecisionConfirmed,
+			},
+			{Runtime: "compose", Compose: "/srv/app/compose.yml", Decision: model.DecisionConfirmed},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	containers := readFile(t, out, "modules/containers.nix")
+	if !strings.Contains(containers, "virtualisation.oci-containers.containers.app = {\n    image = \"myapp:latest\";\n  };") {
+		t.Fatalf("containers module should render image-only block when port/mount are unsafe:\n%s", containers)
+	}
+	if !strings.Contains(containers, "# TODO container detail: app port 5432 has no explicit host mapping and was not generated") {
+		t.Fatalf("containers module missing unmapped port note:\n%s", containers)
+	}
+	if !strings.Contains(containers, "# TODO container detail: app mount tmpfs::/tmp/x could not be safely converted and was not generated") {
+		t.Fatalf("containers module missing unsafe mount note:\n%s", containers)
+	}
+	if strings.Contains(containers, "oci-containers.containers.compose") {
+		t.Fatalf("compose-only entries should not render an individual container block:\n%s", containers)
 	}
 }
 

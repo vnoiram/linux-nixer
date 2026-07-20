@@ -121,7 +121,71 @@ func TestInteractiveAppliesChoices(t *testing.T) {
 	if !strings.Contains(out.String(), "choose c=confirmed") {
 		t.Fatalf("interactive prompt missing choices: %s", out.String())
 	}
-	for _, want := range []string{"generates: package curl", "review: no nix mapping", "detail: source=apt-mark:manual"} {
+	for _, want := range []string{"generates: package curl", "review: no nix mapping", "detail: source=apt-mark:manual", "[packages #1/5]", "[packages #5/5]"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("interactive output missing %q: %s", want, out.String())
+		}
+	}
+}
+
+func TestInteractiveSkipSectionMovesToNextSection(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl"},
+			{Manager: "apt", Name: "git"},
+			{Manager: "apt", Name: "vim"},
+		},
+		GitSources: []model.GitSource{
+			{Path: "/home/alice/app", Remote: "https://example.test/app.git", Commit: "abc123"},
+		},
+	}
+	in := strings.NewReader("n\nc\n")
+	var out bytes.Buffer
+
+	got := Interactive(in, &out, report, Options{})
+
+	for i, pkg := range got.Packages {
+		if pkg.Decision != model.DecisionCandidate {
+			t.Fatalf("package %d decision=%q, want candidate (section should have been skipped)", i, pkg.Decision)
+		}
+	}
+	if got.GitSources[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("git source decision=%q, want confirmed", got.GitSources[0].Decision)
+	}
+	if !strings.Contains(out.String(), "n=skip-section") {
+		t.Fatalf("interactive prompt missing skip-section choice: %s", out.String())
+	}
+	if strings.Count(out.String(), "[packages") != 1 {
+		t.Fatalf("expected only the first package to be prompted before section skip: %s", out.String())
+	}
+}
+
+func TestInteractivePendingOnlySkipsAlreadyDecidedFindings(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl"},
+			{Manager: "apt", Name: "git", Decision: model.DecisionExcluded},
+			{Manager: "apt", Name: "vim"},
+		},
+	}
+	in := strings.NewReader("c\nc\n")
+	var out bytes.Buffer
+
+	got := Interactive(in, &out, report, Options{PendingOnly: true})
+
+	if got.Packages[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("curl decision=%q, want confirmed", got.Packages[0].Decision)
+	}
+	if got.Packages[1].Decision != model.DecisionExcluded {
+		t.Fatalf("git decision=%q, want unchanged excluded", got.Packages[1].Decision)
+	}
+	if got.Packages[2].Decision != model.DecisionConfirmed {
+		t.Fatalf("vim decision=%q, want confirmed", got.Packages[2].Decision)
+	}
+	if strings.Contains(out.String(), "apt git") {
+		t.Fatalf("pending-only should not prompt for already-decided git package: %s", out.String())
+	}
+	for _, want := range []string{"[packages #1/2]", "[packages #2/2]"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("interactive output missing %q: %s", want, out.String())
 		}
@@ -242,11 +306,11 @@ func TestSummarizeCountsDecisionsDomainsProtectedFindingsAndNixImpact(t *testing
 			}},
 		},
 		Containers: []model.Container{
-			{Runtime: "docker", Name: "web", Decision: model.DecisionConfirmed},
+			{Runtime: "docker", Name: "web", Image: "nginx", Decision: model.DecisionConfirmed},
 			{Runtime: "podman", Name: "db", Decision: model.DecisionExcluded},
 		},
 		Services: []model.Service{
-			{Manager: "systemd", Name: "custom.service", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "custom.service", ExecStart: "/opt/app/bin/app", Decision: model.DecisionConfirmed},
 		},
 		FilesystemDiff: []model.FileFinding{
 			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionMigrationNote},
@@ -309,6 +373,42 @@ func TestSummarizeCountsDecisionsDomainsProtectedFindingsAndNixImpact(t *testing
 	}
 	if got.Domains[0].Domain != "packages" || got.Domains[0].UnmappedPackages != 1 {
 		t.Fatalf("package domain unmapped missing: %+v", got.Domains[0])
+	}
+}
+
+func TestSummarizeCountsOnlyRenderableSystemdServicesAsNixImpact(t *testing.T) {
+	report := model.ScanReport{
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", ExecStart: "/opt/app/bin/app", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "secret.service", ExecStart: "/opt/app/bin/app --token=super-secret", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "envfile.service", ExecStart: "/opt/app/bin/app", EnvironmentFiles: []string{"/etc/default/envfile"}, Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "backup.timer", Schedule: "OnCalendar=daily", Decision: model.DecisionConfirmed},
+			{Manager: "cron", Name: "job", ExecStart: "/usr/local/bin/job", Decision: model.DecisionConfirmed},
+		},
+	}
+
+	got := Summarize(report)
+
+	if got.NixImpact.SystemdServices != 1 {
+		t.Fatalf("systemd services impact=%d, want 1", got.NixImpact.SystemdServices)
+	}
+}
+
+func TestSummarizeCountsOnlyRenderableContainersAsNixImpact(t *testing.T) {
+	report := model.ScanReport{
+		Containers: []model.Container{
+			{Runtime: "docker", Name: "web", Image: "nginx", Decision: model.DecisionConfirmed},
+			{Runtime: "docker", Name: "noimage", Decision: model.DecisionConfirmed},
+			{Runtime: "podman", Image: "redis:7", Decision: model.DecisionConfirmed},
+			{Runtime: "compose", Compose: "/srv/app/compose.yml", Decision: model.DecisionConfirmed},
+			{Runtime: "podman", Name: "db", Image: "postgres:16", Decision: model.DecisionCandidate},
+		},
+	}
+
+	got := Summarize(report)
+
+	if got.NixImpact.ConfirmedContainers != 1 {
+		t.Fatalf("confirmed containers impact=%d, want 1", got.NixImpact.ConfirmedContainers)
 	}
 }
 

@@ -18,6 +18,7 @@ type Options struct {
 	MigrationNoteKinds  []string
 	ConfirmManagers     []string
 	ExcludePathPrefixes []string
+	PendingOnly         bool
 }
 
 func Apply(report model.ScanReport, opts Options) model.ScanReport {
@@ -31,7 +32,7 @@ func Apply(report model.ScanReport, opts Options) model.ScanReport {
 
 func Interactive(in io.Reader, out io.Writer, report model.ScanReport, opts Options) model.ScanReport {
 	report = applyDecisions(report, opts)
-	session := interactiveSession{in: bufio.NewScanner(in), out: out, quit: false}
+	session := interactiveSession{in: bufio.NewScanner(in), out: out, quit: false, pendingOnly: opts.PendingOnly}
 	session.reviewPackages("packages", report.Packages, func(i int, decision model.Decision) { report.Packages[i].Decision = decision })
 	session.reviewPackages("npm", report.Languages.NPM, func(i int, decision model.Decision) { report.Languages.NPM[i].Decision = decision })
 	session.reviewPackages("conda", report.Languages.Conda, func(i int, decision model.Decision) { report.Languages.Conda[i].Decision = decision })
@@ -95,91 +96,173 @@ func applyDecisions(report model.ScanReport, opts Options) model.ScanReport {
 }
 
 type interactiveSession struct {
-	in   *bufio.Scanner
-	out  io.Writer
-	quit bool
+	in          *bufio.Scanner
+	out         io.Writer
+	quit        bool
+	skipSection bool
+	pendingOnly bool
+}
+
+func (s *interactiveSession) shouldPrompt(decision model.Decision) bool {
+	return !s.pendingOnly || decision == model.DecisionCandidate
 }
 
 func (s *interactiveSession) reviewPackages(section string, pkgs []model.Package, set func(int, model.Decision)) {
+	s.skipSection = false
+	total := 0
+	for _, pkg := range pkgs {
+		if s.shouldPrompt(pkg.Decision) {
+			total++
+		}
+	}
+	shown := 0
 	for i, pkg := range pkgs {
-		if s.quit {
+		if s.quit || s.skipSection {
 			return
 		}
-		s.reviewDecision(section, i+1, packageSummary(pkg), packageNotes(pkg), pkg.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if !s.shouldPrompt(pkg.Decision) {
+			continue
+		}
+		shown++
+		s.reviewDecision(section, shown, total, packageSummary(pkg), packageNotes(pkg), pkg.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
 func (s *interactiveSession) reviewGitSources(items []model.GitSource, set func(int, model.Decision)) {
+	s.skipSection = false
+	total := 0
+	for _, item := range items {
+		if s.shouldPrompt(item.Decision) {
+			total++
+		}
+	}
+	shown := 0
 	for i, item := range items {
-		if s.quit {
+		if s.quit || s.skipSection {
 			return
 		}
-		s.reviewDecision("git sources", i+1, fmt.Sprintf("%s remote=%s commit=%s", item.Path, item.Remote, item.Commit), gitSourceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if !s.shouldPrompt(item.Decision) {
+			continue
+		}
+		shown++
+		s.reviewDecision("git sources", shown, total, fmt.Sprintf("%s remote=%s commit=%s", item.Path, item.Remote, item.Commit), gitSourceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
 func (s *interactiveSession) reviewContainers(items []model.Container, set func(int, model.Decision)) {
+	s.skipSection = false
+	total := 0
+	for _, item := range items {
+		if s.shouldPrompt(item.Decision) {
+			total++
+		}
+	}
+	shown := 0
 	for i, item := range items {
-		if s.quit {
+		if s.quit || s.skipSection {
 			return
 		}
+		if !s.shouldPrompt(item.Decision) {
+			continue
+		}
+		shown++
 		name := item.Name
 		if name == "" {
 			name = item.Compose
 		}
-		s.reviewDecision("containers", i+1, fmt.Sprintf("%s %s image=%s", item.Runtime, name, item.Image), containerNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision("containers", shown, total, fmt.Sprintf("%s %s image=%s", item.Runtime, name, item.Image), containerNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
 func (s *interactiveSession) reviewServices(items []model.Service, set func(int, model.Decision)) {
+	s.skipSection = false
+	total := 0
+	for _, item := range items {
+		if s.shouldPrompt(item.Decision) {
+			total++
+		}
+	}
+	shown := 0
 	for i, item := range items {
-		if s.quit {
+		if s.quit || s.skipSection {
 			return
 		}
-		s.reviewDecision("services", i+1, fmt.Sprintf("%s %s %s", item.Manager, item.Name, item.Path), serviceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if !s.shouldPrompt(item.Decision) {
+			continue
+		}
+		shown++
+		s.reviewDecision("services", shown, total, fmt.Sprintf("%s %s %s", item.Manager, item.Name, item.Path), serviceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
 func (s *interactiveSession) reviewFiles(section string, items []model.FileFinding, forceMigrationNote bool, set func(int, model.Decision)) {
+	s.skipSection = false
+	total := 0
+	for _, item := range items {
+		if s.shouldPrompt(item.Decision) {
+			total++
+		}
+	}
+	shown := 0
 	for i, item := range items {
-		if s.quit {
+		if s.quit || s.skipSection {
 			return
 		}
+		if !s.shouldPrompt(item.Decision) {
+			continue
+		}
+		shown++
 		protected := item.SecretRisk || forceMigrationNote
-		s.reviewDecision(section, i+1, fmt.Sprintf("%s %s %s", item.Category, item.Path, item.Reason), fileFindingNotes(item, protected), item.Decision, protected, func(decision model.Decision) { set(i, decision) })
+		s.reviewDecision(section, shown, total, fmt.Sprintf("%s %s %s", item.Category, item.Path, item.Reason), fileFindingNotes(item, protected), item.Decision, protected, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
 func (s *interactiveSession) reviewItems(items []model.Item, set func(int, model.Decision)) {
+	s.skipSection = false
+	total := 0
+	for _, item := range items {
+		if s.shouldPrompt(item.Decision) {
+			total++
+		}
+	}
+	shown := 0
 	for i, item := range items {
-		if s.quit {
+		if s.quit || s.skipSection {
 			return
 		}
-		s.reviewDecision("config/items", i+1, fmt.Sprintf("%s %s %s", item.Kind, item.Path, item.Reason), itemNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if !s.shouldPrompt(item.Decision) {
+			continue
+		}
+		shown++
+		s.reviewDecision("config/items", shown, total, fmt.Sprintf("%s %s %s", item.Kind, item.Path, item.Reason), itemNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
 	}
 }
 
-func (s *interactiveSession) reviewDecision(section string, index int, summary string, notes []string, current model.Decision, protected bool, set func(model.Decision)) {
+func (s *interactiveSession) reviewDecision(section string, index, total int, summary string, notes []string, current model.Decision, protected bool, set func(model.Decision)) {
 	if current == "" {
 		current = model.DecisionCandidate
 	}
-	fmt.Fprintf(s.out, "\n[%s #%d]\n%s\ncurrent: %s\n", section, index, summary, current)
+	fmt.Fprintf(s.out, "\n[%s #%d/%d]\n%s\ncurrent: %s\n", section, index, total, summary, current)
 	for _, note := range notes {
 		if note != "" {
 			fmt.Fprintf(s.out, "%s\n", note)
 		}
 	}
-	fmt.Fprint(s.out, "choose c=confirmed k=candidate t=todo m=migration-note x=excluded s=skip q=quit: ")
+	fmt.Fprint(s.out, "choose c=confirmed k=candidate t=todo m=migration-note x=excluded s=skip n=skip-section q=quit: ")
 	if !s.in.Scan() {
 		s.quit = true
 		return
 	}
 	choice := strings.TrimSpace(strings.ToLower(s.in.Text()))
-	decision, ok := choiceDecision(choice)
 	if choice == "q" {
 		s.quit = true
 		return
 	}
+	if choice == "n" {
+		s.skipSection = true
+		return
+	}
+	decision, ok := choiceDecision(choice)
 	if !ok || choice == "s" || choice == "" {
 		return
 	}

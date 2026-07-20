@@ -193,11 +193,12 @@ const reviewHelp = `linux-nixer review
 Apply repeatable review decisions or run an interactive review over scan JSON.
 
 Usage:
-  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH]
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH]
 
 Examples:
   linux-nixer review --scan scan.json --out reviewed.json --auto-safe
   linux-nixer review --scan scan.json --out reviewed.json --interactive
+  linux-nixer review --scan scan.json --out reviewed.json --interactive --pending-only
   linux-nixer review --policy linux-nixer-policy.json --scan scan.json --out reviewed.json
 
 Flags:
@@ -205,7 +206,8 @@ Flags:
   --out PATH                   Write reviewed scan JSON.
   --policy PATH                Load repeatable review policy from PATH.
   --auto-safe                  Confirm high-confidence safe findings.
-  --interactive                Prompt for each finding with c/k/t/m/x/s/q choices and safe context notes.
+  --interactive                Prompt for each finding with c/k/t/m/x/s/n/q choices, safe context notes, and per-section progress. n skips the rest of the current section.
+  --pending-only               In interactive mode, only prompt for findings still at candidate; skip ones already resolved by policy or safety rules.
   --confirm-kind KIND          Mark findings of kind/category as confirmed. Repeatable.
   --exclude-kind KIND          Mark findings of kind/category as excluded. Repeatable.
   --todo-kind KIND             Mark findings of kind/category as todo. Repeatable.
@@ -407,7 +409,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote scan: %s\n", scanPath)
 
-	reviewOpts := reviewOptionsFromFlags(fs, p, review.Options{AutoSafe: true}, *autoSafe, nil, nil, nil, nil, nil, nil)
+	reviewOpts := reviewOptionsFromFlags(fs, p, review.Options{AutoSafe: true}, *autoSafe, nil, nil, nil, nil, nil, nil, false)
 	reviewed := review.Apply(*report, reviewOpts)
 	if err := writeJSON(reviewedPath, reviewed); err != nil {
 		return err
@@ -443,6 +445,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	policyPath := fs.String("policy", "", "policy JSON path")
 	autoSafe := fs.Bool("auto-safe", false, "confirm high-confidence safe findings")
 	interactive := fs.Bool("interactive", false, "review findings interactively")
+	pendingOnly := fs.Bool("pending-only", false, "in interactive mode, only prompt for findings still needing a decision")
 	var confirmKinds multiFlag
 	var excludeKinds multiFlag
 	var todoKinds multiFlag
@@ -469,7 +472,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	opts := reviewOptionsFromFlags(fs, p, review.Options{}, *autoSafe, confirmKinds, excludeKinds, todoKinds, noteKinds, confirmManagers, excludePaths)
+	opts := reviewOptionsFromFlags(fs, p, review.Options{}, *autoSafe, confirmKinds, excludeKinds, todoKinds, noteKinds, confirmManagers, excludePaths, *pendingOnly)
 	if *interactive {
 		report = review.Interactive(stdin, stdout, report, opts)
 	} else {
@@ -699,7 +702,7 @@ func scannerOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, root string, use
 	return opts, nil
 }
 
-func reviewOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, base review.Options, autoSafe bool, confirmKinds []string, excludeKinds []string, todoKinds []string, noteKinds []string, confirmManagers []string, excludePaths []string) review.Options {
+func reviewOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, base review.Options, autoSafe bool, confirmKinds []string, excludeKinds []string, todoKinds []string, noteKinds []string, confirmManagers []string, excludePaths []string, pendingOnly bool) review.Options {
 	opts := p.ReviewOptions(base)
 	if flagSpecified(fs, "auto-safe") {
 		opts.AutoSafe = autoSafe
@@ -710,6 +713,7 @@ func reviewOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, base review.Optio
 	opts.MigrationNoteKinds = policy.Merge(noteKinds, opts.MigrationNoteKinds)
 	opts.ConfirmManagers = policy.Merge(confirmManagers, opts.ConfirmManagers)
 	opts.ExcludePathPrefixes = policy.Merge(excludePaths, opts.ExcludePathPrefixes)
+	opts.PendingOnly = pendingOnly
 	return opts
 }
 

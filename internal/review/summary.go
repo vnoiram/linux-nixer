@@ -432,11 +432,24 @@ func primaryUser(report model.ScanReport) model.User {
 func confirmedSystemdServices(report model.ScanReport) int {
 	count := 0
 	for _, service := range report.Services {
-		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
+		if renderableSystemdService(service) {
 			count++
 		}
 	}
 	return count
+}
+
+func renderableSystemdService(service model.Service) bool {
+	return service.Decision == model.DecisionConfirmed &&
+		service.Manager == "systemd" &&
+		!strings.HasSuffix(service.Name, ".timer") &&
+		service.ExecStart != "" &&
+		!secretLikeText(service.ExecStart) &&
+		len(service.EnvironmentFiles) == 0
+}
+
+func secretLikeText(text string) bool {
+	return redactSecretLikeText(text) != text
 }
 
 func containerRuntimeEnables(report model.ScanReport) int {
@@ -466,9 +479,13 @@ func containerRuntimeEnables(report model.ScanReport) int {
 func confirmedContainers(report model.ScanReport) int {
 	count := 0
 	for _, container := range report.Containers {
-		if container.Decision == model.DecisionConfirmed {
+		if renderableContainer(container) {
 			count++
 		}
 	}
 	return count
+}
+
+func renderableContainer(c model.Container) bool {
+	return c.Decision == model.DecisionConfirmed && c.Runtime != "compose" && c.Name != "" && c.Image != ""
 }

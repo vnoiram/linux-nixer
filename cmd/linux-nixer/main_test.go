@@ -132,7 +132,8 @@ func TestRunCommandHelpTopics(t *testing.T) {
 			args: []string{"review", "-h"},
 			wants: []string{
 				"linux-nixer review",
-				"c/k/t/m/x/s/q",
+				"c/k/t/m/x/s/n/q",
+				"--pending-only",
 				"Policy decisions are applied first",
 			},
 		},

@@ -38,7 +38,7 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
   - `Package`, `Item`, `Service`, `Container`, `FileFinding`, and related structs carry review decisions and safe details.
 - Review and policy:
   - Non-interactive rules can confirm, exclude, mark TODO, or mark migration notes.
-  - Interactive review shows safe context notes, details, Nix mapping impact, and protected-finding reasons.
+  - Interactive review shows safe context notes, details, Nix mapping impact, and protected-finding reasons, with per-section progress counts, a skip-rest-of-section command, and an optional pending-only filter that hides findings already resolved by policy or safety rules.
 - Rendering:
   - Generated projects include flake, host config, Home Manager config, service/container/filesystem modules, reports, and migration checklist.
   - Rendering is conservative and mostly emits confirmed packages, safe user options, safe shell/home options, container runtime enables, and limited systemd service/timer options.
@@ -74,7 +74,7 @@ Current scanner domains include:
   - Confirmed packages with known Nix candidates become system or Home Manager packages.
   - Confirmed human users become `users.users` entries with safe shells and allowlisted groups.
   - Confirmed shell/home config markers enable selected Home Manager programs.
-  - Confirmed container runtimes enable Docker/Podman flags.
+  - Confirmed container runtimes enable Docker/Podman flags, and confirmed containers with a known name and image render individual `virtualisation.oci-containers.containers` entries with safe ports and volumes; unmapped ports, unsafe mounts, and environment values stay as migration notes.
   - Confirmed safe systemd services/timers can render limited service/timer options.
 - Reports:
   - Domain reports preserve context that should not be converted automatically.
