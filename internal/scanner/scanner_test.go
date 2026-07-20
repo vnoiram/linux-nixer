@@ -46,6 +46,10 @@ Package: libauto
 Status: install ok installed
 Version: 1.0
 
+Package: shellcheck
+Status: install ok installed
+Version: 0.10.0
+
 `)
 	write(t, root, "/var/lib/apt/extended_states", `Package: libauto
 Architecture: amd64
@@ -72,6 +76,9 @@ Auto-Installed: 1
 	}
 	if packages["libauto"].Source != "dpkg:auto-installed" {
 		t.Fatalf("libauto source=%q, want auto-installed in %+v", packages["libauto"].Source, report.Packages)
+	}
+	if len(packages["shellcheck"].NixNames) != 1 || packages["shellcheck"].NixNames[0] != "shellcheck" {
+		t.Fatalf("shellcheck nixNames=%v, want [shellcheck] in %+v", packages["shellcheck"].NixNames, report.Packages)
 	}
 	items := map[string]model.Item{}
 	for _, item := range report.Items {
@@ -1479,10 +1486,14 @@ func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 func TestLanguageScannerAddsNixCandidatesForKnownCLIs(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/usr/local/lib/node_modules/typescript/package.json", `{"name":"typescript","version":"5.0.0"}`)
+	write(t, root, "/usr/local/lib/node_modules/vite/package.json", `{"name":"vite","version":"6.0.0"}`)
 	write(t, root, "/home/alice/.local/pipx/venvs/ruff/pipx_metadata.json", `{}`)
 	writeMode(t, root, "/home/alice/.cargo/bin/starship", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/home/alice/.cargo/bin/git-delta", []byte("#!/bin/sh\n"), 0o755)
 	writeMode(t, root, "/home/alice/go/bin/gopls", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/home/alice/go/bin/buf", []byte("#!/bin/sh\n"), 0o755)
 	writeMode(t, root, "/home/alice/.gem/ruby/3.3.0/bin/bundler", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/home/alice/.gem/ruby/3.3.0/bin/rubocop", []byte("#!/bin/sh\n"), 0o755)
 
 	report := &model.ScanReport{}
 	if err := (LanguageScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -1490,13 +1501,17 @@ func TestLanguageScannerAddsNixCandidatesForKnownCLIs(t *testing.T) {
 	}
 
 	assertPkgMapping(t, report.Languages.NPM, "typescript", "nodePackages.typescript")
+	assertPkgMapping(t, report.Languages.NPM, "vite", "nodePackages.vite")
 	if len(report.Languages.Python) != 1 {
 		t.Fatalf("python envs=%d, want 1", len(report.Languages.Python))
 	}
 	assertPkgMapping(t, report.Languages.Python[0].Packages, "ruff", "ruff")
 	assertPkgMapping(t, report.Languages.Cargo, "starship", "starship")
+	assertPkgMapping(t, report.Languages.Cargo, "git-delta", "delta")
 	assertPkgMapping(t, report.Languages.Go, "gopls", "gopls")
+	assertPkgMapping(t, report.Languages.Go, "buf", "buf")
 	assertPkgMapping(t, report.Languages.Gem, "bundler", "bundler")
+	assertPkgMapping(t, report.Languages.Gem, "rubocop", "rubocop")
 }
 
 func TestLanguageScannerFindsLanguageEcosystemHints(t *testing.T) {

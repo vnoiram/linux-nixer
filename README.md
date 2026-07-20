@@ -19,7 +19,7 @@ This is an early implementation scaffold. It includes:
 - Service detail reporting for systemd units, timers, and cron schedules
 - Confirmed-only rendering for system packages, Home Manager packages, and container runtime enables
 - Conservative Nix option rendering for detected users, safe shell enables, and selected confirmed Home Manager program enables
-- Shared conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings
+- Expanded conservative Nix package mapping for apt, npm, pipx/Python CLI, cargo, go-install, and gem findings, including common CLI aliases
 - Non-interactive review rules for confirming, excluding, or deferring findings
 - Interactive review mode using only the Go standard library
 - Review summary output and pending-finding gates before generating Nix
@@ -169,7 +169,7 @@ Generated projects include:
 - hardware/peripheral markers such as CUPS printers, Bluetooth/BlueZ, SANE scanners, PipeWire/PulseAudio/ALSA, fprint/U2F/YubiKey/smartcard config, fwupd/TLP/UPower, and input remapping tools
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, stateful data, and location hints for `/opt`, `/usr/local`, `/srv`, and user-local paths
 
-Package mapping and Nix option rendering are intentionally conservative. apt and common language CLI tools get static Nix candidates when known; snap, flatpak, AppImage, Homebrew, secrets, stateful data, raw dotfiles, service unit bodies, and repository keys are reported without automatic Nix replacements by default.
+Package mapping and Nix option rendering are intentionally conservative. apt and common language CLI tools get static Nix candidates when known, including selected CLI aliases and case normalization; snap, flatpak, AppImage, Homebrew, secrets, stateful data, raw dotfiles, service unit bodies, and repository keys are reported without automatic Nix replacements by default.
 
 ## Development
 
