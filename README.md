@@ -6,6 +6,8 @@ The project is intentionally conservative: it detects a wide range of system sta
 
 Generated Nix settings only include findings marked `confirmed`. Findings left as `candidate` stay in reports and TODO comments until reviewed.
 
+See [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for design assumptions, safety boundaries, and planned work.
+
 ## Current status
 
 This is an early implementation scaffold. It includes:
