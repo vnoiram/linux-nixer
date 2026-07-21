@@ -58,7 +58,11 @@ func inspectGitSource(root, path string) model.GitSource {
 				source.Build = appendUnique(source.Build, "branch:"+strings.TrimPrefix(refName, "refs/heads/"))
 			}
 			refPath := filepath.Join(gitDir, refName)
-			if commit, err := os.ReadFile(refPath); err == nil {
+			// HEAD's content is untrusted (scanned from the target
+			// filesystem): a crafted "ref: ../../../../etc/shadow"-style
+			// value would otherwise escape gitDir/root via plain ".."
+			// collapsing, no symlink required at all.
+			if commit, ok := safeReadFile(root, refPath); ok {
 				source.Commit = strings.TrimSpace(string(commit))
 			}
 		} else {

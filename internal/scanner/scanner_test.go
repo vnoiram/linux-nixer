@@ -978,6 +978,34 @@ func TestGitScannerFindsSourceMetadataAndHints(t *testing.T) {
 	}
 }
 
+func TestGitScannerRejectsHeadRefTraversal(t *testing.T) {
+	root := t.TempDir()
+	outsideSecret := filepath.Join(t.TempDir(), "shadow")
+	if err := os.WriteFile(outsideSecret, []byte("root:hash:outside-root-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "/home/alice/evil/.git/config", "[remote \"origin\"]\n  url = https://example.com/evil.git\n")
+	gitDir := filepath.Join(root, "home", "alice", "evil", ".git")
+	relEscape, err := filepath.Rel(gitDir, outsideSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// HEAD's content is untrusted (read from the scanned filesystem); a
+	// crafted ref with enough ".." segments would otherwise escape
+	// gitDir/root via plain path collapsing, no symlink required.
+	write(t, root, "/home/alice/evil/.git/HEAD", "ref: "+filepath.ToSlash(relEscape)+"\n")
+
+	report := &model.ScanReport{}
+	if err := (GitScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range report.GitSources {
+		if strings.Contains(source.Commit, "outside-root-secret") {
+			t.Fatalf("git scanner followed a HEAD ref outside root, leaked: %+v", source)
+		}
+	}
+}
+
 func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/etc/fstab", "UUID=demo / ext4 defaults 0 1\n")
@@ -1737,6 +1765,20 @@ func writeMode(t *testing.T, root, path string, content []byte, mode os.FileMode
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(abs, content, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeSymlink creates a symlink at root+path pointing at target (an
+// absolute path, possibly outside root, to exercise symlink-traversal
+// guards).
+func writeSymlink(t *testing.T, root, path, target string) {
+	t.Helper()
+	abs := filepath.Join(root, strings.TrimPrefix(path, "/"))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, abs); err != nil {
 		t.Fatal(err)
 	}
 }
