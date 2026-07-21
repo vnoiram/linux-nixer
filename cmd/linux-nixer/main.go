@@ -357,6 +357,9 @@ Flags:
   --boot             Attempt to start the generated VM script.
   --timeout VALUE    VM boot validation timeout. Defaults to 15s.
   --host NAME        NixOS configuration name for VM validation.
+
+Exit status:
+  Always writes the full check result as JSON to stdout. Exits non-zero if any check failed, suitable for a CI gate.
 `
 
 const baselineCreateHelp = `linux-nixer baseline create
@@ -948,7 +951,19 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Boot: *boot, Timeout: *timeout, Host: *host})
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(result)
+	if err := enc.Encode(result); err != nil {
+		return err
+	}
+	if !result.OK {
+		failed := 0
+		for _, c := range result.Checks {
+			if !c.OK {
+				failed++
+			}
+		}
+		return fmt.Errorf("doctor checks failed: %d of %d checks failed", failed, len(result.Checks))
+	}
+	return nil
 }
 
 func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {

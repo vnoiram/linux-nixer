@@ -39,6 +39,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Plugin scanners now also merge `packages`/`services`/`containers` from a plugin's output, in addition to `items`/`warnings`; these flow through review and Nix generation exactly like built-in scanner output, so a plugin that knows this tool's per-domain conventions can contribute directly instead of only via the general-purpose `items` type.
 - `reports/migration-annotations.nix` now also covers confirmed packages (both `environment.systemPackages` and Home Manager `home.packages`) and every scanned user, in addition to the existing containers/systemd services/cron jobs.
 - `validate --decisions decisions.json --policy policy.json` checks a decisions file for consistency with a policy's kind vocabulary, warning about stale entries (recorded decision disagrees with what the current policy would now produce for that kind) or unresolvable ones (unrecognized domain, or a key with no recoverable kind).
+- CI job (`nix-verify`) installs a real Nix toolchain and runs `capture`/`doctor --vm` against it, validating that the generated flake/modules are real, buildable Nix — the first time any `nix`-touching functionality in this project has run against real `nix` rather than only being designed against it.
 
 ### Changed
 
@@ -52,6 +53,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `doctor`'s pre-flight file-completeness check now covers all 21 files `render.Project` generates, including `modules/services.nix` and `modules/filesystem-findings.nix` (both imported by the generated flake); previously 5 files were missing from the check, so a corrupted or missing module would only surface as an opaque Nix import error instead of a clear pre-flight failure.
 - Plugin scanner timeouts now kill the plugin's whole process group, not just its top-level process; previously a plugin that forked a subprocess before exiting (e.g. a shell script) could leave that subprocess holding the output pipe open after being killed, so the scan blocked until the orphaned subprocess exited on its own instead of at the timeout.
 - `serviceGenerationNotes`/`containerGenerationNotes` now explain a confirmed systemd service with no `ExecStart` and a confirmed container missing a name or image, respectively; previously both cases silently produced zero explanatory notes despite nothing being generated.
+- `doctor` now exits non-zero when any check fails; previously it always printed the check result JSON and exited 0 regardless of `ok`, so a CI step running `doctor` could never actually fail.
 
 ## [0.1.0] - 2026-07-19
 

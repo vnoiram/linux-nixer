@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -397,6 +398,31 @@ func TestRunPluginCheckFailsForBrokenProcess(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "plugin check failed") {
 		t.Fatalf("expected process failure text, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunDoctorFailsWhenChecksFail(t *testing.T) {
+	if _, err := exec.LookPath("nix"); err == nil {
+		t.Skip("nix is installed in this environment; this test relies on the missing-project-files check failing on its own")
+	}
+	dir := t.TempDir()
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"doctor", "--project", dir}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected doctor to fail for a project missing every generated file")
+	}
+	if !strings.Contains(err.Error(), "doctor checks failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if jsonErr := json.Unmarshal(stdout.Bytes(), &result); jsonErr != nil {
+		t.Fatalf("expected valid result JSON on stdout even on failure: %v\n%s", jsonErr, stdout.String())
+	}
+	if result.OK {
+		t.Fatalf("result JSON says ok=true despite the error: %s", stdout.String())
 	}
 }
 

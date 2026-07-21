@@ -30,3 +30,27 @@ jobs:
         run: go test ./...
       - name: Build
         run: go build -o bin/linux-nixer ./cmd/linux-nixer
+
+  nix-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: DeterminateSystems/determinate-nix-action@v3
+      - name: Build linux-nixer
+        run: go build -o bin/linux-nixer ./cmd/linux-nixer
+      - name: Capture this runner (scan, auto-safe review, generate)
+        run: bin/linux-nixer capture --out linux-nixer-output
+      # --boot is intentionally omitted: standard GitHub-hosted runners have
+      # no /dev/kvm (no nested virtualization), and the generated VM script
+      # defaults to -enable-kvm, so booting it here would fail or need slow
+      # software-emulated QEMU. This still exercises real `nix flake check`
+      # and a real VM derivation build (`nix build`), which needs no
+      # virtualization — the biggest real risk area (invalid generated Nix)
+      # either way.
+      - name: Doctor (nix flake check + VM build, no boot)
+        run: bin/linux-nixer doctor --project linux-nixer-output/nix-config --vm --host generated
