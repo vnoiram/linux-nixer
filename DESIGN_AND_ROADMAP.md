@@ -88,6 +88,35 @@ Current scanner domains include:
 - backup/sync config and job markers for restic, borg, kopia, rclone, rsync, syncthing, Timeshift, and Duplicati
 - filesystem findings such as ELF executables, shebang scripts, desktop entries, systemd units, configs, secrets, stateful data, and location hints
 
+## Plugin scanners
+
+`scan`/`capture --plugin PATH` (repeatable) run an external executable as an extra scanner, without any Go plugin loading or module-distribution requirement — a plugin is any executable, in any language, that speaks a small JSON protocol.
+
+- **Invocation**: `<path> scan`, with a JSON `PluginRequest` written to its stdin:
+  ```json
+  {
+    "schemaVersion": "linux-nixer.plugin-request.v1",
+    "root": "/",
+    "deep": false,
+    "sudo": false,
+    "includes": [],
+    "excludes": []
+  }
+  ```
+  `root`/`deep`/`includes`/`excludes` mirror the main scan's own options. `sudo` is **informational only** — it reflects whether the main scan was run with `--sudo`, but the plugin process itself is always invoked as the current user, never elevated, regardless of this flag.
+- **Output**: the plugin must write a JSON `model.ScanReport` (the same schema as `scan.json`/`reviewed.json`, `schemaVersion: "linux-nixer.scan.v1"`) to stdout. Only its `items` and `warnings` are read and merged into the real scan report — every other field is ignored. `Item` (`kind`, `name`, `path`, `source`, `reason`, `details`) is this schema's general-purpose finding type, already used by most built-in scanners, and flows through review/decisions/summary/checklist exactly like a built-in finding once merged — a plugin doesn't need to know anything about this tool's per-domain Nix-mapping conventions to contribute something useful.
+- **Timeout**: 30 seconds by default; a plugin that doesn't produce output in time is treated as a scan error for that one scanner (surfaced as a `warnings` entry, same as any other scanner failure — never aborts the whole scan) rather than hanging the run.
+- **Trust model**: a plugin is an arbitrary executable the user explicitly named via `--plugin PATH` — the same trust level as any other file/path input this CLI already takes (`--policy`, `--baseline`), not a new attack surface.
+
+Minimal example plugin (shell):
+```sh
+#!/bin/sh
+cat >/dev/null  # request JSON is ignored by this trivial example
+cat <<'JSON'
+{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","path":"/opt/example","reason":"found by my-plugin"}]}
+JSON
+```
+
 ## Output strategy
 
 - Generated Nix:

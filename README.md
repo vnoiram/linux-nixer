@@ -34,6 +34,7 @@ This is an early implementation scaffold. It includes:
 - Read-only `scan --sudo` fallback for selected host files
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
+- `scan`/`capture --plugin PATH` to run external scanner plugins (any executable, JSON on stdin/stdout) alongside the built-in scanners
 
 ## Usage
 
@@ -63,6 +64,14 @@ bin/linux-nixer capture --root /path/to/rootfs --include /random-seed-42 --out l
 
 `capture` writes `scan.json`, `reviewed.json`, `summary.md`, and `nix-config/` under the output directory. It applies the same conservative auto-safe review as `review --auto-safe`; use the split `scan` and `review --interactive` flow when you want to approve findings manually before generating Nix.
 After capture, review `nix-config/reports/migration-checklist.md` for manual package, secret, stateful data, and configuration migration steps.
+
+`--plugin PATH` (repeatable, on `scan`/`capture`) runs an external executable as an extra scanner — any language, communicating over a small JSON protocol (request on stdin, a `model.ScanReport`-shaped result with `items`/`warnings` on stdout):
+
+```sh
+bin/linux-nixer scan --plugin ./my-scanner --out scan.json
+```
+
+Plugins always run as the current user, never with `--sudo` elevation. See "Plugin scanners" in [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for the full protocol and a minimal example.
 
 Policy files make scan and review decisions repeatable:
 

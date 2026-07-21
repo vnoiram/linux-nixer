@@ -36,8 +36,11 @@ func New(scanners ...Scanner) Registry {
 	return Registry{scanners: scanners}
 }
 
-func DefaultRegistry() Registry {
-	return New(
+// DefaultRegistry returns the built-in scanner registry. extra scanners
+// (e.g. PluginScanner instances) are appended after every built-in
+// scanner, so plugins always run last.
+func DefaultRegistry(extra ...Scanner) Registry {
+	scanners := []Scanner{
 		HostScanner{},
 		UserScanner{},
 		AptScanner{},
@@ -55,7 +58,9 @@ func DefaultRegistry() Registry {
 		HardwareConfigScanner{},
 		SecretScanner{},
 		FilesystemDiffScanner{},
-	)
+	}
+	scanners = append(scanners, extra...)
+	return New(scanners...)
 }
 
 func (r Registry) Scan(ctx context.Context, opts Options) (*model.ScanReport, error) {

@@ -458,6 +458,43 @@ func TestRunBaselineImportRequiresTar(t *testing.T) {
 	}
 }
 
+func TestRunScanInvokesPluginScanner(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "my-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"cat <<'EOF'\n" +
+		`{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"plugin-finding","name":"thing","path":"/opt/plugin-thing","reason":"found by plugin"}]}` + "\n" +
+		"EOF\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	root := filepath.Join(dir, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "scan.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--plugin", pluginPath, "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	found := false
+	for _, item := range got.Items {
+		if item.Kind == "plugin-finding" && item.Path == "/opt/plugin-thing" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected plugin-contributed item in scan output: %+v", got.Items)
+	}
+}
+
 func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	project := t.TempDir()
 	root := filepath.Join(project, "root")

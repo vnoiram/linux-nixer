@@ -151,12 +151,13 @@ const scanHelp = `linux-nixer scan
 Scan a Debian/Ubuntu-like root filesystem and write scan JSON.
 
 Usage:
-  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
+  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH]
 
 Examples:
   linux-nixer scan --out scan.json
   linux-nixer scan --sudo --deep --out scan.json
   linux-nixer scan --root /mnt/ubuntu --include /opt --baseline ubuntu:24.04 --out scan.json
+  linux-nixer scan --plugin ./my-scanner --out scan.json
 
 Flags:
   --out PATH       Write scan JSON to PATH.
@@ -167,6 +168,7 @@ Flags:
   --baseline ID    Compare filesystem findings against a baseline id or JSON path.
   --include PATH   Add a path to filesystem-diff scanning. Repeatable.
   --exclude PATH   Exclude a path prefix from scanning. Repeatable.
+  --plugin PATH    Run an external scanner plugin executable. Repeatable. See "Plugin scanners" in DESIGN_AND_ROADMAP.md for the protocol. Plugins always run as the current user, never with --sudo elevation.
 
 Policy:
   Policy include/exclude lists are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
@@ -176,13 +178,14 @@ const captureHelp = `linux-nixer capture
 Run scan, auto-safe review, summary, and Nix generation in one workflow.
 
 Usage:
-  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
+  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
 
 Examples:
   linux-nixer capture --out linux-nixer-output
   linux-nixer capture --sudo --deep --out linux-nixer-output
   linux-nixer capture --policy linux-nixer-policy.json --root /mnt/ubuntu --include /opt --out linux-nixer-output
   linux-nixer capture --import-decisions decisions.json --export-decisions decisions.json --out linux-nixer-output
+  linux-nixer capture --plugin ./my-scanner --out linux-nixer-output
 
 Artifacts:
   DIR/scan.json
@@ -199,6 +202,7 @@ Flags:
   --baseline ID             Compare filesystem findings against a baseline id or JSON path.
   --include PATH            Add a path to filesystem-diff scanning. Repeatable.
   --exclude PATH            Exclude a path prefix from scanning. Repeatable.
+  --plugin PATH             Run an external scanner plugin executable. Repeatable. See "Plugin scanners" in DESIGN_AND_ROADMAP.md for the protocol. Plugins always run as the current user, never with --sudo elevation.
   --auto-safe=false         Disable high-confidence automatic confirmations.
   --fail-on-pending         Return an error if candidate or todo findings remain.
   --import-decisions PATH   Seed decisions from a previously exported decisions JSON before review.
@@ -417,8 +421,10 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
 	var includes multiFlag
 	var excludes multiFlag
+	var plugins multiFlag
 	fs.Var(&includes, "include", "additional path to scan")
 	fs.Var(&excludes, "exclude", "path prefix to exclude")
+	fs.Var(&plugins, "plugin", "path to an external scanner plugin executable. Repeatable.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -433,12 +439,20 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reg := scanner.DefaultRegistry()
+	reg := scanner.DefaultRegistry(pluginScanners(plugins)...)
 	report, err := reg.Scan(ctx, opts)
 	if err != nil {
 		return err
 	}
 	return writeJSON(*out, report)
+}
+
+func pluginScanners(paths []string) []scanner.Scanner {
+	scanners := make([]scanner.Scanner, len(paths))
+	for i, path := range paths {
+		scanners[i] = scanner.PluginScanner{Path: path}
+	}
+	return scanners
 }
 
 func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
@@ -460,8 +474,10 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	exportDecisions := fs.String("export-decisions", "", "write final decisions to a portable decisions JSON")
 	var includes multiFlag
 	var excludes multiFlag
+	var plugins multiFlag
 	fs.Var(&includes, "include", "additional path to scan")
 	fs.Var(&excludes, "exclude", "path prefix to exclude")
+	fs.Var(&plugins, "plugin", "path to an external scanner plugin executable. Repeatable.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -477,7 +493,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	reg := scanner.DefaultRegistry()
+	reg := scanner.DefaultRegistry(pluginScanners(plugins)...)
 	report, err := reg.Scan(ctx, scanOpts)
 	if err != nil {
 		return err
