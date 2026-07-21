@@ -38,15 +38,16 @@ func (s DecisionSet) Validate() error {
 	return nil
 }
 
-// ExportDecisions collects every finding whose Decision is something other
-// than the default "not yet decided" state (empty or candidate) into a
-// portable DecisionSet. Desktop.Autostart is intentionally excluded: it's
-// never touched by applyDecisions/Interactive today, so it never carries a
-// real decision to export.
-func ExportDecisions(report model.ScanReport) DecisionSet {
+// allDecisions returns one DecisionEntry per finding across every domain
+// applyDecisions manages, regardless of its current Decision (including
+// empty/candidate) — the unfiltered base both ExportDecisions and
+// ComputeProgress build on. Desktop.Autostart is intentionally excluded:
+// it's never touched by applyDecisions/Interactive today, so it never
+// carries a real decision to export or compare.
+func allDecisions(report model.ScanReport) []DecisionEntry {
 	var entries []DecisionEntry
 	add := func(domain, key string, decision model.Decision) {
-		if key == "" || decision == "" || decision == model.DecisionCandidate {
+		if key == "" {
 			return
 		}
 		entries = append(entries, DecisionEntry{Domain: domain, Key: key, Decision: decision})
@@ -74,6 +75,25 @@ func ExportDecisions(report model.ScanReport) DecisionSet {
 		add("item", itemDecisionKey(it), it.Decision)
 	}
 
+	return entries
+}
+
+// isDecided reports whether a decision is something other than the default
+// "not yet decided" state (empty or candidate).
+func isDecided(decision model.Decision) bool {
+	return decision != "" && decision != model.DecisionCandidate
+}
+
+// ExportDecisions collects every finding whose Decision is something other
+// than the default "not yet decided" state (empty or candidate) into a
+// portable DecisionSet.
+func ExportDecisions(report model.ScanReport) DecisionSet {
+	var entries []DecisionEntry
+	for _, e := range allDecisions(report) {
+		if isDecided(e.Decision) {
+			entries = append(entries, e)
+		}
+	}
 	return DecisionSet{SchemaVersion: DecisionsSchemaVersion, Entries: entries}
 }
 

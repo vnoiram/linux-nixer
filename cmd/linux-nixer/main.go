@@ -247,17 +247,20 @@ const summaryHelp = `linux-nixer summary
 Summarize reviewed scan decisions, review focus, and next actions for humans or automation.
 
 Usage:
-  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
+  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending] [--compare-decisions PATH]
 
 Examples:
   linux-nixer summary --scan reviewed.json
   linux-nixer summary --scan reviewed.json --json
   linux-nixer summary --scan reviewed.json --fail-on-pending
+  linux-nixer review --scan scan-a.json --out reviewed-a.json --export-decisions decisions-a.json
+  linux-nixer summary --scan reviewed-b.json --compare-decisions decisions-a.json
 
 Flags:
-  --scan PATH          Read reviewed scan JSON.
-  --json               Write machine-readable JSON summary.
-  --fail-on-pending    Return an error if candidate or todo findings remain.
+  --scan PATH                 Read reviewed scan JSON.
+  --json                      Write machine-readable JSON summary.
+  --fail-on-pending           Return an error if candidate or todo findings remain.
+  --compare-decisions PATH    Compare against a previously exported decisions JSON (see review --export-decisions) and report what's newly decided, changed, regressed to pending, or no longer present — migration progress across repeated scans of the same host.
 `
 
 const validateHelp = `linux-nixer validate
@@ -578,6 +581,7 @@ func runSummary(args []string, stdout io.Writer) error {
 	scanPath := fs.String("scan", "", "input reviewed scan JSON")
 	jsonOutput := fs.Bool("json", false, "write machine-readable JSON summary")
 	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain")
+	compareDecisions := fs.String("compare-decisions", "", "compare against a previously exported decisions JSON to report migration progress")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -589,14 +593,34 @@ func runSummary(args []string, stdout io.Writer) error {
 		return err
 	}
 	summary := review.Summarize(report)
+	var progress *review.Progress
+	if *compareDecisions != "" {
+		previous, err := loadDecisionSet(*compareDecisions)
+		if err != nil {
+			return err
+		}
+		p := review.ComputeProgress(report, previous)
+		progress = &p
+	}
 	if *jsonOutput {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(summary); err != nil {
+		if progress != nil {
+			if err := enc.Encode(struct {
+				review.Summary
+				Progress *review.Progress `json:"progress,omitempty"`
+			}{Summary: summary, Progress: progress}); err != nil {
+				return err
+			}
+		} else if err := enc.Encode(summary); err != nil {
 			return err
 		}
 	} else {
 		fmt.Fprint(stdout, review.FormatSummaryMarkdown(summary))
+		if progress != nil {
+			fmt.Fprint(stdout, "\n")
+			fmt.Fprint(stdout, review.FormatProgressMarkdown(*progress))
+		}
 	}
 	if *failOnPending && summary.Pending > 0 {
 		return fmt.Errorf("summary has %d pending findings", summary.Pending)

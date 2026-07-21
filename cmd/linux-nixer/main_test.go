@@ -577,6 +577,91 @@ func TestRunReviewExportThenImportDecisionsRoundTrips(t *testing.T) {
 	}
 }
 
+func TestRunSummaryComparesDecisionsAcrossScans(t *testing.T) {
+	dir := t.TempDir()
+	scanAPath := filepath.Join(dir, "scan-a.json")
+	reviewedAPath := filepath.Join(dir, "reviewed-a.json")
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	scanBPath := filepath.Join(dir, "scan-b.json")
+	reviewedBPath := filepath.Join(dir, "reviewed-b.json")
+
+	writeScan(t, scanAPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service"},
+		},
+	})
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"review", "--scan", scanAPath, "--out", reviewedAPath, "--confirm-kind", "service", "--confirm-manager", "apt", "--export-decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+
+	// Scan B, later: curl unchanged, service now excluded (changed), and a
+	// new git source confirmed (newly decided). No import, so it's decided
+	// independently of A, exercising the diff purely via --compare-decisions.
+	writeScan(t, scanBPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service", Decision: model.DecisionExcluded},
+		},
+		GitSources: []model.GitSource{
+			{Path: "/home/alice/app", Decision: model.DecisionConfirmed},
+		},
+	})
+	stdout.Reset()
+	if err := run(context.Background(), []string{"review", "--scan", scanBPath, "--out", reviewedBPath, "--confirm-manager", "apt"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	err := run(context.Background(), []string{"summary", "--scan", reviewedBPath, "--compare-decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"## Migration progress since last snapshot",
+		"previously decided: 2",
+		"currently decided: 3",
+		"newly decided: 1",
+		"changed: 1",
+		"git-source `/home/alice/app` -> confirmed",
+		"service `systemd:app.service`: confirmed -> excluded",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("summary output missing %q:\n%s", want, out)
+		}
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"summary", "--scan", reviewedBPath, "--compare-decisions", decisionsPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Total    int `json:"total"`
+		Progress struct {
+			PreviousDecided int `json:"previousDecided"`
+			CurrentDecided  int `json:"currentDecided"`
+		} `json:"progress"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("summary --json output not parseable: %v\n%s", err, stdout.String())
+	}
+	if decoded.Total == 0 {
+		t.Fatalf("expected top-level summary fields alongside progress: %+v", decoded)
+	}
+	if decoded.Progress.PreviousDecided != 2 || decoded.Progress.CurrentDecided != 3 {
+		t.Fatalf("unexpected progress in JSON output: %+v", decoded.Progress)
+	}
+}
+
 func TestRunCaptureWritesWorkflowArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root")

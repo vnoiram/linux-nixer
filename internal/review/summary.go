@@ -151,6 +151,45 @@ func FormatSummaryMarkdown(s Summary) string {
 	return b.String()
 }
 
+// FormatProgressMarkdown renders a Progress comparison as a human-readable
+// report showing what changed since a previously exported DecisionSet.
+func FormatProgressMarkdown(p Progress) string {
+	var b strings.Builder
+	b.WriteString("## Migration progress since last snapshot\n\n")
+	fmt.Fprintf(&b, "- previously decided: %d\n", p.PreviousDecided)
+	fmt.Fprintf(&b, "- currently decided: %d\n", p.CurrentDecided)
+	fmt.Fprintf(&b, "- still pending: %d\n", p.StillPending)
+	fmt.Fprintf(&b, "- newly decided: %d\n", len(p.NewlyDecided))
+	fmt.Fprintf(&b, "- changed: %d\n", len(p.Changed))
+	fmt.Fprintf(&b, "- regressed to pending: %d\n", len(p.Regressed))
+	fmt.Fprintf(&b, "- no longer present: %d\n", len(p.Removed))
+
+	writeProgressSection(&b, "Newly decided", p.NewlyDecided, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` -> %s\n", e.Domain, e.Key, e.CurrentDecision)
+	})
+	writeProgressSection(&b, "Changed", p.Changed, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s`: %s -> %s\n", e.Domain, e.Key, e.PreviousDecision, e.CurrentDecision)
+	})
+	writeProgressSection(&b, "Regressed to pending", p.Regressed, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` (was %s)\n", e.Domain, e.Key, e.PreviousDecision)
+	})
+	writeProgressSection(&b, "No longer present", p.Removed, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` (was %s)\n", e.Domain, e.Key, e.PreviousDecision)
+	})
+
+	return b.String()
+}
+
+func writeProgressSection(b *strings.Builder, title string, entries []ProgressEntry, line func(ProgressEntry) string) {
+	if len(entries) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "\n### %s\n\n", title)
+	for _, e := range entries {
+		b.WriteString(line(e))
+	}
+}
+
 func writeNextActions(b *strings.Builder, s Summary) {
 	b.WriteString("\n## Next actions\n\n")
 	if s.Pending > 0 {

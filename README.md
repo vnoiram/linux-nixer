@@ -86,6 +86,12 @@ bin/linux-nixer review --scan scan-later.json --out reviewed-later.json --import
 
 Imported decisions win over policy `confirmKinds`/`excludeKinds` for the same finding — an explicit prior decision outranks a category default.
 
+`summary --compare-decisions decisions.json` diffs the current scan's decisions against a previously exported snapshot, tracking migration progress across repeated scans of the same host: what's newly decided, what changed, what regressed back to pending, and what's no longer present (e.g. a package that was uninstalled):
+
+```sh
+bin/linux-nixer summary --scan reviewed-later.json --compare-decisions decisions.json
+```
+
 Create a baseline manifest. If Docker or Podman is available, `baseline fetch` builds one from the distro's official image — no local rootfs needed:
 
 ```sh
