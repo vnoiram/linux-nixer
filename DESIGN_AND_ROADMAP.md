@@ -51,6 +51,7 @@ Review checklist for adding a mapping entry:
   - `Package`, `Item`, `Service`, `Container`, `FileFinding`, and related structs carry review decisions and safe details.
 - Review and policy:
   - Non-interactive rules can confirm, exclude, mark TODO, or mark migration notes.
+  - `policy init --preset <name>` seeds a policy tuned for a common migration style (`workstation`, `server`, `developer-machine`, `minimal-audit`) instead of the generic template, by pre-setting `confirmKinds`/`excludeKinds` for that archetype.
   - Interactive review shows safe context notes, details, Nix mapping impact, and protected-finding reasons, with per-section progress counts, a skip-rest-of-section command, and an optional pending-only filter that hides findings already resolved by policy or safety rules.
   - Container, systemd service, and cron job notes reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts, missing cron schedule/user), not a blanket "generates when safe" claim, so the safe/unsafe outcome is visible before the decision is made.
 - Rendering:

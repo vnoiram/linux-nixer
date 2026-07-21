@@ -3,6 +3,7 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/vnoiram/linux-nixer/internal/review"
@@ -67,6 +68,68 @@ func TestLoadRejectsInvalidPolicy(t *testing.T) {
 		if _, err := Load(path); err == nil {
 			t.Fatalf("expected %s to fail", name)
 		}
+	}
+}
+
+func TestTemplatePresetsSetExpectedFields(t *testing.T) {
+	cases := []struct {
+		preset       string
+		wantAutoSafe bool
+		wantConfirm  []string
+		wantExclude  []string
+	}{
+		{"workstation", true, []string{"desktop-config", "shell-config", "user-config", "direnv"}, nil},
+		{"server", true, []string{"service", "container", "os-config"}, []string{"desktop-config", "shell-plugin"}},
+		{"developer-machine", true, []string{"dev-project", "git-source", "language-project", "shell-config", "direnv"}, nil},
+		{"minimal-audit", false, nil, nil},
+	}
+	for _, tc := range cases {
+		p, err := Template(tc.preset)
+		if err != nil {
+			t.Fatalf("Template(%q) error: %v", tc.preset, err)
+		}
+		if p.AutoSafe == nil || *p.AutoSafe != tc.wantAutoSafe {
+			t.Fatalf("Template(%q).AutoSafe=%v, want %v", tc.preset, p.AutoSafe, tc.wantAutoSafe)
+		}
+		if !slices.Equal(p.ConfirmKinds, tc.wantConfirm) {
+			t.Fatalf("Template(%q).ConfirmKinds=%v, want %v", tc.preset, p.ConfirmKinds, tc.wantConfirm)
+		}
+		if !slices.Equal(p.ExcludeKinds, tc.wantExclude) {
+			t.Fatalf("Template(%q).ExcludeKinds=%v, want %v", tc.preset, p.ExcludeKinds, tc.wantExclude)
+		}
+		if len(p.ConfirmManagers) != 0 {
+			t.Fatalf("Template(%q).ConfirmManagers=%v, want empty", tc.preset, p.ConfirmManagers)
+		}
+	}
+}
+
+func TestTemplateUnknownPresetReturnsError(t *testing.T) {
+	p, err := Template("bogus")
+	if err == nil {
+		t.Fatal("expected error for unknown preset")
+	}
+	if p.SchemaVersion != "" {
+		t.Fatalf("expected zero-value policy on error, got %+v", p)
+	}
+}
+
+func TestTemplateEmptyPresetMatchesCurrentDefault(t *testing.T) {
+	empty, err := Template("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	named, err := Template("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.AutoSafe == nil || !*empty.AutoSafe {
+		t.Fatalf("Template(\"\").AutoSafe=%v, want true", empty.AutoSafe)
+	}
+	if len(empty.ConfirmKinds) != 0 || len(empty.ExcludeKinds) != 0 {
+		t.Fatalf("Template(\"\") should have no confirm/exclude kinds: %+v", empty)
+	}
+	if named.AutoSafe == nil || *empty.AutoSafe != *named.AutoSafe {
+		t.Fatalf("Template(\"\") and Template(\"default\") should match: %+v vs %+v", empty, named)
 	}
 }
 

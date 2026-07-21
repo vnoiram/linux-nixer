@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/vnoiram/linux-nixer/internal/review"
 	"github.com/vnoiram/linux-nixer/internal/scanner"
 )
 
 const SchemaVersion = "linux-nixer.policy.v1"
+
+// PresetNames lists the valid Template preset names, in the order they're
+// documented in CLI help text. Keep this in sync with Template's switch.
+var PresetNames = []string{"workstation", "server", "developer-machine", "minimal-audit"}
 
 type Policy struct {
 	SchemaVersion       string   `json:"schemaVersion"`
@@ -29,11 +34,16 @@ type Policy struct {
 	Baseline            string   `json:"baseline,omitempty"`
 }
 
-func Template() Policy {
-	autoSafe := true
-	return Policy{
+// Template returns a policy template, optionally tuned by a named preset
+// for a common migration style. preset == "" (or "default") returns the
+// generic template: AutoSafe on, everything else empty. A known preset name
+// layers ConfirmKinds/ExcludeKinds/AutoSafe on top of that. ConfirmManagers
+// is deliberately left empty by every preset: it unconditionally confirms
+// every package from a manager regardless of whether a Nix mapping exists,
+// a stronger statement than a preset should make on the user's behalf.
+func Template(preset string) (Policy, error) {
+	p := Policy{
 		SchemaVersion:       SchemaVersion,
-		AutoSafe:            &autoSafe,
 		ConfirmKinds:        []string{},
 		ExcludeKinds:        []string{},
 		TODOKinds:           []string{},
@@ -43,6 +53,23 @@ func Template() Policy {
 		IncludePaths:        []string{},
 		ExcludePaths:        []string{},
 	}
+	autoSafe := true
+	switch preset {
+	case "", "default":
+	case "workstation":
+		p.ConfirmKinds = []string{"desktop-config", "shell-config", "user-config", "direnv"}
+	case "server":
+		p.ConfirmKinds = []string{"service", "container", "os-config"}
+		p.ExcludeKinds = []string{"desktop-config", "shell-plugin"}
+	case "developer-machine":
+		p.ConfirmKinds = []string{"dev-project", "git-source", "language-project", "shell-config", "direnv"}
+	case "minimal-audit":
+		autoSafe = false
+	default:
+		return Policy{}, fmt.Errorf("unknown policy preset %q; supported presets: %s", preset, strings.Join(PresetNames, ", "))
+	}
+	p.AutoSafe = &autoSafe
+	return p, nil
 }
 
 func Load(path string) (Policy, error) {
@@ -63,9 +90,13 @@ func Load(path string) (Policy, error) {
 	return p, p.Validate()
 }
 
-func WriteTemplate(path string) error {
+func WriteTemplate(path, preset string) error {
 	if path == "" {
 		return errors.New("policy init requires --out")
+	}
+	tmpl, err := Template(preset)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -77,7 +108,7 @@ func WriteTemplate(path string) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	return enc.Encode(Template())
+	return enc.Encode(tmpl)
 }
 
 func (p Policy) Validate() error {

@@ -27,6 +27,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `baseline fetch` command that builds a baseline manifest from a distro's official Docker/Podman image, so common Ubuntu/Debian releases don't require a local rootfs.
 - Structural tests for the Nix package mapping table (normalized keys, non-empty values, alias targets resolve to real entries) plus a documented review checklist for adding new mappings.
 - Confirmed cron jobs with a schedule, user, and non-secret-like command render as `services.cron.systemCronJobs` entries; interactive review notes now explain the generation outcome for cron jobs the same way they do for systemd services.
+- `policy init --preset <name>` for common migration styles (`workstation`, `server`, `developer-machine`, `minimal-audit`), pre-setting `confirmKinds`/`excludeKinds` for that archetype instead of starting from the generic template.
 
 ### Changed
 

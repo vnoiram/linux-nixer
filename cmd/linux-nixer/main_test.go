@@ -309,6 +309,56 @@ func TestRunPolicyInitWritesParseablePolicy(t *testing.T) {
 	}
 }
 
+func TestRunPolicyInitWithPresetWritesConfirmKinds(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "server-policy.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "init", "--preset", "server", "--out", policyPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := policypkg.Load(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantConfirm := []string{"service", "container", "os-config"}
+	if len(p.ConfirmKinds) != len(wantConfirm) {
+		t.Fatalf("confirmKinds=%v, want %v", p.ConfirmKinds, wantConfirm)
+	}
+	for i, k := range wantConfirm {
+		if p.ConfirmKinds[i] != k {
+			t.Fatalf("confirmKinds=%v, want %v", p.ConfirmKinds, wantConfirm)
+		}
+	}
+	wantExclude := []string{"desktop-config", "shell-plugin"}
+	if len(p.ExcludeKinds) != len(wantExclude) {
+		t.Fatalf("excludeKinds=%v, want %v", p.ExcludeKinds, wantExclude)
+	}
+	for i, k := range wantExclude {
+		if p.ExcludeKinds[i] != k {
+			t.Fatalf("excludeKinds=%v, want %v", p.ExcludeKinds, wantExclude)
+		}
+	}
+}
+
+func TestRunPolicyInitRejectsUnknownPreset(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "bogus-policy.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "init", "--preset", "bogus", "--out", policyPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error for unknown preset")
+	}
+	if !strings.Contains(err.Error(), "unknown policy preset") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(policyPath); !os.IsNotExist(statErr) {
+		t.Fatalf("policy file should not be written for unknown preset, stat err=%v", statErr)
+	}
+}
+
 func TestRunPolicyInitWritesStdoutForDash(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

@@ -86,7 +86,7 @@ Usage:
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out baselines/ubuntu-24.04.json]
-  linux-nixer policy init --out linux-nixer-policy.json
+  linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer help <command>
   linux-nixer version [--full]`)
 }
@@ -338,14 +338,24 @@ const policyInitHelp = `linux-nixer policy init
 Write a reusable policy template for scan paths, baselines, and review decisions.
 
 Usage:
-  linux-nixer policy init --out linux-nixer-policy.json
+  linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
 
 Examples:
   linux-nixer policy init --out linux-nixer-policy.json
+  linux-nixer policy init --preset workstation --out linux-nixer-policy.json
+  linux-nixer policy init --preset server --out linux-nixer-policy.json
+  linux-nixer policy init --preset developer-machine --out linux-nixer-policy.json
+  linux-nixer policy init --preset minimal-audit --out linux-nixer-policy.json
   linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-output
 
 Flags:
-  --out PATH    Write policy JSON template to PATH. Use - for stdout.
+  --out PATH       Write policy JSON template to PATH. Use - for stdout.
+  --preset NAME    Tune the template for a common migration style. One of:
+                      workstation        confirm desktop/shell/user config
+                      server             confirm services/containers/os-config, exclude desktop config
+                      developer-machine  confirm dev projects, git sources, shell config
+                      minimal-audit      confirm nothing automatically; review everything by hand
+                   Omit for the generic template (autoSafe on, nothing else set).
 
 Policy:
   The template uses schemaVersion "linux-nixer.policy.v1". Policy values supply defaults; explicit CLI boolean and string flags override them, and CLI list flags are merged with policy lists.
@@ -744,15 +754,20 @@ func runPolicy(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("policy init", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output policy JSON")
+	preset := fs.String("preset", "", "policy preset: workstation, server, developer-machine, or minimal-audit")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if *out == "-" {
+		tmpl, err := policy.Template(*preset)
+		if err != nil {
+			return err
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(policy.Template())
+		return enc.Encode(tmpl)
 	}
-	if err := policy.WriteTemplate(*out); err != nil {
+	if err := policy.WriteTemplate(*out, *preset); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote policy: %s\n", *out)

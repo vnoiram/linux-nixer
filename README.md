@@ -73,6 +73,8 @@ bin/linux-nixer review --policy linux-nixer-policy.json --scan scan.json --out r
 bin/linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-output
 ```
 
+`policy init --preset <name>` starts from a template tuned for a common migration style instead of the generic one: `workstation`, `server`, `developer-machine`, or `minimal-audit` (confirms nothing automatically — the most conservative starting point). Run `bin/linux-nixer help policy init` for what each preset confirms.
+
 Policy paths are plain prefixes, not globs. CLI list flags are merged with policy lists; explicitly provided boolean and string flags override policy values.
 
 Create a baseline manifest. If Docker or Podman is available, `baseline fetch` builds one from the distro's official image — no local rootfs needed:
