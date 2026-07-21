@@ -560,6 +560,17 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Name: "root", UID: "0", GID: "0", Home: "/root", Shell: "/bin/bash", Groups: []string{"root"}},
 			{Name: "alice", UID: "1000", GID: "1000", Home: "/home/alice", Shell: "/bin/zsh", Groups: []string{"alice", "docker", "sudo", "video", "networkmanager", "unknown"}},
 			{Name: "daemon", UID: "1", GID: "1", Home: "/usr/sbin", Shell: "/usr/sbin/nologin", Groups: []string{"daemon"}, System: true},
+			{Name: "svc", UID: "2000", GID: "2000", Home: "/opt/svc", Shell: "/usr/sbin/nologin"},
+		},
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+			{Manager: "apt", Name: "obscure-tool", Decision: model.DecisionConfirmed},
+			{Manager: "apt", Name: "skip-me", Decision: model.DecisionCandidate},
+		},
+		Languages: model.Languages{
+			NPM: []model.Package{
+				{Manager: "npm", Name: "eslint", NixNames: []string{"nodePackages.eslint"}, Decision: model.DecisionConfirmed},
+			},
 		},
 		Services: []model.Service{
 			{Manager: "systemd", Name: "custom.service", Path: "/etc/systemd/system/custom.service", User: "app", WorkingDirectory: "/srv/app", ExecStart: "/opt/app/bin/app --serve", WantedBy: []string{"multi-user.target"}, Decision: model.DecisionConfirmed},
@@ -675,13 +686,20 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		`{ key = "systemd:backup.timer"; decision = "confirmed"; nixOption = "systemd.timers.backup"; }`,
 		`{ key = "cron:backup-job"; decision = "confirmed"; nixOption = "services.cron.systemCronJobs"; }`,
 		`{ key = "cron:secret-job"; decision = "confirmed"; nixOption = null; note = "secret-job command contains secret-like text and was not generated"; }`,
+		`{ key = "apt:curl"; decision = "confirmed"; nixOption = "environment.systemPackages"; }`,
+		`{ key = "apt:obscure-tool"; decision = "confirmed"; nixOption = null; note = "no Nix package mapping found for apt:obscure-tool"; }`,
+		`{ key = "npm:eslint"; decision = "confirmed"; nixOption = "home.packages"; }`,
+		`{ key = "root"; decision = ""; nixOption = null; note = "root user, not rendered"; }`,
+		`{ key = "alice"; decision = ""; nixOption = "users.users.\"alice\""; }`,
+		`{ key = "daemon"; decision = ""; nixOption = null; note = "system user, not rendered"; }`,
+		`{ key = "svc"; decision = ""; nixOption = null; note = "home directory is not under /home/, not rendered"; }`,
 	} {
 		if !strings.Contains(annotations, want) {
 			t.Fatalf("migration annotations missing %q:\n%s", want, annotations)
 		}
 	}
-	if strings.Contains(annotations, "candidate") {
-		t.Fatalf("migration annotations should not include the candidate service:\n%s", annotations)
+	if strings.Contains(annotations, "candidate") || strings.Contains(annotations, "skip-me") {
+		t.Fatalf("migration annotations should not include the candidate service or package:\n%s", annotations)
 	}
 	if strings.Contains(cfg, "migration-annotations") {
 		t.Fatalf("migration-annotations.nix must not be imported into the NixOS configuration:\n%s", cfg)

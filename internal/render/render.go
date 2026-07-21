@@ -1108,6 +1108,11 @@ func renderMigrationAnnotations(report model.ScanReport) string {
 	writeAnnotationSection(&b, "containers", containerAnnotations(report))
 	writeAnnotationSection(&b, "systemdServices", systemdServiceAnnotations(report))
 	writeAnnotationSection(&b, "cronJobs", cronJobAnnotations(report))
+	writeAnnotationSection(&b, "systemPackages", systemPackageAnnotations(report))
+	writeAnnotationSection(&b, "homePackages", homePackageAnnotations(report))
+	b.WriteString("  # users has no review decision (model.User carries none); decision is always \"\",\n")
+	b.WriteString("  # and nixOption/note instead reflect nixUsers()'s structural render gate (system/root/home path).\n")
+	writeAnnotationSection(&b, "users", userAnnotations(report))
 	b.WriteString("}\n")
 	return b.String()
 }
@@ -1189,6 +1194,88 @@ func cronJobAnnotations(report model.ScanReport) []migrationAnnotation {
 			a.nixOption = "services.cron.systemCronJobs"
 		} else {
 			a.note = cronJobGenerationNote(s)
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func packageAnnotationKey(pkg model.Package) string {
+	return pkg.Manager + ":" + pkg.Name
+}
+
+func packageAnnotation(pkg model.Package, nixOption string) migrationAnnotation {
+	a := migrationAnnotation{key: packageAnnotationKey(pkg), decision: pkg.Decision}
+	if len(pkg.NixNames) > 0 {
+		a.nixOption = nixOption
+	} else {
+		a.note = "no Nix package mapping found for " + pkg.Manager + ":" + pkg.Name
+	}
+	return a
+}
+
+func systemPackageAnnotations(report model.ScanReport) []migrationAnnotation {
+	var out []migrationAnnotation
+	for _, pkg := range report.Packages {
+		if pkg.Decision != model.DecisionConfirmed {
+			continue
+		}
+		out = append(out, packageAnnotation(pkg, "environment.systemPackages"))
+	}
+	return out
+}
+
+func homePackageAnnotations(report model.ScanReport) []migrationAnnotation {
+	var out []migrationAnnotation
+	add := func(pkg model.Package) {
+		if pkg.Decision != model.DecisionConfirmed {
+			return
+		}
+		out = append(out, packageAnnotation(pkg, "home.packages"))
+	}
+	for _, pkg := range report.Languages.NPM {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Conda {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Cargo {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Gem {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Go {
+		add(pkg)
+	}
+	for _, env := range report.Languages.Python {
+		for _, pkg := range env.Packages {
+			add(pkg)
+		}
+	}
+	return out
+}
+
+func userAnnotationKey(u model.User) string {
+	return u.Name
+}
+
+// userAnnotations covers every report.Users entry, not just confirmed ones —
+// model.User has no Decision field, so there's no review step to filter on.
+// Inclusion mirrors nixUsers's exact structural gate.
+func userAnnotations(report model.ScanReport) []migrationAnnotation {
+	var out []migrationAnnotation
+	for _, u := range report.Users {
+		a := migrationAnnotation{key: userAnnotationKey(u)}
+		switch {
+		case u.System:
+			a.note = "system user, not rendered"
+		case u.Name == "root":
+			a.note = "root user, not rendered"
+		case !strings.HasPrefix(u.Home, "/home/"):
+			a.note = "home directory is not under /home/, not rendered"
+		default:
+			a.nixOption = "users.users." + quote(u.Name)
 		}
 		out = append(out, a)
 	}
