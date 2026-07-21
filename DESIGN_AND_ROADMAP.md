@@ -49,6 +49,8 @@ Review checklist for adding a catalog entry:
 
 `internal/baseline/embedded.go` embeds pre-built manifests for the catalog's entries directly into the binary via `//go:embed`, so `baseline fetch --offline` works with neither Docker/Podman nor network access at all — real fetched data (metadata-only per file: path/type/mode/size/sha256, no raw file contents), not synthesized, which is also why it compresses well (~130KB per Ubuntu release, ~270-290KB per Debian release, ~195-240KB per Fedora release, gzipped). `BundledManifest(distro, release)` rewrites the manifest's `Source` field with a `bundled:` prefix so a caller can't mistake it for a manifest built from a fetch that just happened.
 
+`baseline check` (`internal/baseline.CheckCatalog`) is a purely informational diagnostic: it pulls each entry's tag fresh (not the pinned digest) and compares the tag's *current* digest against what's pinned in `catalog.go`, reporting drift without ever modifying the catalog — a stale entry is meant to surface as a visible, checkable fact, with refreshing its digest left as the deliberate, reviewed catalog change described above. `--fail-on-drift` makes it usable as a periodic/CI gate; the default is report-only.
+
 ## Current architecture
 
 - CLI commands:
@@ -59,7 +61,7 @@ Review checklist for adding a catalog entry:
   - `validate` checks schema, decisions, and protected finding rules.
   - `generate` renders the NixOS/Home Manager project.
   - `doctor` validates generated project files and can run Nix VM checks.
-  - `baseline create`/`fetch`/`import` record rootfs baseline manifests (from a local rootfs, a pulled distro image, or an already-downloaded tar, respectively); `baseline list` shows the curated catalog `fetch` will accept; `fetch --offline` uses a real manifest bundled into the binary instead of pulling one, for a fully offline host.
+  - `baseline create`/`fetch`/`import` record rootfs baseline manifests (from a local rootfs, a pulled distro image, or an already-downloaded tar, respectively); `baseline list` shows the curated catalog `fetch` will accept; `fetch --offline` uses a real manifest bundled into the binary instead of pulling one, for a fully offline host; `baseline check` reports whether any catalog entry's pinned digest has drifted from what its tag currently resolves to.
   - `policy init` creates repeatable review policy templates.
 - Scanner registry:
   - Dedicated scanners collect packages, language tooling, Git sources, containers, services, system config, DevOps config, user config, desktop config, hardware/peripherals, backups, secrets, stateful data, and filesystem diff findings.

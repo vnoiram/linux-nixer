@@ -91,6 +91,7 @@ Usage:
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--offline] [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline list [--json]
+  linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer help <command>
@@ -132,6 +133,10 @@ func commandHelp(w io.Writer, topic []string) error {
 		}
 		if topic[1] == "list" {
 			fmt.Fprint(w, baselineListHelp)
+			return nil
+		}
+		if topic[1] == "check" {
+			fmt.Fprint(w, baselineCheckHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
@@ -421,6 +426,25 @@ Flags:
   --json             Write machine-readable JSON (one object per catalog entry: distro, release, image, digest) instead of plain text.
 
 This is a small, hand-verified catalog (see DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance"), not every possible Docker Hub image — an unlisted distro/release is rejected by "baseline fetch" rather than guessed at. Every entry currently listed here also works fully offline via "baseline fetch --offline" (no Docker/Podman or network access needed), since its manifest is bundled directly into this binary.
+`
+
+const baselineCheckHelp = `linux-nixer baseline check
+Check whether each catalog entry's pinned digest still matches what its tag currently resolves to.
+
+Usage:
+  linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
+
+Examples:
+  linux-nixer baseline check
+  linux-nixer baseline check --json
+  linux-nixer baseline check --fail-on-drift
+
+Flags:
+  --backend NAME     Container backend: docker or podman. Auto-detected from PATH if omitted.
+  --json             Write machine-readable JSON (one object per catalog entry: distro, release, image, pinned/current digest, drifted, error) instead of plain text.
+  --fail-on-drift    Exit non-zero if any entry has drifted from its pinned digest or could not be checked (network/backend failure). Default is report-only, exit 0.
+
+Purely informational — this never modifies the catalog. A drifted entry (its tag now resolves to a different digest than the one pinned in internal/baseline/catalog.go) means the image was rebuilt upstream since the catalog was last verified; bumping the pinned digest is a deliberate, reviewed catalog change, not something this command does automatically. See DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance" section.
 `
 
 const baselineImportHelp = `linux-nixer baseline import
@@ -996,7 +1020,7 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check")
 	}
 	switch args[0] {
 	case "create":
@@ -1007,9 +1031,57 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return runBaselineImport(ctx, args[1:], stdin, stdout)
 	case "list":
 		return runBaselineList(args[1:], stdout)
+	case "check":
+		return runBaselineCheck(ctx, args[1:], stdout)
 	default:
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check")
 	}
+}
+
+func runBaselineCheck(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, baselineCheckHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("baseline check", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	backend := fs.String("backend", "", "container backend: docker or podman")
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON")
+	failOnDrift := fs.Bool("fail-on-drift", false, "exit non-zero if any catalog entry has drifted or could not be checked")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	results, err := baseline.CheckCatalog(ctx, baseline.CatalogCheckOptions{Backend: *backend})
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(results); err != nil {
+			return err
+		}
+	} else {
+		for _, r := range results {
+			if r.Error != "" {
+				fmt.Fprintf(stdout, "%s %s: error: %s\n", r.Distro, r.Release, r.Error)
+				continue
+			}
+			status := "ok"
+			if r.Drifted {
+				status = "DRIFTED"
+			}
+			fmt.Fprintf(stdout, "%s %s: %s (pinned: %s, current: %s)\n", r.Distro, r.Release, status, r.PinnedDigest, r.CurrentDigest)
+		}
+	}
+	if *failOnDrift {
+		for _, r := range results {
+			if r.Drifted || r.Error != "" {
+				return errors.New("baseline catalog check found drift or errors; see output above")
+			}
+		}
+	}
+	return nil
 }
 
 func runBaselineList(args []string, stdout io.Writer) error {

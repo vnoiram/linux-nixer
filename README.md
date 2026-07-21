@@ -133,6 +133,13 @@ No Docker/Podman and no network access at all? Every catalog entry's manifest is
 bin/linux-nixer baseline fetch --distro ubuntu --release 24.04 --offline
 ```
 
+`baseline fetch` pins each entry to a verified image digest, not a floating tag, so the same catalog entry always fetches the same bytes. `baseline check` reports whether any entry's pinned digest has drifted from what its tag currently resolves to (informational only — it never updates the catalog itself):
+
+```sh
+bin/linux-nixer baseline check
+bin/linux-nixer baseline check --fail-on-drift
+```
+
 Without Docker/Podman, or for a custom/offline rootfs, use `baseline create` against a mounted or extracted filesystem instead:
 
 ```sh

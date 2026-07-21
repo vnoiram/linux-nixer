@@ -165,6 +165,15 @@ func TestRunCommandHelpTopics(t *testing.T) {
 			},
 		},
 		{
+			name: "baseline check help",
+			args: []string{"help", "baseline", "check"},
+			wants: []string{
+				"linux-nixer baseline check",
+				"--fail-on-drift",
+				"never modifies the catalog",
+			},
+		},
+		{
 			name: "review help",
 			args: []string{"review", "-h"},
 			wants: []string{
@@ -545,8 +554,28 @@ func TestRunBaselineUnknownSubcommandFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown baseline subcommand")
 	}
-	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") || !strings.Contains(err.Error(), "baseline list") {
-		t.Fatalf("error should mention all four subcommands: %v", err)
+	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") || !strings.Contains(err.Error(), "baseline list") || !strings.Contains(err.Error(), "baseline check") {
+		t.Fatalf("error should mention all five subcommands: %v", err)
+	}
+}
+
+func TestRunBaselineCheckReportsPerEntryErrorsWithoutRealBackend(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "check", "--backend", "linux-nixer-nonexistent-backend-xyz"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("baseline check should report per-entry errors, not fail outright: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "error:") {
+		t.Fatalf("expected per-entry errors in output since the backend doesn't exist, got: %q", out)
+	}
+}
+
+func TestRunBaselineCheckFailOnDriftFailsOnError(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "check", "--backend", "linux-nixer-nonexistent-backend-xyz", "--fail-on-drift"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected --fail-on-drift to fail when every entry errors")
 	}
 }
 

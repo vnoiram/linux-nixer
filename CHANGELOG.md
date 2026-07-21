@@ -54,6 +54,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `baseline fetch` now pulls each catalog entry's exact verified image digest (`CatalogDigest`, `internal/baseline/catalog.go`), not just its floating tag, so fetched content can't silently drift as a tag like `ubuntu:24.04` gets rebuilt over time — the manifest's `source` field records the pinned `image@sha256:...` reference actually pulled. `baseline list` now also prints each entry's digest.
 - `baseline list --json` writes machine-readable JSON (one object per catalog entry: distro, release, image, digest), matching the `--json` convention already used by `summary`/`validate`/`plugin check`.
 - Baseline catalog and offline bundled manifests now cover Fedora 40 and 41, in addition to the existing Ubuntu/Debian releases.
+- `baseline check` reports whether any catalog entry's pinned digest has drifted from what its tag currently resolves to, without ever modifying the catalog — purely informational by default, with `--fail-on-drift` for optional CI/periodic use.
 
 ### Fixed
 
