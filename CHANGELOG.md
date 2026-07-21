@@ -34,6 +34,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `baseline import --tar <path>` builds a baseline manifest from an already-downloaded flat rootfs tar (an official distro base-rootfs tarball, or a carried-over `docker export` tar), for fully offline use with neither a container backend nor network access; auto-decompresses gzip and supports `--tar -` for stdin.
 - `scan`/`capture --plugin PATH` runs an external executable as an extra scanner: a documented JSON protocol on stdin/stdout (reusing the existing `scan.json`/`reviewed.json` schema as the output contract) rather than dynamic Go plugin loading or a published Go module, so a plugin can be written in any language. Plugin-contributed `items`/`warnings` are merged; plugins always run as the current user, never with `--sudo` elevation, and are bounded by a 30s timeout. See "Plugin scanners" in `DESIGN_AND_ROADMAP.md`.
 - Policy files can set default `--plugin` paths via a `plugins` list field, merged with CLI `--plugin` flags the same way as `includePaths`/`excludePaths`, consistent with every other scan option already being policy-configurable.
+- `scan`/`capture --plugin-timeout DURATION` overrides the default 30s timeout for plugin scanner invocations.
 
 ### Changed
 
@@ -44,6 +45,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 
 - Baseline diff now also detects permission-only changes (e.g. a file gaining or losing its executable bit) when content is unchanged; previously only the content hash was compared.
 - `doctor`'s pre-flight file-completeness check now covers all 21 files `render.Project` generates, including `modules/services.nix` and `modules/filesystem-findings.nix` (both imported by the generated flake); previously 5 files were missing from the check, so a corrupted or missing module would only surface as an opaque Nix import error instead of a clear pre-flight failure.
+- Plugin scanner timeouts now kill the plugin's whole process group, not just its top-level process; previously a plugin that forked a subprocess before exiting (e.g. a shell script) could leave that subprocess holding the output pipe open after being killed, so the scan blocked until the orphaned subprocess exited on its own instead of at the timeout.
 - `serviceGenerationNotes`/`containerGenerationNotes` now explain a confirmed systemd service with no `ExecStart` and a confirmed container missing a name or image, respectively; previously both cases silently produced zero explanatory notes despite nothing being generated.
 
 ## [0.1.0] - 2026-07-19

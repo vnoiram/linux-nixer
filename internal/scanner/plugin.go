@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -95,6 +96,17 @@ func runPluginProcess(ctx context.Context, path string, req PluginRequest) (mode
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Run the plugin in its own process group so a timeout kills any
+	// subprocesses it spawned too, not just the plugin's own top-level
+	// process. Without this, an orphaned grandchild that inherited the
+	// stdout pipe (e.g. a shell script's own subshells) keeps that pipe
+	// open after the plugin is killed, and Wait below blocks until the
+	// orphan exits on its own instead of returning at the timeout.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Run(); err != nil {
 		return model.ScanReport{}, fmt.Errorf("%w: %s", err, stderr.String())
 	}

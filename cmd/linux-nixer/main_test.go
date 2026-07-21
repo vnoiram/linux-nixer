@@ -538,6 +538,49 @@ func TestRunScanAppliesPolicyPluginPaths(t *testing.T) {
 	}
 }
 
+func TestRunScanPluginTimeoutFlag(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "slow-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"sleep 1\n" +
+		"cat <<'EOF'\n" +
+		`{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"plugin-finding","name":"thing","path":"/opt/slow-plugin-thing","reason":"found by slow plugin"}]}` + "\n" +
+		"EOF\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	root := filepath.Join(dir, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "scan.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--plugin", pluginPath, "--plugin-timeout", "100ms", "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("scan should succeed even when a plugin times out, got: %v", err)
+	}
+
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	for _, item := range got.Items {
+		if item.Kind == "plugin-finding" {
+			t.Fatalf("expected timed-out plugin to contribute no items, got: %+v", got.Items)
+		}
+	}
+	foundWarning := false
+	for _, w := range got.Warnings {
+		if w.Source == "plugin:slow-plugin.sh" {
+			foundWarning = true
+		}
+	}
+	if !foundWarning {
+		t.Fatalf("expected a warning from the timed-out plugin, got: %+v", got.Warnings)
+	}
+}
+
 func TestRunScanResolvesBaselineIDFromProjectBaselines(t *testing.T) {
 	project := t.TempDir()
 	root := filepath.Join(project, "root")

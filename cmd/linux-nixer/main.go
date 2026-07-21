@@ -151,7 +151,7 @@ const scanHelp = `linux-nixer scan
 Scan a Debian/Ubuntu-like root filesystem and write scan JSON.
 
 Usage:
-  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH]
+  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION]
 
 Examples:
   linux-nixer scan --out scan.json
@@ -160,15 +160,16 @@ Examples:
   linux-nixer scan --plugin ./my-scanner --out scan.json
 
 Flags:
-  --out PATH       Write scan JSON to PATH.
-  --policy PATH    Load repeatable scan and review policy from PATH.
-  --root PATH      Scan PATH as the root filesystem. Defaults to /.
-  --sudo           Allow read-only sudo fallback for selected host files.
-  --deep           Scan broader filesystem paths for manual installs and config.
-  --baseline ID    Compare filesystem findings against a baseline id or JSON path.
-  --include PATH   Add a path to filesystem-diff scanning. Repeatable.
-  --exclude PATH   Exclude a path prefix from scanning. Repeatable.
-  --plugin PATH    Run an external scanner plugin executable. Repeatable. See "Plugin scanners" in DESIGN_AND_ROADMAP.md for the protocol. Plugins always run as the current user, never with --sudo elevation.
+  --out PATH               Write scan JSON to PATH.
+  --policy PATH            Load repeatable scan and review policy from PATH.
+  --root PATH              Scan PATH as the root filesystem. Defaults to /.
+  --sudo                   Allow read-only sudo fallback for selected host files.
+  --deep                   Scan broader filesystem paths for manual installs and config.
+  --baseline ID            Compare filesystem findings against a baseline id or JSON path.
+  --include PATH           Add a path to filesystem-diff scanning. Repeatable.
+  --exclude PATH           Exclude a path prefix from scanning. Repeatable.
+  --plugin PATH            Run an external scanner plugin executable. Repeatable. See "Plugin scanners" in DESIGN_AND_ROADMAP.md for the protocol. Plugins always run as the current user, never with --sudo elevation.
+  --plugin-timeout DURATION  Timeout for each plugin scanner invocation. Defaults to 30s.
 
 Policy:
   Policy include/exclude/plugin lists are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
@@ -178,7 +179,7 @@ const captureHelp = `linux-nixer capture
 Run scan, auto-safe review, summary, and Nix generation in one workflow.
 
 Usage:
-  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
+  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
 
 Examples:
   linux-nixer capture --out linux-nixer-output
@@ -203,6 +204,7 @@ Flags:
   --include PATH            Add a path to filesystem-diff scanning. Repeatable.
   --exclude PATH            Exclude a path prefix from scanning. Repeatable.
   --plugin PATH             Run an external scanner plugin executable. Repeatable. See "Plugin scanners" in DESIGN_AND_ROADMAP.md for the protocol. Plugins always run as the current user, never with --sudo elevation.
+  --plugin-timeout DURATION Timeout for each plugin scanner invocation. Defaults to 30s.
   --auto-safe=false         Disable high-confidence automatic confirmations.
   --fail-on-pending         Return an error if candidate or todo findings remain.
   --import-decisions PATH   Seed decisions from a previously exported decisions JSON before review.
@@ -419,6 +421,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
 	deep := fs.Bool("deep", false, "scan broader filesystem paths")
 	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
+	pluginTimeout := fs.Duration("plugin-timeout", 30*time.Second, "timeout for each plugin scanner invocation")
 	var includes multiFlag
 	var excludes multiFlag
 	var plugins multiFlag
@@ -439,7 +442,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins))...)
+	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins), *pluginTimeout)...)
 	report, err := reg.Scan(ctx, opts)
 	if err != nil {
 		return err
@@ -447,10 +450,10 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	return writeJSON(*out, report)
 }
 
-func pluginScanners(paths []string) []scanner.Scanner {
+func pluginScanners(paths []string, timeout time.Duration) []scanner.Scanner {
 	scanners := make([]scanner.Scanner, len(paths))
 	for i, path := range paths {
-		scanners[i] = scanner.PluginScanner{Path: path}
+		scanners[i] = scanner.PluginScanner{Path: path, Timeout: timeout}
 	}
 	return scanners
 }
@@ -472,6 +475,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain after capture")
 	importDecisions := fs.String("import-decisions", "", "seed decisions from a previously exported decisions JSON")
 	exportDecisions := fs.String("export-decisions", "", "write final decisions to a portable decisions JSON")
+	pluginTimeout := fs.Duration("plugin-timeout", 30*time.Second, "timeout for each plugin scanner invocation")
 	var includes multiFlag
 	var excludes multiFlag
 	var plugins multiFlag
@@ -493,7 +497,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins))...)
+	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins), *pluginTimeout)...)
 	report, err := reg.Scan(ctx, scanOpts)
 	if err != nil {
 		return err

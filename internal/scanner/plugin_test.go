@@ -3,8 +3,11 @@ package scanner
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
 )
@@ -60,6 +63,33 @@ func TestPluginScannerPassesRequestFields(t *testing.T) {
 	}
 	if len(got.Includes) != 1 || got.Includes[0] != "/opt" || len(got.Excludes) != 1 || got.Excludes[0] != "/tmp" {
 		t.Fatalf("unexpected includes/excludes: %+v", got)
+	}
+}
+
+func TestRunPluginProcessKillsWholeProcessGroupOnTimeout(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "slow-plugin.sh")
+	// Forks a subprocess (sleep) that inherits the stdout pipe before the
+	// top-level shell exits. If only the top-level process is killed on
+	// timeout, the orphaned sleep keeps the pipe open and Wait blocks
+	// until it exits on its own, defeating the timeout.
+	script := "#!/bin/sh\nsleep 2 &\nwait\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := runPluginProcess(ctx, pluginPath, PluginRequest{})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("runPluginProcess took %s to return after a 100ms timeout; the orphaned subprocess likely kept the output pipe open", elapsed)
 	}
 }
 

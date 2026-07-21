@@ -71,7 +71,7 @@ After capture, review `nix-config/reports/migration-checklist.md` for manual pac
 bin/linux-nixer scan --plugin ./my-scanner --out scan.json
 ```
 
-Plugins always run as the current user, never with `--sudo` elevation. See "Plugin scanners" in [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for the full protocol and a minimal example. A policy file's `plugins` list sets default plugin paths, merged with `--plugin` the same way as other policy list options.
+Plugins always run as the current user, never with `--sudo` elevation, and are bounded by a 30s timeout, overridable with `--plugin-timeout DURATION`. See "Plugin scanners" in [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for the full protocol and a minimal example. A policy file's `plugins` list sets default plugin paths, merged with `--plugin` the same way as other policy list options.
 
 Policy files make scan and review decisions repeatable:
 
