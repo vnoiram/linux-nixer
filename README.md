@@ -103,6 +103,14 @@ bin/linux-nixer review --scan scan-later.json --out reviewed-later.json --import
 
 Imported decisions win over policy `confirmKinds`/`excludeKinds` for the same finding — an explicit prior decision outranks a category default.
 
+Since a committed decisions file can outlive the policy it was made under, `validate --decisions decisions.json --policy policy.json` checks it for entries whose recorded decision no longer agrees with the current policy's kind vocabulary (stale — the policy probably changed since), or that can't be resolved to a kind at all (unresolvable — an unrecognized domain, or a malformed key):
+
+```sh
+bin/linux-nixer validate --decisions decisions.json --policy policy.json
+```
+
+These are always warnings, never errors — a stale or unresolvable entry still applies correctly (explicit decisions always win over policy rules), it's just worth reviewing.
+
 `summary --compare-decisions decisions.json` diffs the current scan's decisions against a previously exported snapshot, tracking migration progress across repeated scans of the same host: what's newly decided, what changed, what regressed back to pending, and what's no longer present (e.g. a package that was uninstalled):
 
 ```sh

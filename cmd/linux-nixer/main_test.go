@@ -289,6 +289,45 @@ func TestRunValidateFailsInvalidScanAndStrictUnknownField(t *testing.T) {
 	}
 }
 
+func TestRunValidateChecksDecisionsAgainstPolicy(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","confirmKinds":["service"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	decisionsJSON := `{"schemaVersion":"linux-nixer.decisions.v1","entries":[{"domain":"service","key":"systemd:legacy.service","decision":"excluded"}]}`
+	if err := os.WriteFile(decisionsPath, []byte(decisionsJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"validate", "--decisions", decisionsPath, "--policy", policyPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("stale decision warnings should not fail the command, got %v:\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `conflicts with current policy for kind "service"`) {
+		t.Fatalf("expected stale-decision warning, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunValidateDecisionsRequiresPolicy(t *testing.T) {
+	dir := t.TempDir()
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	if err := os.WriteFile(decisionsPath, []byte(`{"schemaVersion":"linux-nixer.decisions.v1","entries":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"validate", "--decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected --decisions without --policy to fail")
+	}
+	if !strings.Contains(err.Error(), "requires --policy") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func writePluginFixture(t *testing.T, path, itemsJSON string) {
 	t.Helper()
 	script := "#!/bin/sh\n" +

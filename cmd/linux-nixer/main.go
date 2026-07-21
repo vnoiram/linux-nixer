@@ -285,20 +285,26 @@ Flags:
 `
 
 const validateHelp = `linux-nixer validate
-Validate scan or reviewed scan JSON before using it for generation or CI gates.
+Validate scan or reviewed scan JSON before using it for generation or CI gates, or check a decisions JSON for consistency with a policy's kind vocabulary.
 
 Usage:
   linux-nixer validate --scan reviewed.json [--json] [--strict]
+  linux-nixer validate --decisions decisions.json --policy policy.json [--json]
 
 Examples:
   linux-nixer validate --scan reviewed.json
   linux-nixer validate --scan reviewed.json --json
   linux-nixer validate --scan reviewed.json --strict
+  linux-nixer validate --decisions decisions.json --policy policy.json
 
 Flags:
-  --scan PATH    Read scan JSON.
-  --json         Write machine-readable JSON validation result.
-  --strict       Reject unknown JSON fields in addition to semantic validation.
+  --scan PATH        Read scan JSON.
+  --decisions PATH   Check a decisions JSON (see --export-decisions) for stale or unresolvable entries against --policy. Combinable with --scan.
+  --policy PATH      Policy JSON to check --decisions against. Required together with --decisions.
+  --json             Write machine-readable JSON validation result.
+  --strict           Reject unknown JSON fields in addition to semantic validation. Applies to --scan only.
+
+The --decisions check compares each entry's kind (derived from its domain/key) against the policy's confirmKinds/excludeKinds/todoKinds/migrationNoteKinds and warns when the recorded decision disagrees with what the current policy would now produce — a sign the decision predates a later policy change. It also warns about entries with an unrecognized domain or a malformed key. Package, filesystem-finding, and stateful-data entries have no kind vocabulary to check against and are never flagged. These are warnings, not errors: a stale or unresolvable entry still works correctly when reapplied, since an explicit decision always wins over policy category rules.
 `
 
 const pluginCheckHelp = `linux-nixer plugin check
@@ -710,49 +716,107 @@ func runValidate(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input scan JSON")
+	decisionsPath := fs.String("decisions", "", "decisions JSON to check for consistency with --policy")
+	policyPath := fs.String("policy", "", "policy JSON to check --decisions against")
 	jsonOutput := fs.Bool("json", false, "write machine-readable JSON validation result")
 	strict := fs.Bool("strict", false, "reject unknown JSON fields")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *scanPath == "" {
-		return errors.New("validate requires --scan")
+	if *scanPath == "" && *decisionsPath == "" {
+		return errors.New("validate requires --scan or --decisions")
 	}
-	var report model.ScanReport
-	if *strict {
-		if err := readJSONStrict(*scanPath, &report); err != nil {
-			result := validate.Result{
-				OK:     false,
-				Errors: []validate.Issue{{Path: *scanPath, Message: err.Error()}},
-			}
-			if *jsonOutput {
-				enc := json.NewEncoder(stdout)
-				enc.SetIndent("", "  ")
-				if encodeErr := enc.Encode(result); encodeErr != nil {
-					return encodeErr
+	if *decisionsPath != "" && *policyPath == "" {
+		return errors.New("validate --decisions requires --policy")
+	}
+
+	var subjects []string
+	result := validate.Result{OK: true}
+	if *scanPath != "" {
+		subjects = append(subjects, "scan")
+		var report model.ScanReport
+		if *strict {
+			if err := readJSONStrict(*scanPath, &report); err != nil {
+				result := validate.Result{
+					OK:     false,
+					Errors: []validate.Issue{{Path: *scanPath, Message: err.Error()}},
 				}
-			} else {
-				fmt.Fprint(stdout, validate.FormatText(result))
+				if err := writeValidateResult(stdout, "scan", result, *jsonOutput); err != nil {
+					return err
+				}
+				return fmt.Errorf("validation failed with 1 error")
 			}
-			return fmt.Errorf("validation failed with 1 error")
-		}
-	} else if err := readJSON(*scanPath, &report); err != nil {
-		return err
-	}
-	result := validate.ScanReport(report)
-	if *jsonOutput {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(result); err != nil {
+		} else if err := readJSON(*scanPath, &report); err != nil {
 			return err
 		}
-	} else {
-		fmt.Fprint(stdout, validate.FormatText(result))
+		result = validate.ScanReport(report)
+	}
+
+	if *decisionsPath != "" {
+		subjects = append(subjects, "decisions")
+		set, err := loadDecisionSet(*decisionsPath)
+		if err != nil {
+			return err
+		}
+		p, err := policy.Load(*policyPath)
+		if err != nil {
+			return err
+		}
+		result = mergeValidateResults(result, policy.CheckDecisions(set, p))
+	}
+
+	if err := writeValidateResult(stdout, strings.Join(subjects, " and "), result, *jsonOutput); err != nil {
+		return err
 	}
 	if !result.OK {
 		return fmt.Errorf("validation failed with %d errors", len(result.Errors))
 	}
 	return nil
+}
+
+func writeValidateResult(stdout io.Writer, subject string, result validate.Result, jsonOutput bool) error {
+	if jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+	fmt.Fprint(stdout, formatValidateText(subject, result))
+	return nil
+}
+
+// formatValidateText mirrors validate.FormatText's layout, parameterized by
+// what was actually checked ("scan", "decisions", or "scan and decisions")
+// instead of FormatText's fixed "scan" wording, since validate can now run
+// independently of any scan file.
+func formatValidateText(subject string, result validate.Result) string {
+	var b strings.Builder
+	if result.OK {
+		fmt.Fprintf(&b, "valid %s: checked %d findings\n", subject, result.Checked)
+	} else {
+		fmt.Fprintf(&b, "invalid %s: %d errors, checked %d findings\n", subject, len(result.Errors), result.Checked)
+	}
+	if len(result.Errors) > 0 {
+		b.WriteString("\nErrors:\n")
+		for _, issue := range result.Errors {
+			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
+	}
+	if len(result.Warnings) > 0 {
+		b.WriteString("\nWarnings:\n")
+		for _, issue := range result.Warnings {
+			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
+	}
+	return b.String()
+}
+
+func mergeValidateResults(a, b validate.Result) validate.Result {
+	return validate.Result{
+		OK:       a.OK && b.OK,
+		Checked:  a.Checked + b.Checked,
+		Errors:   append(append([]validate.Issue{}, a.Errors...), b.Errors...),
+		Warnings: append(append([]validate.Issue{}, a.Warnings...), b.Warnings...),
+	}
 }
 
 func runPlugin(ctx context.Context, args []string, stdout io.Writer) error {
