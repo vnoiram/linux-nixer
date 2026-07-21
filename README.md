@@ -12,7 +12,7 @@ See [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for design assumptions, safet
 
 This is an early implementation scaffold. It includes:
 
-- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`/`fetch`/`import`/`list`, `policy init`, `plugin check`
+- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`/`fetch`/`import`/`list`/`check`, `policy init`, `plugin check`
 - Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, secrets, system config files, DevOps/project config, user shell settings, desktop settings, hardware/peripheral settings, and filesystem findings
 - Dedicated package ecosystem scanners and safe detail summaries for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
@@ -34,7 +34,7 @@ This is an early implementation scaffold. It includes:
 - Read-only `scan --sudo` fallback for selected host files
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
-- A CI job installs a real Nix toolchain and validates a generated flake against it (`nix flake check`, a real VM derivation build) on every push/PR
+- A CI job installs a real Nix toolchain and validates a generated flake against it (`nix flake check`, a real VM derivation build, and a real VM boot attempt) on every push/PR
 - `scan`/`capture --plugin PATH` to run external scanner plugins (any executable, JSON on stdin/stdout) alongside the built-in scanners
 - `baseline fetch --offline` uses a pre-built manifest bundled into the binary for common releases, no Docker/Podman or network access needed
 
