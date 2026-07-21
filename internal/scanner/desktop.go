@@ -167,7 +167,18 @@ func scanDconf(ctx context.Context, opts Options, report *model.ScanReport) {
 	if text == "" {
 		return
 	}
-	report.Desktop.Dconf = strings.Split(text, "\n")
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		// dconf covers the whole GSettings database for this user, which in
+		// practice can include app-stored tokens/credentials (e.g. some
+		// sync/backup tools and GNOME Online Accounts caches keep secrets
+		// here) — redact secret-like lines the same way other content-based
+		// scanners in this package do, instead of embedding raw values.
+		if isSecretReference(line) {
+			lines[i] = "[secret-like line redacted]"
+		}
+	}
+	report.Desktop.Dconf = lines
 }
 
 func desktopConfigName(path string) string {

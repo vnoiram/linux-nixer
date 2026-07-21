@@ -1402,6 +1402,33 @@ func TestDesktopScannerDconfUsesRunnerOnHostRoot(t *testing.T) {
 	}
 }
 
+func TestDesktopScannerRedactsSecretLikeDconfLines(t *testing.T) {
+	report := &model.ScanReport{}
+	err := (DesktopScanner{}).Scan(context.Background(), Options{
+		Root: "/",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return []byte("[org/gnome/desktop/interface]\ncolor-scheme='prefer-dark'\n[some/sync/tool]\napi_token='raw-secret-value'\n"), nil
+		},
+	}, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range report.Desktop.Dconf {
+		if strings.Contains(line, "raw-secret-value") {
+			t.Fatalf("dconf dump leaked secret-like content: %+v", report.Desktop.Dconf)
+		}
+	}
+	var sawRedaction bool
+	for _, line := range report.Desktop.Dconf {
+		if line == "[secret-like line redacted]" {
+			sawRedaction = true
+		}
+	}
+	if !sawRedaction {
+		t.Fatalf("expected a redacted marker in place of the secret-like line: %+v", report.Desktop.Dconf)
+	}
+}
+
 func TestDesktopScannerDoesNotRunDconfForMountedRoot(t *testing.T) {
 	root := t.TempDir()
 	report := &model.ScanReport{}
