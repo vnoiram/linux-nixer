@@ -12,6 +12,17 @@ import (
 	"github.com/vnoiram/linux-nixer/internal/model"
 )
 
+// TestPluginRequestSchemaVersionIsStable pins the literal protocol version
+// string. Changing it is a breaking change for every existing plugin (see
+// DESIGN_AND_ROADMAP.md's "Compatibility policy" bullet under "Plugin
+// scanners") and must be a deliberate decision, not an accidental edit.
+func TestPluginRequestSchemaVersionIsStable(t *testing.T) {
+	const want = "linux-nixer.plugin-request.v1"
+	if PluginRequestSchemaVersion != want {
+		t.Fatalf("PluginRequestSchemaVersion changed to %q, want %q — this is a breaking change for every existing plugin unless deliberate", PluginRequestSchemaVersion, want)
+	}
+}
+
 func TestPluginScannerMergesAllDomains(t *testing.T) {
 	report := &model.ScanReport{
 		Packages: []model.Package{{Manager: "apt", Name: "curl"}},

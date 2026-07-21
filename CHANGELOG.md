@@ -41,6 +41,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `validate --decisions decisions.json --policy policy.json` checks a decisions file for consistency with a policy's kind vocabulary, warning about stale entries (recorded decision disagrees with what the current policy would now produce for that kind) or unresolvable ones (unrecognized domain, or a key with no recoverable kind).
 - CI job (`nix-verify`) installs a real Nix toolchain and runs `capture`/`doctor --vm` against it, validating that the generated flake/modules are real, buildable Nix — the first time any `nix`-touching functionality in this project has run against real `nix` rather than only being designed against it.
 - `baseline list` prints the curated catalog of distro/release pairs `baseline fetch` knows how to pull (`internal/baseline/catalog.go`); `baseline fetch` now validates `--distro`/`--release` against this catalog and rejects an unsupported combination with a clear message before attempting a `docker pull`, instead of building the image reference as a bare `distro:release` concatenation and failing opaquely inside the pull.
+- Documented a compatibility policy for the plugin JSON protocol in DESIGN_AND_ROADMAP.md (what's additive vs. what requires a new `schemaVersion`), plus regression tests pinning the `linux-nixer.plugin-request.v1`/`linux-nixer.scan.v1` version constants so a future change to either is a deliberate decision, not an accidental edit.
 
 ### Changed
 
