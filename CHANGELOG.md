@@ -35,6 +35,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `scan`/`capture --plugin PATH` runs an external executable as an extra scanner: a documented JSON protocol on stdin/stdout (reusing the existing `scan.json`/`reviewed.json` schema as the output contract) rather than dynamic Go plugin loading or a published Go module, so a plugin can be written in any language. Plugin-contributed `items`/`warnings` are merged; plugins always run as the current user, never with `--sudo` elevation, and are bounded by a 30s timeout. See "Plugin scanners" in `DESIGN_AND_ROADMAP.md`.
 - Policy files can set default `--plugin` paths via a `plugins` list field, merged with CLI `--plugin` flags the same way as `includePaths`/`excludePaths`, consistent with every other scan option already being policy-configurable.
 - `scan`/`capture --plugin-timeout DURATION` overrides the default 30s timeout for plugin scanner invocations.
+- `plugin check --plugin PATH` invokes a single plugin once with a synthetic request and validates its JSON output with the same structural checks `validate` runs on `scan.json`/`reviewed.json`, catching a broken plugin before a real `scan`/`capture`.
 
 ### Changed
 

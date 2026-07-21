@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vnoiram/linux-nixer/internal/baseline"
@@ -56,6 +57,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runBaseline(ctx, args[1:], stdin, stdout)
 	case "policy":
 		return runPolicy(args[1:], stdout)
+	case "plugin":
+		return runPlugin(ctx, args[1:], stdout)
 	case "version", "--version", "-v":
 		if len(args) > 1 && args[1] == "--full" {
 			fmt.Fprintf(stdout, "version=%s commit=%s built=%s\n", version, commit, date)
@@ -88,6 +91,7 @@ Usage:
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
+  linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer help <command>
   linux-nixer version [--full]`)
 }
@@ -132,6 +136,12 @@ func commandHelp(w io.Writer, topic []string) error {
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "policy "+topic[1])
+	case "plugin":
+		if len(topic) == 1 || topic[1] == "check" {
+			fmt.Fprint(w, pluginCheckHelp)
+			return nil
+		}
+		return fmt.Errorf("unknown help topic %q", "plugin "+topic[1])
 	default:
 		return fmt.Errorf("unknown help topic %q", topic[0])
 	}
@@ -289,6 +299,25 @@ Flags:
   --scan PATH    Read scan JSON.
   --json         Write machine-readable JSON validation result.
   --strict       Reject unknown JSON fields in addition to semantic validation.
+`
+
+const pluginCheckHelp = `linux-nixer plugin check
+Invoke a scanner plugin once with a synthetic request and validate its JSON output before pointing a real scan/capture at it.
+
+Usage:
+  linux-nixer plugin check --plugin PATH [--timeout 30s] [--json]
+
+Examples:
+  linux-nixer plugin check --plugin ./my-scanner
+  linux-nixer plugin check --plugin ./my-scanner --timeout 5s
+  linux-nixer plugin check --plugin ./my-scanner --json
+
+Flags:
+  --plugin PATH   Path to the plugin executable to check.
+  --timeout VALUE Timeout for the plugin invocation. Defaults to 30s.
+  --json          Write machine-readable JSON validation result.
+
+The plugin is run exactly once, the same way scan/capture would run it (see "Plugin scanners" in DESIGN_AND_ROADMAP.md), and its output is validated with the same structural checks as "linux-nixer validate".
 `
 
 const generateHelp = `linux-nixer generate
@@ -724,6 +753,88 @@ func runValidate(args []string, stdout io.Writer) error {
 		return fmt.Errorf("validation failed with %d errors", len(result.Errors))
 	}
 	return nil
+}
+
+func runPlugin(ctx context.Context, args []string, stdout io.Writer) error {
+	if len(args) == 1 && hasHelp(args) {
+		fmt.Fprint(stdout, pluginCheckHelp)
+		return nil
+	}
+	if len(args) == 0 || args[0] != "check" {
+		return errors.New("plugin supports only: plugin check")
+	}
+	return runPluginCheck(ctx, args[1:], stdout)
+}
+
+func runPluginCheck(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, pluginCheckHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("plugin check", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	pluginPath := fs.String("plugin", "", "path to the plugin executable to check")
+	timeout := fs.Duration("timeout", 30*time.Second, "timeout for the plugin invocation")
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON validation result")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pluginPath == "" {
+		return errors.New("plugin check requires --plugin")
+	}
+
+	report, err := scanner.CheckPlugin(ctx, *pluginPath, *timeout)
+	if err != nil {
+		result := validate.Result{
+			OK:     false,
+			Errors: []validate.Issue{{Path: *pluginPath, Message: err.Error()}},
+		}
+		if writeErr := writePluginCheckResult(stdout, *pluginPath, result, *jsonOutput); writeErr != nil {
+			return writeErr
+		}
+		return fmt.Errorf("plugin check failed: %v", err)
+	}
+
+	result := validate.ScanReport(report)
+	if err := writePluginCheckResult(stdout, *pluginPath, result, *jsonOutput); err != nil {
+		return err
+	}
+	if !result.OK {
+		return fmt.Errorf("plugin check failed with %d errors", len(result.Errors))
+	}
+	return nil
+}
+
+func writePluginCheckResult(stdout io.Writer, pluginPath string, result validate.Result, jsonOutput bool) error {
+	if jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
+	fmt.Fprint(stdout, formatPluginCheckText(pluginPath, result))
+	return nil
+}
+
+func formatPluginCheckText(pluginPath string, result validate.Result) string {
+	var b strings.Builder
+	if result.OK {
+		fmt.Fprintf(&b, "plugin OK: %s (checked %d findings)\n", pluginPath, result.Checked)
+	} else {
+		fmt.Fprintf(&b, "plugin check failed: %s (%d errors, checked %d findings)\n", pluginPath, len(result.Errors), result.Checked)
+	}
+	if len(result.Errors) > 0 {
+		b.WriteString("\nErrors:\n")
+		for _, issue := range result.Errors {
+			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
+	}
+	if len(result.Warnings) > 0 {
+		b.WriteString("\nWarnings:\n")
+		for _, issue := range result.Warnings {
+			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
+	}
+	return b.String()
 }
 
 func runGenerate(args []string, stdout io.Writer) error {

@@ -289,6 +289,78 @@ func TestRunValidateFailsInvalidScanAndStrictUnknownField(t *testing.T) {
 	}
 }
 
+func writePluginFixture(t *testing.T, path, itemsJSON string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"cat <<'EOF'\n" +
+		`{"schemaVersion":"linux-nixer.scan.v1","items":[` + itemsJSON + `]}` + "\n" +
+		"EOF\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunPluginCheckSucceedsForValidPlugin(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "good-plugin.sh")
+	writePluginFixture(t, pluginPath, `{"kind":"custom-finding","path":"/opt/thing","reason":"found by plugin"}`)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("expected success, got %v:\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "plugin OK") {
+		t.Fatalf("expected success text, got:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("expected success, got %v:\n%s", err, stdout.String())
+	}
+	var got struct {
+		OK      bool `json:"ok"`
+		Checked int  `json:"checked"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid plugin check json: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.Checked != 1 {
+		t.Fatalf("unexpected plugin check json: %+v", got)
+	}
+}
+
+func TestRunPluginCheckFailsForInvalidItem(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "bad-item-plugin.sh")
+	writePluginFixture(t, pluginPath, `{"path":"/opt/thing","reason":"missing kind"}`)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected failure for item missing kind")
+	}
+	if !strings.Contains(stdout.String(), "item kind is required") {
+		t.Fatalf("expected validate.ScanReport's item check to surface, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunPluginCheckFailsForBrokenProcess(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "missing-plugin.sh")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected failure for a nonexistent plugin executable")
+	}
+	if !strings.Contains(stdout.String(), "plugin check failed") {
+		t.Fatalf("expected process failure text, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunPolicyInitWritesParseablePolicy(t *testing.T) {
 	dir := t.TempDir()
 	policyPath := filepath.Join(dir, "linux-nixer-policy.json")

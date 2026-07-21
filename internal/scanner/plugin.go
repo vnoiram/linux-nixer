@@ -81,6 +81,21 @@ func (p PluginScanner) Scan(ctx context.Context, opts Options, report *model.Sca
 	return nil
 }
 
+// CheckPlugin invokes path once with a synthetic request (root "/", no
+// deep/sudo/includes/excludes) and returns its parsed report, without
+// merging into any real scan. It's the entry point for a standalone
+// protocol check (`plugin check`) that lets a plugin author validate their
+// executable before pointing a real `scan`/`capture` at it.
+func CheckPlugin(ctx context.Context, path string, timeout time.Duration) (model.ScanReport, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req := PluginRequest{SchemaVersion: PluginRequestSchemaVersion, Root: "/"}
+	return runPluginProcess(runCtx, path, req)
+}
+
 func mergePluginReport(dst *model.ScanReport, src model.ScanReport) {
 	dst.Items = append(dst.Items, src.Items...)
 	dst.Warnings = append(dst.Warnings, src.Warnings...)

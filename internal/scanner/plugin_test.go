@@ -93,6 +93,49 @@ func TestRunPluginProcessKillsWholeProcessGroupOnTimeout(t *testing.T) {
 	}
 }
 
+func TestCheckPluginReturnsReportOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "check-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"cat <<'EOF'\n" +
+		`{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","path":"/opt/thing","reason":"found by plugin"}]}` + "\n" +
+		"EOF\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := CheckPlugin(context.Background(), pluginPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Items) != 1 || report.Items[0].Kind != "custom-finding" {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+}
+
+func TestCheckPluginRespectsTimeout(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "slow-check-plugin.sh")
+	// Forks a subprocess before exiting, same shape as the fixture that
+	// exposed the process-group timeout bug for the main plugin path.
+	script := "#!/bin/sh\nsleep 2 &\nwait\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	_, err := CheckPlugin(context.Background(), pluginPath, 100*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("CheckPlugin took %s to return after a 100ms timeout", elapsed)
+	}
+}
+
 func TestPluginScannerWrapsRunnerError(t *testing.T) {
 	p := PluginScanner{
 		Path: "/plugins/broken",
