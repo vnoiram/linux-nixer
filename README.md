@@ -65,7 +65,7 @@ bin/linux-nixer capture --root /path/to/rootfs --include /random-seed-42 --out l
 `capture` writes `scan.json`, `reviewed.json`, `summary.md`, and `nix-config/` under the output directory. It applies the same conservative auto-safe review as `review --auto-safe`; use the split `scan` and `review --interactive` flow when you want to approve findings manually before generating Nix.
 After capture, review `nix-config/reports/migration-checklist.md` for manual package, secret, stateful data, and configuration migration steps.
 
-`--plugin PATH` (repeatable, on `scan`/`capture`) runs an external executable as an extra scanner — any language, communicating over a small JSON protocol (request on stdin, a `model.ScanReport`-shaped result with `items`/`warnings` on stdout):
+`--plugin PATH` (repeatable, on `scan`/`capture`) runs an external executable as an extra scanner — any language, communicating over a small JSON protocol (request on stdin, a `model.ScanReport`-shaped result on stdout, with `packages`/`services`/`containers`/`items`/`warnings` merged into the real scan):
 
 ```sh
 bin/linux-nixer scan --plugin ./my-scanner --out scan.json

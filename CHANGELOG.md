@@ -36,6 +36,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Policy files can set default `--plugin` paths via a `plugins` list field, merged with CLI `--plugin` flags the same way as `includePaths`/`excludePaths`, consistent with every other scan option already being policy-configurable.
 - `scan`/`capture --plugin-timeout DURATION` overrides the default 30s timeout for plugin scanner invocations.
 - `plugin check --plugin PATH` invokes a single plugin once with a synthetic request and validates its JSON output with the same structural checks `validate` runs on `scan.json`/`reviewed.json`, catching a broken plugin before a real `scan`/`capture`.
+- Plugin scanners now also merge `packages`/`services`/`containers` from a plugin's output, in addition to `items`/`warnings`; these flow through review and Nix generation exactly like built-in scanner output, so a plugin that knows this tool's per-domain conventions can contribute directly instead of only via the general-purpose `items` type.
 
 ### Changed
 

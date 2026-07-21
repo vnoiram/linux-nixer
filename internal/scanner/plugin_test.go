@@ -12,7 +12,7 @@ import (
 	"github.com/vnoiram/linux-nixer/internal/model"
 )
 
-func TestPluginScannerMergesItemsAndWarnings(t *testing.T) {
+func TestPluginScannerMergesAllDomains(t *testing.T) {
 	report := &model.ScanReport{
 		Packages: []model.Package{{Manager: "apt", Name: "curl"}},
 	}
@@ -20,9 +20,11 @@ func TestPluginScannerMergesItemsAndWarnings(t *testing.T) {
 		Path: "/usr/local/bin/my-plugin",
 		Runner: func(ctx context.Context, path string, req PluginRequest) (model.ScanReport, error) {
 			return model.ScanReport{
-				Packages: []model.Package{{Manager: "apt", Name: "should-not-merge"}},
-				Items:    []model.Item{{Kind: "custom-finding", Path: "/opt/plugin-thing", Reason: "found by plugin"}},
-				Warnings: []model.Warning{{Source: "my-plugin", Message: "heads up"}},
+				Packages:   []model.Package{{Manager: "apt", Name: "extra-package"}},
+				Services:   []model.Service{{Manager: "systemd", Name: "extra.service"}},
+				Containers: []model.Container{{Runtime: "docker", Name: "extra-container"}},
+				Items:      []model.Item{{Kind: "custom-finding", Path: "/opt/plugin-thing", Reason: "found by plugin"}},
+				Warnings:   []model.Warning{{Source: "my-plugin", Message: "heads up"}},
 			}, nil
 		},
 	}
@@ -31,8 +33,14 @@ func TestPluginScannerMergesItemsAndWarnings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(report.Packages) != 1 {
-		t.Fatalf("packages should not be merged from plugin output: %+v", report.Packages)
+	if len(report.Packages) != 2 || report.Packages[1].Name != "extra-package" {
+		t.Fatalf("expected plugin package to be merged: %+v", report.Packages)
+	}
+	if len(report.Services) != 1 || report.Services[0].Name != "extra.service" {
+		t.Fatalf("expected plugin service to be merged: %+v", report.Services)
+	}
+	if len(report.Containers) != 1 || report.Containers[0].Name != "extra-container" {
+		t.Fatalf("expected plugin container to be merged: %+v", report.Containers)
 	}
 	if len(report.Items) != 1 || report.Items[0].Kind != "custom-finding" {
 		t.Fatalf("expected plugin item to be merged: %+v", report.Items)

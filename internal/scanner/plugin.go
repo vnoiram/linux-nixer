@@ -33,10 +33,12 @@ type PluginRunner func(ctx context.Context, path string, req PluginRequest) (mod
 
 // PluginScanner runs an external executable as a scanner. The plugin
 // receives a PluginRequest as JSON on stdin and must write a
-// model.ScanReport as JSON to stdout; only Items and Warnings are merged
-// into the main report (see mergePluginReport) — a plugin can express
+// model.ScanReport as JSON to stdout; Packages, Services, Containers,
+// Items, and Warnings are merged into the main report (see
+// mergePluginReport) — every other field is ignored. A plugin can express
 // arbitrary findings via model.Item without needing to know this tool's
-// per-domain Nix-mapping/decision conventions for packages, services, etc.
+// per-domain Nix-mapping/decision conventions, or contribute directly to
+// Packages/Services/Containers if it does.
 //
 // Plugins always run as the current user with no sudo elevation,
 // regardless of --sudo — they are arbitrary code the user explicitly
@@ -97,6 +99,9 @@ func CheckPlugin(ctx context.Context, path string, timeout time.Duration) (model
 }
 
 func mergePluginReport(dst *model.ScanReport, src model.ScanReport) {
+	dst.Packages = append(dst.Packages, src.Packages...)
+	dst.Services = append(dst.Services, src.Services...)
+	dst.Containers = append(dst.Containers, src.Containers...)
 	dst.Items = append(dst.Items, src.Items...)
 	dst.Warnings = append(dst.Warnings, src.Warnings...)
 }
