@@ -166,6 +166,8 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Let policy files specify default `--plugin` paths, consistent with every other scan option (`root`, `sudo`, `deep`, `baseline`, `includes`, `excludes`) already being policy-configurable.
 - Add a `--plugin-timeout` flag to override `PluginScanner`'s default 30s timeout per invocation.
 - Add a plugin protocol validation command that invokes a single plugin with a synthetic request and checks its JSON output against the schema, to catch a broken plugin before a real scan.
+- Add a small curated baseline catalog (distro/release → verified image reference, in the same conservative-table spirit as `internal/mapping/mapping.go`) plus a `baseline list` command/flag, and have `baseline fetch` validate `--distro`/`--release` against it before attempting a pull instead of failing opaquely inside `docker pull` (currently `internal/baseline/fetch.go` builds the image reference as a bare `distro:release` concatenation with no validation).
+- Document a compatibility policy for the plugin JSON protocol (what counts as an additive change a plugin may safely ignore vs. a breaking change requiring a new `schemaVersion`) and add a regression test guarding the existing `linux-nixer.plugin-request.v1`/`linux-nixer.scan.v1` constants — the protocol has already grown once compatibly (adding `packages`/`services`/`containers` merging) without this being written down anywhere.
 
 ### Mid term
 
@@ -177,6 +179,9 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Extend the plugin protocol to merge `Packages`/`Services`/`Containers` in addition to `Items`/`Warnings`, so plugins can contribute richer, per-domain findings.
 - Extend `reports/migration-annotations.nix` to cover packages and users, not just containers/systemd services/cron jobs.
 - Add a consistency check between `decisions.json` and the current policy's kind vocabulary, warning about stale or unresolvable decision entries.
+- Extend `reports/migration-annotations.nix` to also explain excluded/todo/migration-note findings, not just confirmed ones, so the one structured trace file answers "why isn't this in Nix" for everything, not only "why is this in Nix."
+- Bundle small pre-built baseline manifests for a handful of common releases (e.g. ubuntu 22.04/24.04, debian 11/12) as release artifacts or a `baselines/catalog/` directory, built on top of the near-term baseline catalog and `baseline import`'s existing tar-based path, so the fully offline case doesn't require separately obtaining a rootfs tar.
+- Investigate `/dev/kvm` availability on larger GitHub-hosted runners (or a self-hosted runner) to finally exercise `doctor --boot` in the `nix-verify` CI job; if no viable free option exists, document that conclusion explicitly instead of leaving the gap silently unrevisited.
 
 ### Long term
 
@@ -187,6 +192,8 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Add migration progress tracking across repeated scans of the same machine.
 - Strengthen `doctor --boot`'s VM-boot detection beyond the current timeout-as-success heuristic.
 - Add a CI job with a real Nix installation to verify `nix`-touching functionality (`doctor --vm`/`--boot`, `scripts/release-check.sh`, the generated flake/modules) that has so far only ever been designed, never executed against real `nix`.
+- Consider incremental/streaming plugin output for scans too large to buffer and print within the (overridable) timeout window, now that the protocol carries richer per-domain data than the original items/warnings-only design.
+- Consider signed/verified baseline manifests once a curated baseline catalog exists, so a fetched or imported baseline can't be silently tampered with between fetch and later diff use.
 
 ## Non-goals for now
 
