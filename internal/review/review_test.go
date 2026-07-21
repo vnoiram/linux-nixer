@@ -245,11 +245,14 @@ func TestInteractiveShowsSafeContextNotes(t *testing.T) {
 		"review: dirty working tree",
 		"detail: build-hints=submodules,flake.nix",
 		"generates: docker runtime enable when confirmed",
+		"generates: container definition (image, ports, volumes) when confirmed",
 		"detail: ports=8080:80",
+		"review: 1 port(s) not safely convertible; excluded from generated Nix",
 		"detail: env-keys=1",
-		"generates: systemd service options when confirmed and safe",
+		"review: environment values require manual entry",
+		"review: exec start looks secret-like; service will not generate",
 		"detail: exec=/opt/app --token=<redacted>",
-		"review: environment files require manual migration",
+		"detail: environment-files=1",
 		"detail: store=password-store",
 		"detail: token=token=<redacted>",
 		"review: manual migration recommended",
@@ -260,6 +263,51 @@ func TestInteractiveShowsSafeContextNotes(t *testing.T) {
 	}
 	if strings.Contains(got, "super-secret") {
 		t.Fatalf("interactive output leaked secret:\n%s", got)
+	}
+}
+
+func TestInteractiveContainerNotesFlagMissingNameOrImage(t *testing.T) {
+	report := model.ScanReport{
+		Containers: []model.Container{
+			{Runtime: "docker", Name: "web"},
+		},
+	}
+	in := strings.NewReader("s\n")
+	var out bytes.Buffer
+
+	Interactive(in, &out, report, Options{})
+	got := out.String()
+
+	if !strings.Contains(got, "review: missing name or image; container definition will not be generated") {
+		t.Fatalf("interactive output missing missing-image note:\n%s", got)
+	}
+	if strings.Contains(got, "generates: container definition") {
+		t.Fatalf("interactive output should not claim container definition generation:\n%s", got)
+	}
+}
+
+func TestInteractiveServiceNotesReflectActualGenerationOutcome(t *testing.T) {
+	report := model.ScanReport{
+		Services: []model.Service{
+			{Manager: "systemd", Name: "safe.service", ExecStart: "/opt/app/bin/app"},
+			{Manager: "systemd", Name: "missing-exec.service"},
+			{Manager: "systemd", Name: "backup.timer", Schedule: "15 2 * * *"},
+		},
+	}
+	in := strings.NewReader("s\ns\ns\n")
+	var out bytes.Buffer
+
+	Interactive(in, &out, report, Options{})
+	got := out.String()
+
+	for _, want := range []string{
+		"generates: systemd service options when confirmed",
+		"review: missing exec start; service will not generate",
+		"review: timer schedule requires manual migration; will not generate",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("interactive output missing %q:\n%s", want, got)
+		}
 	}
 }
 

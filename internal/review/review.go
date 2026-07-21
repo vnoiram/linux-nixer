@@ -339,26 +339,56 @@ func containerNotes(item model.Container) []string {
 	case "compose":
 		notes = append(notes, "review: compose file requires manual service/container translation")
 	}
+	if item.Runtime == "docker" || item.Runtime == "podman" {
+		if item.Name != "" && item.Image != "" {
+			notes = append(notes, "generates: container definition (image, ports, volumes) when confirmed")
+		} else {
+			notes = append(notes, "review: missing name or image; container definition will not be generated")
+		}
+	}
 	if len(item.Ports) > 0 {
 		notes = append(notes, "detail: ports="+strings.Join(item.Ports, ","))
+		if unsafe := countUnsafe(item.Ports, containerPortSafe); unsafe > 0 {
+			notes = append(notes, fmt.Sprintf("review: %d port(s) not safely convertible; excluded from generated Nix", unsafe))
+		}
 	}
 	if len(item.Mounts) > 0 {
 		notes = append(notes, "detail: mounts="+strings.Join(item.Mounts, ","))
+		if unsafe := countUnsafe(item.Mounts, containerMountSafe); unsafe > 0 {
+			notes = append(notes, fmt.Sprintf("review: %d mount(s) not safely convertible; excluded from generated Nix", unsafe))
+		}
 	}
 	if len(item.Env) > 0 {
 		notes = append(notes, fmt.Sprintf("detail: env-keys=%d", len(item.Env)))
+		notes = append(notes, "review: environment values require manual entry")
 	}
-	return limitNotes(notes, 6)
+	return limitNotes(notes, 8)
+}
+
+func countUnsafe(values []string, safe func(string) bool) int {
+	count := 0
+	for _, value := range values {
+		if !safe(value) {
+			count++
+		}
+	}
+	return count
+}
+
+func containerPortSafe(port string) bool {
+	host, containerPort, ok := strings.Cut(port, "->")
+	return ok && host != "" && containerPort != ""
+}
+
+func containerMountSafe(mount string) bool {
+	parts := strings.SplitN(mount, ":", 3)
+	return len(parts) == 3 && parts[1] != "" && parts[2] != ""
 }
 
 func serviceNotes(item model.Service) []string {
 	var notes []string
 	if item.Manager == "systemd" {
-		if strings.HasSuffix(item.Name, ".timer") {
-			notes = append(notes, "generates: systemd timer options when confirmed and safe")
-		} else {
-			notes = append(notes, "generates: systemd service options when confirmed and safe")
-		}
+		notes = append(notes, serviceGenerationNote(item))
 	}
 	if item.User != "" {
 		notes = append(notes, "detail: user="+item.User)
@@ -373,9 +403,28 @@ func serviceNotes(item model.Service) []string {
 		notes = append(notes, "detail: exec="+redactSecretLikeText(item.ExecStart))
 	}
 	if len(item.EnvironmentFiles) > 0 {
-		notes = append(notes, "review: environment files require manual migration")
+		notes = append(notes, fmt.Sprintf("detail: environment-files=%d", len(item.EnvironmentFiles)))
 	}
 	return limitNotes(notes, 6)
+}
+
+func serviceGenerationNote(item model.Service) string {
+	if strings.HasSuffix(item.Name, ".timer") {
+		if strings.HasPrefix(strings.TrimSpace(item.Schedule), "OnCalendar=") {
+			return "generates: systemd timer options when confirmed"
+		}
+		return "review: timer schedule requires manual migration; will not generate"
+	}
+	switch {
+	case item.ExecStart == "":
+		return "review: missing exec start; service will not generate"
+	case secretLikeText(item.ExecStart):
+		return "review: exec start looks secret-like; service will not generate"
+	case len(item.EnvironmentFiles) > 0:
+		return "review: environment files require manual migration; service will not generate"
+	default:
+		return "generates: systemd service options when confirmed"
+	}
 }
 
 func fileFindingNotes(item model.FileFinding, protected bool) []string {

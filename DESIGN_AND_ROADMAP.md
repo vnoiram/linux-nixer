@@ -39,6 +39,7 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
 - Review and policy:
   - Non-interactive rules can confirm, exclude, mark TODO, or mark migration notes.
   - Interactive review shows safe context notes, details, Nix mapping impact, and protected-finding reasons, with per-section progress counts, a skip-rest-of-section command, and an optional pending-only filter that hides findings already resolved by policy or safety rules.
+  - Container and systemd service notes reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts), not a blanket "generates when safe" claim, so the safe/unsafe outcome is visible before the decision is made.
 - Rendering:
   - Generated projects include flake, host config, Home Manager config, service/container/filesystem modules, reports, and migration checklist.
   - Rendering is conservative and mostly emits confirmed packages, safe user options, safe shell/home options, container runtime enables, and limited systemd service/timer options.
