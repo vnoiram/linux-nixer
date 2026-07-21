@@ -153,8 +153,8 @@ func addSecretFinding(opts Options, report *model.ScanReport, path, reason strin
 	if strings.HasSuffix(display, ".pub") {
 		return
 	}
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
+	info, ok := safeStat(opts.Root, path)
+	if !ok || !info.Mode().IsRegular() {
 		return
 	}
 	finding := model.FileFinding{

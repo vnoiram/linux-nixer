@@ -36,7 +36,7 @@ func (DevOpsConfigScanner) Scan(ctx context.Context, opts Options, report *model
 			seen[path] = true
 			display := displayPath(opts.Root, path)
 			decision := model.DecisionMigrationNote
-			details := devOpsProviderDetails(display, readLocalDevOpsFile(path))
+			details := devOpsProviderDetails(display, readLocalDevOpsFile(opts.Root, path))
 			_, hasSecretRefs := details["secret-refs"]
 			secretRisk := hasSecretRefs
 			if strings.Contains(display, ".aws/config") {
@@ -68,7 +68,7 @@ func scanCICDConfigs(opts Options, report *model.ScanReport, seen map[string]boo
 		addCICDItem(opts, report, seen, path, cicdWorkflowReason(displayPath(opts.Root, path)))
 	}
 	for _, path := range findCICDScriptFiles(opts.Root) {
-		addCICDItemWithDetails(opts, report, seen, path, "deploy or release script", cicdAutomationDetails(path, readLocalDevOpsFile(path)))
+		addCICDItemWithDetails(opts, report, seen, path, "deploy or release script", cicdAutomationDetails(path, readLocalDevOpsFile(opts.Root, path)))
 	}
 	for _, path := range recursiveGlob(opts.Root,
 		"/home/*/**/Makefile",
@@ -90,7 +90,7 @@ func scanCICDConfigs(opts Options, report *model.ScanReport, seen map[string]boo
 		"/opt/**/Taskfile.yml",
 		"/opt/**/Taskfile.yaml",
 	) {
-		details := cicdAutomationDetails(path, readLocalDevOpsFile(path))
+		details := cicdAutomationDetails(path, readLocalDevOpsFile(opts.Root, path))
 		if details == nil {
 			continue
 		}
@@ -151,7 +151,7 @@ func findDevOpsFiles(root string, match func(string) bool) []string {
 }
 
 func addCICDItem(opts Options, report *model.ScanReport, seen map[string]bool, path, reason string) {
-	addCICDItemWithDetails(opts, report, seen, path, reason, cicdConfigDetails(path, readLocalDevOpsFile(path)))
+	addCICDItemWithDetails(opts, report, seen, path, reason, cicdConfigDetails(path, readLocalDevOpsFile(opts.Root, path)))
 }
 
 func addCICDItemWithDetails(opts Options, report *model.ScanReport, seen map[string]bool, path, reason string, details map[string]string) {
@@ -169,9 +169,9 @@ func addCICDItemWithDetails(opts Options, report *model.ScanReport, seen map[str
 	})
 }
 
-func readLocalDevOpsFile(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
+func readLocalDevOpsFile(root, path string) string {
+	b, ok := safeReadFile(root, path)
+	if !ok {
 		return ""
 	}
 	return string(b)

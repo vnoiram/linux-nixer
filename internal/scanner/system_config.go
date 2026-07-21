@@ -98,7 +98,7 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 				decision = model.DecisionMigrationNote
 				reason = "network connection profile may contain credentials"
 			}
-			details := systemConfigDetails(display, readLocalFile(path))
+			details := systemConfigDetails(display, readLocalFile(opts.Root, path))
 			report.Items = append(report.Items, model.Item{
 				Kind:     "os-config",
 				Name:     filepath.Base(path),
@@ -119,9 +119,9 @@ func readSystemConfigDetails(ctx context.Context, opts Options, report *model.Sc
 	return systemConfigDetails(displayPath, string(b))
 }
 
-func readLocalFile(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
+func readLocalFile(root, path string) string {
+	b, ok := safeReadFile(root, path)
+	if !ok {
 		return ""
 	}
 	return string(b)

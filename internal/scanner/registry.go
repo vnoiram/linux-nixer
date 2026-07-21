@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -121,8 +120,8 @@ func readText(ctx context.Context, opts Options, report *model.ScanReport, sourc
 }
 
 func exists(root, path string) bool {
-	_, err := os.Stat(rootPath(root, path))
-	return err == nil
+	_, ok := safeStat(root, rootPath(root, path))
+	return ok
 }
 
 func existsWithSudo(ctx context.Context, opts Options, report *model.ScanReport, source, path string) bool {
@@ -144,10 +143,11 @@ func existsWithSudo(ctx context.Context, opts Options, report *model.ScanReport,
 }
 
 func readFile(ctx context.Context, opts Options, report *model.ScanReport, source, path string) ([]byte, error) {
-	b, err := os.ReadFile(rootPath(opts.Root, path))
-	if err == nil {
+	b, ok := safeReadFile(opts.Root, rootPath(opts.Root, path))
+	if ok {
 		return b, nil
 	}
+	err := fmt.Errorf("%s: not found, or resolves outside the scan root", path)
 	if !canUseSudo(opts) {
 		return nil, err
 	}

@@ -3,7 +3,6 @@ package scanner
 import (
 	"bufio"
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -92,7 +91,7 @@ func addUserConfigItem(opts Options, report *model.ScanReport, path, kind, reaso
 }
 
 func addUserConfigItemWithDecision(opts Options, report *model.ScanReport, path, kind, reason string, decision model.Decision) {
-	if info, err := os.Stat(path); err != nil {
+	if info, ok := safeStat(opts.Root, path); !ok {
 		return
 	} else if info.IsDir() && kind != "shell-plugin" && kind != "credential-store" {
 		return
@@ -104,7 +103,7 @@ func addUserConfigItemWithDecision(opts Options, report *model.ScanReport, path,
 		Path:     display,
 		Decision: decision,
 		Reason:   reason,
-		Details:  userConfigDetails(display, readLocalFile(path)),
+		Details:  userConfigDetails(display, readLocalFile(opts.Root, path)),
 	})
 }
 

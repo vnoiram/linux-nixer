@@ -3,7 +3,6 @@ package scanner
 import (
 	"bufio"
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -27,7 +26,7 @@ func (BackupConfigScanner) Scan(ctx context.Context, opts Options, report *model
 func scanBackupConfigFiles(opts Options, report *model.ScanReport, seen map[string]bool) {
 	for _, path := range findBackupFiles(opts.Root) {
 		display := displayPath(opts.Root, path)
-		addBackupItem(opts, report, seen, path, backupTool(display), backupReason(display), backupDetails(display, readLocalBackupFile(path)))
+		addBackupItem(opts, report, seen, path, backupTool(display), backupReason(display), backupDetails(display, readLocalBackupFile(opts.Root, path)))
 	}
 }
 
@@ -40,7 +39,7 @@ func scanBackupJobs(opts Options, report *model.ScanReport, seen map[string]bool
 		"/etc/cron.d/*",
 		"/var/spool/cron/crontabs/*",
 	) {
-		content := readLocalBackupFile(path)
+		content := readLocalBackupFile(opts.Root, path)
 		display := displayPath(opts.Root, path)
 		if !mentionsBackupTool(display + "\n" + content) {
 			continue
@@ -68,8 +67,8 @@ func findBackupFiles(root string) []string {
 		"/var/lib/syncthing/*",
 	} {
 		for _, path := range glob(root, pattern) {
-			info, err := os.Stat(path)
-			if err != nil || info.IsDir() {
+			info, ok := safeStat(root, path)
+			if !ok || info.IsDir() {
 				continue
 			}
 			if isBackupConfigPath(displayPath(root, path)) {
@@ -99,9 +98,9 @@ func addBackupItem(opts Options, report *model.ScanReport, seen map[string]bool,
 	})
 }
 
-func readLocalBackupFile(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
+func readLocalBackupFile(root, path string) string {
+	b, ok := safeReadFile(root, path)
+	if !ok {
 		return ""
 	}
 	return string(b)
