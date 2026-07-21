@@ -100,7 +100,7 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer scan",
 				"Examples:",
 				"--baseline ID",
-				"Policy include/exclude lists are merged",
+				"Policy include/exclude/plugin lists are merged",
 			},
 		},
 		{
@@ -492,6 +492,49 @@ func TestRunScanInvokesPluginScanner(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected plugin-contributed item in scan output: %+v", got.Items)
+	}
+}
+
+func TestRunScanAppliesPolicyPluginPaths(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "policy-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"cat <<'EOF'\n" +
+		`{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"plugin-finding","name":"thing","path":"/opt/policy-plugin-thing","reason":"found by policy plugin"}]}` + "\n" +
+		"EOF\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	policyPath := filepath.Join(dir, "policy.json")
+	policyJSON := `{"schemaVersion":"linux-nixer.policy.v1","plugins":["` + pluginPath + `"]}`
+	if err := os.WriteFile(policyPath, []byte(policyJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := filepath.Join(dir, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "scan.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--policy", policyPath, "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	found := false
+	for _, item := range got.Items {
+		if item.Kind == "plugin-finding" && item.Path == "/opt/policy-plugin-thing" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected policy-configured plugin item in scan output: %+v", got.Items)
 	}
 }
 

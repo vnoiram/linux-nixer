@@ -33,6 +33,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `reports/migration-annotations.nix`: a structured, standalone Nix attribute set tracing every confirmed container/systemd service/cron job to the Nix option it renders as, or why not — not imported into the NixOS configuration, purely a queryable trace (`nix eval --file reports/migration-annotations.nix`).
 - `baseline import --tar <path>` builds a baseline manifest from an already-downloaded flat rootfs tar (an official distro base-rootfs tarball, or a carried-over `docker export` tar), for fully offline use with neither a container backend nor network access; auto-decompresses gzip and supports `--tar -` for stdin.
 - `scan`/`capture --plugin PATH` runs an external executable as an extra scanner: a documented JSON protocol on stdin/stdout (reusing the existing `scan.json`/`reviewed.json` schema as the output contract) rather than dynamic Go plugin loading or a published Go module, so a plugin can be written in any language. Plugin-contributed `items`/`warnings` are merged; plugins always run as the current user, never with `--sudo` elevation, and are bounded by a 30s timeout. See "Plugin scanners" in `DESIGN_AND_ROADMAP.md`.
+- Policy files can set default `--plugin` paths via a `plugins` list field, merged with CLI `--plugin` flags the same way as `includePaths`/`excludePaths`, consistent with every other scan option already being policy-configurable.
 
 ### Changed
 

@@ -171,7 +171,7 @@ Flags:
   --plugin PATH    Run an external scanner plugin executable. Repeatable. See "Plugin scanners" in DESIGN_AND_ROADMAP.md for the protocol. Plugins always run as the current user, never with --sudo elevation.
 
 Policy:
-  Policy include/exclude lists are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
+  Policy include/exclude/plugin lists are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
 `
 
 const captureHelp = `linux-nixer capture
@@ -439,7 +439,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	reg := scanner.DefaultRegistry(pluginScanners(plugins)...)
+	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins))...)
 	report, err := reg.Scan(ctx, opts)
 	if err != nil {
 		return err
@@ -493,7 +493,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 
-	reg := scanner.DefaultRegistry(pluginScanners(plugins)...)
+	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins))...)
 	report, err := reg.Scan(ctx, scanOpts)
 	if err != nil {
 		return err

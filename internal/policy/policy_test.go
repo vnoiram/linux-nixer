@@ -58,6 +58,7 @@ func TestLoadRejectsInvalidPolicy(t *testing.T) {
 	cases := map[string]string{
 		"schema.json": `{"schemaVersion":"linux-nixer.policy.v0"}`,
 		"empty.json":  `{"schemaVersion":"linux-nixer.policy.v1","confirmKinds":[""]}`,
+		"plugin.json": `{"schemaVersion":"linux-nixer.policy.v1","plugins":[""]}`,
 		"type.json":   `{"schemaVersion":"linux-nixer.policy.v1","deep":"yes"}`,
 	}
 	for name, content := range cases {

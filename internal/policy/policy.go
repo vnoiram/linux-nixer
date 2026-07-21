@@ -32,6 +32,7 @@ type Policy struct {
 	Deep                *bool    `json:"deep,omitempty"`
 	Sudo                *bool    `json:"sudo,omitempty"`
 	Baseline            string   `json:"baseline,omitempty"`
+	Plugins             []string `json:"plugins,omitempty"`
 }
 
 // Template returns a policy template, optionally tuned by a named preset
@@ -52,6 +53,7 @@ func Template(preset string) (Policy, error) {
 		ExcludePathPrefixes: []string{},
 		IncludePaths:        []string{},
 		ExcludePaths:        []string{},
+		Plugins:             []string{},
 	}
 	autoSafe := true
 	switch preset {
@@ -127,6 +129,7 @@ func (p Policy) Validate() error {
 		"excludePathPrefixes": p.ExcludePathPrefixes,
 		"includePaths":        p.IncludePaths,
 		"excludePaths":        p.ExcludePaths,
+		"plugins":             p.Plugins,
 	}
 	for field, values := range fields {
 		for i, value := range values {
