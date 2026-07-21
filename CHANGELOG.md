@@ -30,6 +30,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `policy init --preset <name>` for common migration styles (`workstation`, `server`, `developer-machine`, `minimal-audit`), pre-setting `confirmKinds`/`excludeKinds` for that archetype instead of starting from the generic template.
 - `review`/`capture --export-decisions` and `--import-decisions` for repeatable migration sessions and team review: a portable, host-independent record of per-finding decisions keyed by identity (manager+name, path, or kind+path) that can be re-applied to a later scan of the same host or a similar one, taking precedence over policy category rules for the same finding.
 - `summary --compare-decisions <path>` for migration progress tracking across repeated scans of the same host: diffs the current scan's decisions against a previously exported decisions snapshot and reports newly decided, changed, regressed-to-pending, and no-longer-present findings.
+- `reports/migration-annotations.nix`: a structured, standalone Nix attribute set tracing every confirmed container/systemd service/cron job to the Nix option it renders as, or why not — not imported into the NixOS configuration, purely a queryable trace (`nix eval --file reports/migration-annotations.nix`).
 
 ### Changed
 
@@ -40,6 +41,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 
 - Baseline diff now also detects permission-only changes (e.g. a file gaining or losing its executable bit) when content is unchanged; previously only the content hash was compared.
 - `doctor`'s pre-flight file-completeness check now covers all 21 files `render.Project` generates, including `modules/services.nix` and `modules/filesystem-findings.nix` (both imported by the generated flake); previously 5 files were missing from the check, so a corrupted or missing module would only surface as an opaque Nix import error instead of a clear pre-flight failure.
+- `serviceGenerationNotes`/`containerGenerationNotes` now explain a confirmed systemd service with no `ExecStart` and a confirmed container missing a name or image, respectively; previously both cases silently produced zero explanatory notes despite nothing being generated.
 
 ## [0.1.0] - 2026-07-19
 

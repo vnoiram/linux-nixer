@@ -99,6 +99,7 @@ Current scanner domains include:
 - Reports:
   - Domain reports preserve context that should not be converted automatically.
   - Reports include safe details, counts, markers, and redacted summaries.
+  - `reports/migration-annotations.nix` is a structured, standalone Nix attribute set tracing every confirmed container/systemd service/cron job to the Nix option it renders as, or a note explaining why not — deliberately not added to any `imports` list, so it can carry arbitrary structured data without risking `nix flake check` rejecting an undeclared option.
 - Migration checklist:
   - Manual work is grouped by package, source, language, service, container, DevOps, filesystem, secret, stateful, backup, user/desktop, and hardware domains.
 - Summary:

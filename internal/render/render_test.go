@@ -566,10 +566,15 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Manager: "systemd", Name: "backup.timer", Path: "/etc/systemd/system/backup.timer", Schedule: "OnCalendar=daily", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "secret.service", Path: "/etc/systemd/system/secret.service", ExecStart: "/opt/app/bin/app --token=super-secret", EnvironmentFiles: []string{"/etc/default/secret"}, Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "envfile.service", Path: "/etc/systemd/system/envfile.service", ExecStart: "/opt/app/bin/app --serve", EnvironmentFiles: []string{"/etc/default/envfile"}, Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "empty.service", Path: "/etc/systemd/system/empty.service", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "candidate.service", Path: "/etc/systemd/system/candidate.service", Decision: model.DecisionCandidate},
 			{Manager: "cron", Name: "backup-job", Path: "/etc/cron.d/backup-job", User: "root", ExecStart: "/usr/local/bin/backup", Schedule: "15 2 * * *", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "secret-job", Path: "/etc/cron.d/secret-job", User: "root", ExecStart: "/usr/local/bin/job --token=super-secret", Schedule: "0 3 * * *", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "no-user-job", Path: "/etc/cron.d/no-user-job", ExecStart: "/usr/local/bin/job", Schedule: "0 4 * * *", Decision: model.DecisionConfirmed},
+		},
+		Containers: []model.Container{
+			{Runtime: "docker", Name: "web", Image: "nginx", Decision: model.DecisionConfirmed},
+			{Runtime: "docker", Name: "missing-image", Decision: model.DecisionConfirmed},
 		},
 		Items: []model.Item{
 			{Kind: "shell-config", Name: ".zshrc", Path: "/home/alice/.zshrc", Decision: model.DecisionConfirmed, Reason: "shell or login environment configuration"},
@@ -641,6 +646,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		`"15 2 * * * root /usr/local/bin/backup"`,
 		`secret-job command contains secret-like text and was not generated`,
 		`no-user-job missing user and was not generated`,
+		`empty.service missing exec start and was not generated`,
 	} {
 		if !strings.Contains(services, want) {
 			t.Fatalf("services missing %q:\n%s", want, services)
@@ -657,6 +663,28 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		if !strings.Contains(reportMD, want) {
 			t.Fatalf("migration report missing generated Nix summary %q:\n%s", want, reportMD)
 		}
+	}
+
+	annotations := readFile(t, out, "reports/migration-annotations.nix")
+	for _, want := range []string{
+		`{ key = "docker:web"; decision = "confirmed"; nixOption = "virtualisation.oci-containers.containers.web"; }`,
+		`{ key = "docker:missing-image"; decision = "confirmed"; nixOption = null; note = "missing-image missing name or image and was not generated"; }`,
+		`{ key = "systemd:custom.service"; decision = "confirmed"; nixOption = "systemd.services.custom"; }`,
+		`{ key = "systemd:secret.service"; decision = "confirmed"; nixOption = null; note = "secret.service ExecStart contains secret-like text and was not generated; secret.service environment files require manual migration: /etc/default/secret"; }`,
+		`{ key = "systemd:empty.service"; decision = "confirmed"; nixOption = null; note = "empty.service missing exec start and was not generated"; }`,
+		`{ key = "systemd:backup.timer"; decision = "confirmed"; nixOption = "systemd.timers.backup"; }`,
+		`{ key = "cron:backup-job"; decision = "confirmed"; nixOption = "services.cron.systemCronJobs"; }`,
+		`{ key = "cron:secret-job"; decision = "confirmed"; nixOption = null; note = "secret-job command contains secret-like text and was not generated"; }`,
+	} {
+		if !strings.Contains(annotations, want) {
+			t.Fatalf("migration annotations missing %q:\n%s", want, annotations)
+		}
+	}
+	if strings.Contains(annotations, "candidate") {
+		t.Fatalf("migration annotations should not include the candidate service:\n%s", annotations)
+	}
+	if strings.Contains(cfg, "migration-annotations") {
+		t.Fatalf("migration-annotations.nix must not be imported into the NixOS configuration:\n%s", cfg)
 	}
 }
 
