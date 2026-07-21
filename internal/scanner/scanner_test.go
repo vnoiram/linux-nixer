@@ -1792,3 +1792,53 @@ func sha256Hex(t *testing.T, path string) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
+
+func TestRecursiveGlobWalksSharedPrefixOnce(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/proj/Makefile", "")
+	write(t, root, "/home/alice/proj/justfile", "")
+	write(t, root, "/home/alice/proj/Taskfile.yml", "")
+	write(t, root, "/srv/app/Makefile", "")
+
+	var visited []string
+	recursiveGlobWalkHook = func(base string) {
+		visited = append(visited, base)
+	}
+	defer func() { recursiveGlobWalkHook = nil }()
+
+	got := recursiveGlob(root,
+		"/home/*/**/Makefile",
+		"/home/*/**/makefile",
+		"/home/*/**/justfile",
+		"/home/*/**/Justfile",
+		"/home/*/**/Taskfile.yml",
+		"/home/*/**/Taskfile.yaml",
+		"/srv/**/Makefile",
+		"/srv/**/makefile",
+	)
+
+	// Output correctness: all four files found regardless of how many
+	// same-prefix patterns matched them.
+	wantFiles := map[string]bool{
+		filepath.Join(root, "home", "alice", "proj", "Makefile"):     true,
+		filepath.Join(root, "home", "alice", "proj", "justfile"):     true,
+		filepath.Join(root, "home", "alice", "proj", "Taskfile.yml"): true,
+		filepath.Join(root, "srv", "app", "Makefile"):                true,
+	}
+	if len(got) != len(wantFiles) {
+		t.Fatalf("got %d results, want %d: %v", len(got), len(wantFiles), got)
+	}
+	for _, g := range got {
+		if !wantFiles[g] {
+			t.Fatalf("unexpected result %q not in %v", g, wantFiles)
+		}
+	}
+
+	// The actual point of this test: 6 patterns share the "/home/*/" prefix
+	// and 2 share "/srv/" — each prefix's base directories must be walked
+	// exactly once (one visit per matched base dir), not once per pattern
+	// (which would be 6 + 2 = 8 walks of the same two directories).
+	if len(visited) != 2 {
+		t.Fatalf("recursiveGlob walked %d times, want 2 (one per unique prefix's base dir), visited: %v", len(visited), visited)
+	}
+}

@@ -177,16 +177,51 @@ func inspectEnvKeys(env []string) map[string]string {
 	return out
 }
 
+// recursiveGlob resolves "**"-style patterns (a glob prefix, then any
+// depth, then a suffix). Patterns sharing the same prefix (routine: most
+// callers pass a dozen-plus "/home/*/**/..." patterns in one call) are
+// grouped so each prefix's base directories are walked exactly once,
+// checking every suffix that shares it in a single WalkDir pass, instead
+// of once per pattern — on a real host with a large tree under a shared
+// prefix (Go module cache, Rust registry, etc.), re-walking it once per
+// pattern turned a single scan into repeatedly walking the same large
+// tree dozens of times. Output is identical either way (same files
+// found); only the number of WalkDir invocations changes, so no caller
+// needs to change.
+// recursiveGlobWalkHook, when non-nil, is called once per base directory
+// recursiveGlob is about to WalkDir — test-only instrumentation to verify
+// patterns sharing a prefix are walked once, not once per pattern. Nil
+// (zero overhead, no behavior change) in production.
+var recursiveGlobWalkHook func(base string)
+
 func recursiveGlob(root string, patterns ...string) []string {
 	var out []string
+	type group struct {
+		prefix   string
+		suffixes []string
+	}
+	var groups []*group
+	byPrefix := map[string]*group{}
 	for _, pattern := range patterns {
 		if !strings.Contains(pattern, "**") {
 			out = append(out, glob(root, pattern)...)
 			continue
 		}
 		prefix, suffix, _ := strings.Cut(pattern, "**")
-		bases, _ := filepath.Glob(rootPath(root, prefix))
+		g, ok := byPrefix[prefix]
+		if !ok {
+			g = &group{prefix: prefix}
+			byPrefix[prefix] = g
+			groups = append(groups, g)
+		}
+		g.suffixes = append(g.suffixes, strings.TrimPrefix(suffix, "/"))
+	}
+	for _, g := range groups {
+		bases, _ := filepath.Glob(rootPath(root, g.prefix))
 		for _, base := range bases {
+			if recursiveGlobWalkHook != nil {
+				recursiveGlobWalkHook(base)
+			}
 			filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
 				if err != nil || d.IsDir() {
 					if d != nil && d.IsDir() && shouldSkipDir(d.Name()) {
@@ -194,8 +229,11 @@ func recursiveGlob(root string, patterns ...string) []string {
 					}
 					return nil
 				}
-				if strings.HasSuffix(path, strings.TrimPrefix(suffix, "/")) {
-					out = append(out, path)
+				for _, suffix := range g.suffixes {
+					if strings.HasSuffix(path, suffix) {
+						out = append(out, path)
+						break
+					}
 				}
 				return nil
 			})
