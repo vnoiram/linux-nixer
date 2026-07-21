@@ -552,6 +552,24 @@ func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
 	}
 }
 
+func TestDecisionNoteCoversAllStates(t *testing.T) {
+	cases := []struct {
+		decision model.Decision
+		want     string
+	}{
+		{"", "still a candidate finding; pending review"},
+		{model.DecisionCandidate, "still a candidate finding; pending review"},
+		{model.DecisionTODO, "marked todo; pending manual migration decision"},
+		{model.DecisionMigrationNote, "recorded as a migration note; not intended for automatic Nix generation"},
+		{model.DecisionExcluded, "excluded by review decision or policy; not migrated"},
+	}
+	for _, tc := range cases {
+		if got := decisionNote(tc.decision); got != tc.want {
+			t.Fatalf("decisionNote(%q)=%q, want %q", tc.decision, got, tc.want)
+		}
+	}
+}
+
 func TestProjectRendersConservativeNixOptions(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{
@@ -566,6 +584,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
 			{Manager: "apt", Name: "obscure-tool", Decision: model.DecisionConfirmed},
 			{Manager: "apt", Name: "skip-me", Decision: model.DecisionCandidate},
+			{Manager: "apt", Name: "excluded-tool", Decision: model.DecisionExcluded},
 		},
 		Languages: model.Languages{
 			NPM: []model.Package{
@@ -579,6 +598,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Manager: "systemd", Name: "envfile.service", Path: "/etc/systemd/system/envfile.service", ExecStart: "/opt/app/bin/app --serve", EnvironmentFiles: []string{"/etc/default/envfile"}, Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "empty.service", Path: "/etc/systemd/system/empty.service", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "candidate.service", Path: "/etc/systemd/system/candidate.service", Decision: model.DecisionCandidate},
+			{Manager: "systemd", Name: "todo.service", Path: "/etc/systemd/system/todo.service", Decision: model.DecisionTODO},
 			{Manager: "cron", Name: "backup-job", Path: "/etc/cron.d/backup-job", User: "root", ExecStart: "/usr/local/bin/backup", Schedule: "15 2 * * *", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "secret-job", Path: "/etc/cron.d/secret-job", User: "root", ExecStart: "/usr/local/bin/job --token=super-secret", Schedule: "0 3 * * *", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "no-user-job", Path: "/etc/cron.d/no-user-job", ExecStart: "/usr/local/bin/job", Schedule: "0 4 * * *", Decision: model.DecisionConfirmed},
@@ -663,7 +683,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			t.Fatalf("services missing %q:\n%s", want, services)
 		}
 	}
-	for _, notWant := range []string{`systemd.services."candidate" =`, `systemd.services."envfile" =`, `--token=super-secret`, `EnvironmentFile`, `0 3 * * * root`, `0 4 * * *`} {
+	for _, notWant := range []string{`systemd.services."candidate" =`, `systemd.services."todo" =`, `systemd.services."envfile" =`, `--token=super-secret`, `EnvironmentFile`, `0 3 * * * root`, `0 4 * * *`} {
 		if strings.Contains(services, notWant) {
 			t.Fatalf("services should not contain %q:\n%s", notWant, services)
 		}
@@ -689,6 +709,10 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		`{ key = "apt:curl"; decision = "confirmed"; nixOption = "environment.systemPackages"; }`,
 		`{ key = "apt:obscure-tool"; decision = "confirmed"; nixOption = null; note = "no Nix package mapping found for apt:obscure-tool"; }`,
 		`{ key = "npm:eslint"; decision = "confirmed"; nixOption = "home.packages"; }`,
+		`{ key = "apt:skip-me"; decision = "candidate"; nixOption = null; note = "still a candidate finding; pending review"; }`,
+		`{ key = "apt:excluded-tool"; decision = "excluded"; nixOption = null; note = "excluded by review decision or policy; not migrated"; }`,
+		`{ key = "systemd:candidate.service"; decision = "candidate"; nixOption = null; note = "still a candidate finding; pending review"; }`,
+		`{ key = "systemd:todo.service"; decision = "todo"; nixOption = null; note = "marked todo; pending manual migration decision"; }`,
 		`{ key = "root"; decision = ""; nixOption = null; note = "root user, not rendered"; }`,
 		`{ key = "alice"; decision = ""; nixOption = "users.users.\"alice\""; }`,
 		`{ key = "daemon"; decision = ""; nixOption = null; note = "system user, not rendered"; }`,
@@ -697,9 +721,6 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		if !strings.Contains(annotations, want) {
 			t.Fatalf("migration annotations missing %q:\n%s", want, annotations)
 		}
-	}
-	if strings.Contains(annotations, "candidate") || strings.Contains(annotations, "skip-me") {
-		t.Fatalf("migration annotations should not include the candidate service or package:\n%s", annotations)
 	}
 	if strings.Contains(cfg, "migration-annotations") {
 		t.Fatalf("migration-annotations.nix must not be imported into the NixOS configuration:\n%s", cfg)
