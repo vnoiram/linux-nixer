@@ -735,3 +735,24 @@ func readFile(t *testing.T, root, rel string) string {
 	}
 	return string(b)
 }
+
+func TestRedactSecretLikeTextCatchesURLCredentials(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"basic auth url", "curl https://user:secretpass@example.com/hook", "curl https://<redacted>@example.com/hook"},
+		{"oauth token in url", "git clone https://oauth2:ghp_supersecrettoken@github.com/org/repo.git", "git clone https://<redacted>@github.com/org/repo.git"},
+		{"key=value still redacted", "app --token=raw-secret", "app --token=<redacted>"},
+		{"no credentials, untouched", "app --verbose https://example.com/path", "app --verbose https://example.com/path"},
+		{"at-sign in path is not userinfo", "app https://example.com/path/@handle", "app https://example.com/path/@handle"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := redactSecretLikeText(tc.input); got != tc.want {
+				t.Fatalf("redactSecretLikeText(%q)=%q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}

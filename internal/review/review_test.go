@@ -501,3 +501,22 @@ func TestFormatSummaryMarkdownOmitsFindingDetails(t *testing.T) {
 		t.Fatalf("summary leaked protected finding path:\n%s", got)
 	}
 }
+
+func TestRedactSecretLikeTextCatchesURLCredentials(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"basic auth url", "curl https://user:secretpass@example.com/hook", "curl https://<redacted>@example.com/hook"},
+		{"key=value still redacted", "app --token=raw-secret", "app --token=<redacted>"},
+		{"no credentials, untouched", "app --verbose https://example.com/path", "app --verbose https://example.com/path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := redactSecretLikeText(tc.input); got != tc.want {
+				t.Fatalf("redactSecretLikeText(%q)=%q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}

@@ -522,11 +522,42 @@ func redactSecretLikeText(text string) string {
 			} else {
 				out = append(out, "<redacted>")
 			}
+		case containsURLCredentials(field):
+			out = append(out, redactURLCredentials(field))
 		default:
 			out = append(out, field)
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+// containsURLCredentials reports whether field looks like a "scheme://user:pass@host"
+// URL with embedded userinfo credentials (e.g. Basic-Auth-in-URL), which the
+// key=value field check above doesn't catch on its own.
+func containsURLCredentials(field string) bool {
+	schemeIdx := strings.Index(field, "://")
+	if schemeIdx < 0 {
+		return false
+	}
+	rest := field[schemeIdx+3:]
+	at := strings.Index(rest, "@")
+	if at < 0 {
+		return false
+	}
+	if slash := strings.Index(rest, "/"); slash >= 0 && slash < at {
+		return false
+	}
+	return true
+}
+
+// redactURLCredentials replaces the userinfo portion of a
+// "scheme://user:pass@host/..." field with a redaction marker, keeping the
+// scheme and host/path visible.
+func redactURLCredentials(field string) string {
+	schemeIdx := strings.Index(field, "://")
+	rest := field[schemeIdx+3:]
+	at := strings.Index(rest, "@")
+	return field[:schemeIdx+3] + "<redacted>" + rest[at:]
 }
 
 func applyLanguagePackages(pkgs *[]model.Package, opts Options) {
