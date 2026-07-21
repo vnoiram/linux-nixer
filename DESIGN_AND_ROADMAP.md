@@ -52,10 +52,10 @@ Review checklist for adding a mapping entry:
 - Review and policy:
   - Non-interactive rules can confirm, exclude, mark TODO, or mark migration notes.
   - Interactive review shows safe context notes, details, Nix mapping impact, and protected-finding reasons, with per-section progress counts, a skip-rest-of-section command, and an optional pending-only filter that hides findings already resolved by policy or safety rules.
-  - Container and systemd service notes reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts), not a blanket "generates when safe" claim, so the safe/unsafe outcome is visible before the decision is made.
+  - Container, systemd service, and cron job notes reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts, missing cron schedule/user), not a blanket "generates when safe" claim, so the safe/unsafe outcome is visible before the decision is made.
 - Rendering:
   - Generated projects include flake, host config, Home Manager config, service/container/filesystem modules, reports, and migration checklist.
-  - Rendering is conservative and mostly emits confirmed packages, safe user options, safe shell/home options, container runtime enables, and limited systemd service/timer options.
+  - Rendering is conservative and mostly emits confirmed packages, safe user options, safe shell/home options, container runtime enables, limited systemd service/timer options, and confirmed cron jobs with a schedule/user/command as `services.cron.systemCronJobs` entries.
 - Validation and doctor:
   - Validation rejects unsupported schema versions, unknown decisions, and unsafe confirmed protected findings.
   - Doctor checks generated project structure and optionally validates/builds Nix VM artifacts.
@@ -92,6 +92,7 @@ Current scanner domains include:
   - Confirmed shell/home config markers enable selected Home Manager programs.
   - Confirmed container runtimes enable Docker/Podman flags, and confirmed containers with a known name and image render individual `virtualisation.oci-containers.containers` entries with safe ports and volumes; unmapped ports, unsafe mounts, and environment values stay as migration notes.
   - Confirmed safe systemd services/timers can render limited service/timer options.
+  - Confirmed cron jobs with a schedule, user, and non-secret-like command render as `services.cron.systemCronJobs` entries.
 - Reports:
   - Domain reports preserve context that should not be converted automatically.
   - Reports include safe details, counts, markers, and redacted summaries.

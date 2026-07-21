@@ -292,9 +292,12 @@ func TestInteractiveServiceNotesReflectActualGenerationOutcome(t *testing.T) {
 			{Manager: "systemd", Name: "safe.service", ExecStart: "/opt/app/bin/app"},
 			{Manager: "systemd", Name: "missing-exec.service"},
 			{Manager: "systemd", Name: "backup.timer", Schedule: "15 2 * * *"},
+			{Manager: "cron", Name: "safe-job", User: "root", ExecStart: "/usr/local/bin/backup", Schedule: "15 2 * * *"},
+			{Manager: "cron", Name: "no-user-job", ExecStart: "/usr/local/bin/job", Schedule: "0 3 * * *"},
+			{Manager: "cron", Name: "secret-job", User: "root", ExecStart: "/usr/local/bin/job --token=super-secret", Schedule: "0 4 * * *"},
 		},
 	}
-	in := strings.NewReader("s\ns\ns\n")
+	in := strings.NewReader("s\ns\ns\ns\ns\ns\n")
 	var out bytes.Buffer
 
 	Interactive(in, &out, report, Options{})
@@ -304,6 +307,9 @@ func TestInteractiveServiceNotesReflectActualGenerationOutcome(t *testing.T) {
 		"generates: systemd service options when confirmed",
 		"review: missing exec start; service will not generate",
 		"review: timer schedule requires manual migration; will not generate",
+		"generates: cron job via services.cron.systemCronJobs when confirmed",
+		"review: missing user; cron job will not generate",
+		"review: command looks secret-like; cron job will not generate",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("interactive output missing %q:\n%s", want, got)
@@ -439,6 +445,23 @@ func TestSummarizeCountsOnlyRenderableSystemdServicesAsNixImpact(t *testing.T) {
 
 	if got.NixImpact.SystemdServices != 1 {
 		t.Fatalf("systemd services impact=%d, want 1", got.NixImpact.SystemdServices)
+	}
+}
+
+func TestSummarizeCountsOnlyRenderableCronJobsAsNixImpact(t *testing.T) {
+	report := model.ScanReport{
+		Services: []model.Service{
+			{Manager: "cron", Name: "backup", User: "root", ExecStart: "/usr/local/bin/backup", Schedule: "15 2 * * *", Decision: model.DecisionConfirmed},
+			{Manager: "cron", Name: "no-user", ExecStart: "/usr/local/bin/job", Schedule: "0 3 * * *", Decision: model.DecisionConfirmed},
+			{Manager: "cron", Name: "secret", User: "root", ExecStart: "/usr/local/bin/job --token=super-secret", Schedule: "0 4 * * *", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "app.service", ExecStart: "/opt/app/bin/app", Decision: model.DecisionConfirmed},
+		},
+	}
+
+	got := Summarize(report)
+
+	if got.NixImpact.CronJobs != 1 {
+		t.Fatalf("cron jobs impact=%d, want 1", got.NixImpact.CronJobs)
 	}
 }
 

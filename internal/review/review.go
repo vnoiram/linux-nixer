@@ -387,8 +387,11 @@ func containerMountSafe(mount string) bool {
 
 func serviceNotes(item model.Service) []string {
 	var notes []string
-	if item.Manager == "systemd" {
+	switch item.Manager {
+	case "systemd":
 		notes = append(notes, serviceGenerationNote(item))
+	case "cron":
+		notes = append(notes, cronJobGenerationNote(item))
 	}
 	if item.User != "" {
 		notes = append(notes, "detail: user="+item.User)
@@ -424,6 +427,21 @@ func serviceGenerationNote(item model.Service) string {
 		return "review: environment files require manual migration; service will not generate"
 	default:
 		return "generates: systemd service options when confirmed"
+	}
+}
+
+func cronJobGenerationNote(item model.Service) string {
+	switch {
+	case item.Schedule == "":
+		return "review: missing schedule; cron job will not generate"
+	case item.User == "":
+		return "review: missing user; cron job will not generate"
+	case item.ExecStart == "":
+		return "review: missing command; cron job will not generate"
+	case secretLikeText(item.ExecStart):
+		return "review: command looks secret-like; cron job will not generate"
+	default:
+		return "generates: cron job via services.cron.systemCronJobs when confirmed"
 	}
 }
 

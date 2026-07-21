@@ -435,6 +435,9 @@ func writeGeneratedNixSummary(b *strings.Builder, report model.ScanReport) {
 	if count := len(generatedSystemdTimers(report)); count > 0 {
 		lines = append(lines, fmt.Sprintf("- generated systemd timers: `%d`", count))
 	}
+	if count := generatedCronJobCount(report); count > 0 {
+		lines = append(lines, fmt.Sprintf("- generated cron jobs: `%d`", count))
+	}
 	for _, shell := range generatedHostShells(report) {
 		lines = append(lines, fmt.Sprintf("- host shell option: `programs.%s.enable`", shell))
 	}
@@ -938,6 +941,13 @@ func renderServicesModule(report model.ScanReport) string {
 				b.WriteString("\n")
 			}
 		}
+		if service.Decision == model.DecisionConfirmed && service.Manager == "cron" {
+			if note := cronJobGenerationNote(service); note != "" {
+				b.WriteString("  # TODO service detail: ")
+				b.WriteString(comment(note))
+				b.WriteString("\n")
+			}
+		}
 	}
 	for _, item := range report.Items {
 		if !includeDecision(item.Decision) || !isServiceLikeItem(item) {
@@ -947,8 +957,57 @@ func renderServicesModule(report model.ScanReport) string {
 		b.WriteString(comment(fmt.Sprintf("%s at %s %s", item.Kind, item.Path, item.Reason)))
 		b.WriteString("\n")
 	}
+	if rendered := renderCronJobsOption(report); rendered != "" {
+		b.WriteString(rendered)
+	}
 	b.WriteString("}\n")
 	return b.String()
+}
+
+func renderableCronJob(service model.Service) bool {
+	return service.Decision == model.DecisionConfirmed &&
+		service.Manager == "cron" &&
+		service.Schedule != "" &&
+		service.User != "" &&
+		service.ExecStart != "" &&
+		!secretLikeText(service.ExecStart)
+}
+
+func cronJobLine(service model.Service) string {
+	return service.Schedule + " " + service.User + " " + service.ExecStart
+}
+
+func renderCronJobsOption(report model.ScanReport) string {
+	var jobs []string
+	for _, service := range report.Services {
+		if renderableCronJob(service) {
+			jobs = append(jobs, cronJobLine(service))
+		}
+	}
+	if len(jobs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("  services.cron.enable = true;\n")
+	b.WriteString("  services.cron.systemCronJobs = ")
+	b.WriteString(nixStringList(jobs, 4))
+	b.WriteString(";\n")
+	return b.String()
+}
+
+func cronJobGenerationNote(service model.Service) string {
+	switch {
+	case service.Schedule == "":
+		return fmt.Sprintf("%s missing schedule and was not generated", service.Name)
+	case service.User == "":
+		return fmt.Sprintf("%s missing user and was not generated", service.Name)
+	case service.ExecStart == "":
+		return fmt.Sprintf("%s missing command and was not generated", service.Name)
+	case secretLikeText(service.ExecStart):
+		return fmt.Sprintf("%s command contains secret-like text and was not generated", service.Name)
+	default:
+		return ""
+	}
 }
 
 func renderSystemdServiceOption(service model.Service) string {
@@ -1858,6 +1917,16 @@ func generatedSystemdTimers(report model.ScanReport) []model.Service {
 		}
 	}
 	return timers
+}
+
+func generatedCronJobCount(report model.ScanReport) int {
+	count := 0
+	for _, service := range report.Services {
+		if renderableCronJob(service) {
+			count++
+		}
+	}
+	return count
 }
 
 func nixUserGroups(user model.User) []string {

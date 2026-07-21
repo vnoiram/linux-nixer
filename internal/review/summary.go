@@ -38,6 +38,7 @@ type NixImpact struct {
 	HostShellPrograms       int `json:"hostShellPrograms"`
 	HomePrograms            int `json:"homePrograms"`
 	SystemdServices         int `json:"systemdServices"`
+	CronJobs                int `json:"cronJobs"`
 	ContainerRuntimeEnables int `json:"containerRuntimeEnables"`
 	ConfirmedContainers     int `json:"confirmedContainers"`
 }
@@ -52,6 +53,7 @@ func Summarize(report model.ScanReport) Summary {
 			HostShellPrograms:       len(hostShellPrograms(report)),
 			HomePrograms:            len(homePrograms(report)),
 			SystemdServices:         confirmedSystemdServices(report),
+			CronJobs:                confirmedCronJobs(report),
 			ContainerRuntimeEnables: containerRuntimeEnables(report),
 			ConfirmedContainers:     confirmedContainers(report),
 		},
@@ -142,6 +144,7 @@ func FormatSummaryMarkdown(s Summary) string {
 	fmt.Fprintf(&b, "- host shell programs: %d\n", s.NixImpact.HostShellPrograms)
 	fmt.Fprintf(&b, "- home programs: %d\n", s.NixImpact.HomePrograms)
 	fmt.Fprintf(&b, "- systemd services: %d\n", s.NixImpact.SystemdServices)
+	fmt.Fprintf(&b, "- cron jobs: %d\n", s.NixImpact.CronJobs)
 	fmt.Fprintf(&b, "- container runtime enables: %d\n", s.NixImpact.ContainerRuntimeEnables)
 	fmt.Fprintf(&b, "- confirmed containers: %d\n", s.NixImpact.ConfirmedContainers)
 	writeNextActions(&b, s)
@@ -300,6 +303,7 @@ func generatedCandidates(impact NixImpact) int {
 		impact.HostShellPrograms +
 		impact.HomePrograms +
 		impact.SystemdServices +
+		impact.CronJobs +
 		impact.ContainerRuntimeEnables +
 		impact.ConfirmedContainers
 }
@@ -446,6 +450,25 @@ func renderableSystemdService(service model.Service) bool {
 		service.ExecStart != "" &&
 		!secretLikeText(service.ExecStart) &&
 		len(service.EnvironmentFiles) == 0
+}
+
+func confirmedCronJobs(report model.ScanReport) int {
+	count := 0
+	for _, service := range report.Services {
+		if renderableCronJob(service) {
+			count++
+		}
+	}
+	return count
+}
+
+func renderableCronJob(service model.Service) bool {
+	return service.Decision == model.DecisionConfirmed &&
+		service.Manager == "cron" &&
+		service.Schedule != "" &&
+		service.User != "" &&
+		service.ExecStart != "" &&
+		!secretLikeText(service.ExecStart)
 }
 
 func secretLikeText(text string) bool {
