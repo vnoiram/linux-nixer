@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -175,6 +176,19 @@ func Run(ctx context.Context, opts Options) Result {
 
 func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	// Run in its own process group so a timeout (in practice, --boot's VM
+	// script) kills any subprocess it spawned too, not just its own
+	// top-level process — mirroring internal/scanner/plugin.go's identical
+	// hardening. Without this, a VM script that doesn't exec into qemu as
+	// its last act would leave qemu running, reparented to init, after
+	// only the script's top-level process gets killed on timeout; Wait
+	// would then block on that orphan's inherited output pipe instead of
+	// returning once the timeout fires.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
 	return cmd.CombinedOutput()
 }
 

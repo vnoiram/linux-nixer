@@ -278,3 +278,31 @@ func assertCheck(t *testing.T, result Result, name string, ok bool) {
 	}
 	t.Fatalf("check %s missing from %+v", name, result.Checks)
 }
+
+func TestDefaultRunnerKillsWholeProcessGroupOnTimeout(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "slow-vm-script.sh")
+	// Forks a subprocess (sleep) that inherits the output pipe before the
+	// top-level shell exits, mirroring a generated VM script that doesn't
+	// exec into qemu as its last act. If only the top-level process is
+	// killed on timeout, the orphaned sleep keeps the pipe open and Wait
+	// blocks until it exits on its own, defeating the timeout.
+	script := "#!/bin/sh\nsleep 2 &\nwait\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := defaultRunner(ctx, scriptPath)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("defaultRunner took %s to return after a 100ms timeout; the orphaned subprocess likely kept the output pipe open", elapsed)
+	}
+}
