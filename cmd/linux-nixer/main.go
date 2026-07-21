@@ -90,6 +90,7 @@ Usage:
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
+  linux-nixer baseline list
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer help <command>
@@ -127,6 +128,10 @@ func commandHelp(w io.Writer, topic []string) error {
 		}
 		if topic[1] == "import" {
 			fmt.Fprint(w, baselineImportHelp)
+			return nil
+		}
+		if topic[1] == "list" {
+			fmt.Fprint(w, baselineListHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
@@ -391,12 +396,25 @@ Examples:
   linux-nixer scan --baseline ubuntu:24.04 --include /opt --out scan.json
 
 Flags:
-  --distro NAME      Distro name; also used as the image name (e.g. ubuntu, debian).
-  --release VALUE    Distro release version; also used as the image tag (e.g. 24.04, 12).
+  --distro NAME      Distro name; must be in the baseline catalog (see: linux-nixer baseline list).
+  --release VALUE    Distro release version; must be in the baseline catalog for --distro.
   --backend NAME     Container backend: docker or podman. Auto-detected from PATH if omitted.
   --out PATH         Write baseline JSON to PATH. Defaults to baselines/<distro>-<release>.json.
 
-Pulls the <distro>:<release> image, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data.
+Pulls the catalog's verified image for --distro/--release, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data. Run "linux-nixer baseline list" to see supported distro/release pairs before fetching.
+`
+
+const baselineListHelp = `linux-nixer baseline list
+List the curated distro/release pairs "baseline fetch" knows how to pull.
+
+Usage:
+  linux-nixer baseline list
+
+Examples:
+  linux-nixer baseline list
+  linux-nixer baseline fetch --distro ubuntu --release 24.04
+
+This is a small, hand-verified catalog (see DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance"), not every possible Docker Hub image — an unlisted distro/release is rejected by "baseline fetch" rather than guessed at.
 `
 
 const baselineImportHelp = `linux-nixer baseline import
@@ -972,7 +990,7 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list")
 	}
 	switch args[0] {
 	case "create":
@@ -981,9 +999,22 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return runBaselineFetch(ctx, args[1:], stdout)
 	case "import":
 		return runBaselineImport(ctx, args[1:], stdin, stdout)
+	case "list":
+		return runBaselineList(args[1:], stdout)
 	default:
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list")
 	}
+}
+
+func runBaselineList(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, baselineListHelp)
+		return nil
+	}
+	for _, entry := range baseline.CatalogEntries() {
+		fmt.Fprintf(stdout, "%s %s (image: %s)\n", entry.Distro, entry.Release, entry.Image)
+	}
+	return nil
 }
 
 func runBaselineCreate(ctx context.Context, args []string, stdout io.Writer) error {

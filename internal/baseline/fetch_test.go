@@ -153,6 +153,21 @@ func TestFetchRequiresBackendWithCustomRunner(t *testing.T) {
 	}
 }
 
+func TestFetchRejectsDistroReleaseNotInCatalog(t *testing.T) {
+	called := false
+	runner := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	}
+	_, err := Fetch(context.Background(), FetchOptions{Distro: "fedora", Release: "40", Backend: "docker", Runner: runner})
+	if err == nil {
+		t.Fatal("expected error for a distro/release not in the baseline catalog")
+	}
+	if called {
+		t.Fatal("no commands should run when the distro/release isn't in the catalog")
+	}
+}
+
 func TestSafeExtractPathContainsTraversalAttempts(t *testing.T) {
 	destDir := t.TempDir()
 	cases := []string{

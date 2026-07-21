@@ -12,7 +12,7 @@ See [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for design assumptions, safet
 
 This is an early implementation scaffold. It includes:
 
-- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`, `policy init`, `plugin check`
+- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`/`fetch`/`import`/`list`, `policy init`, `plugin check`
 - Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, secrets, system config files, DevOps/project config, user shell settings, desktop settings, hardware/peripheral settings, and filesystem findings
 - Dedicated package ecosystem scanners and safe detail summaries for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
@@ -118,9 +118,10 @@ These are always warnings, never errors — a stale or unresolvable entry still 
 bin/linux-nixer summary --scan reviewed-later.json --compare-decisions decisions.json
 ```
 
-Create a baseline manifest. If Docker or Podman is available, `baseline fetch` builds one from the distro's official image — no local rootfs needed:
+Create a baseline manifest. If Docker or Podman is available, `baseline fetch` builds one from the distro's official image — no local rootfs needed. `baseline fetch` only accepts distro/release pairs in a small curated catalog (verified real images, not a guess); run `baseline list` to see them:
 
 ```sh
+bin/linux-nixer baseline list
 bin/linux-nixer baseline fetch --distro ubuntu --release 24.04
 bin/linux-nixer scan --root /path/to/current-root --baseline ubuntu:24.04 --out scan.json
 ```

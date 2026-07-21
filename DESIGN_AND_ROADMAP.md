@@ -31,6 +31,16 @@ Review checklist for adding a mapping entry:
 3. Add the entry to the correct manager's table with a lowercase, trimmed key (or add a `mappingAliases` entry when the scanned name differs from the canonical key).
 4. Add at least one case to `mapping_test.go` exercising the new entry, then run `go test ./internal/mapping/...` — the structural tests run automatically and need no per-entry maintenance.
 
+## Baseline catalog maintenance
+
+`internal/baseline/catalog.go` is the curated lookup table from distro/release pairs to verified Docker Hub image references, consumed by `CatalogImage(distro, release)` and listed via `baseline list`/`CatalogEntries()`. Same conservative-by-construction shape as the Nix mapping table above: an unlisted distro/release stays unlisted rather than being passed through to `docker pull` as a guessed `distro:release` tag, and structural tests in `catalog_test.go` (`TestCatalogKeysAreNormalized`, `TestCatalogEntriesSorted`) guard the whole table, not just a handful of example lookups. `baseline fetch` rejects any distro/release not in the catalog before attempting a pull, so an unsupported combination fails with a clear message pointing at `baseline list` instead of an opaque `docker pull` error.
+
+Review checklist for adding a catalog entry:
+
+1. Verify the image reference is a real, current official image on Docker Hub before adding it (e.g. `docker pull <image>` succeeds, or check hub.docker.com) — never guess a `distro:release` tag; if it can't be verified, leave the combination out of the catalog rather than add one that might 404 or resolve to something unexpected.
+2. Add the entry under the correct distro's table with a lowercase, trimmed distro key and a trimmed release key (`CatalogImage` normalizes the distro but not the release, matching how `--release` is typically an exact version string like `24.04`, not free text).
+3. Add at least one case to `catalog_test.go` exercising the new entry, then run `go test ./internal/baseline/...` — the structural tests run automatically and need no per-entry maintenance.
+
 ## Current architecture
 
 - CLI commands:
@@ -41,7 +51,7 @@ Review checklist for adding a mapping entry:
   - `validate` checks schema, decisions, and protected finding rules.
   - `generate` renders the NixOS/Home Manager project.
   - `doctor` validates generated project files and can run Nix VM checks.
-  - `baseline create` records rootfs baseline manifests.
+  - `baseline create`/`fetch`/`import` record rootfs baseline manifests (from a local rootfs, a pulled distro image, or an already-downloaded tar, respectively); `baseline list` shows the curated catalog `fetch` will accept.
   - `policy init` creates repeatable review policy templates.
 - Scanner registry:
   - Dedicated scanners collect packages, language tooling, Git sources, containers, services, system config, DevOps config, user config, desktop config, hardware/peripherals, backups, secrets, stateful data, and filesystem diff findings.

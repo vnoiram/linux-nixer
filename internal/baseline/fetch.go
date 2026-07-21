@@ -26,6 +26,11 @@ func Fetch(ctx context.Context, opts FetchOptions) (*Manifest, error) {
 	if opts.Distro == "" || opts.Release == "" {
 		return nil, fmt.Errorf("fetch requires distro and release")
 	}
+	image, ok := CatalogImage(opts.Distro, opts.Release)
+	if !ok {
+		return nil, fmt.Errorf("%s:%s is not in the known baseline catalog; run \"linux-nixer baseline list\" for supported distro/release pairs", opts.Distro, opts.Release)
+	}
+
 	backend := opts.Backend
 	if backend == "" {
 		if opts.Runner != nil {
@@ -37,7 +42,6 @@ func Fetch(ctx context.Context, opts FetchOptions) (*Manifest, error) {
 		}
 	}
 
-	image := opts.Distro + ":" + opts.Release
 	container := fmt.Sprintf("linux-nixer-baseline-%d", time.Now().UnixNano())
 	run := func(args ...string) ([]byte, error) {
 		return runCommand(ctx, opts.Runner, backend, args...)

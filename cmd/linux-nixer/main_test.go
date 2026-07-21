@@ -155,6 +155,15 @@ func TestRunCommandHelpTopics(t *testing.T) {
 			},
 		},
 		{
+			name: "baseline list help",
+			args: []string{"help", "baseline", "list"},
+			wants: []string{
+				"linux-nixer baseline list",
+				"curated distro/release pairs",
+				"baseline list",
+			},
+		},
+		{
 			name: "review help",
 			args: []string{"review", "-h"},
 			wants: []string{
@@ -535,8 +544,30 @@ func TestRunBaselineUnknownSubcommandFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown baseline subcommand")
 	}
-	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") {
-		t.Fatalf("error should mention all three subcommands: %v", err)
+	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") || !strings.Contains(err.Error(), "baseline list") {
+		t.Fatalf("error should mention all four subcommands: %v", err)
+	}
+}
+
+func TestRunBaselineListPrintsCatalogEntries(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"baseline", "list"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatalf("baseline list failed: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "ubuntu 24.04") || !strings.Contains(out, "debian 12") {
+		t.Fatalf("expected catalog entries in output, got: %q", out)
+	}
+}
+
+func TestRunBaselineFetchRejectsDistroNotInCatalog(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "fedora", "--release", "40"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error for a distro/release not in the baseline catalog")
+	}
+	if !strings.Contains(err.Error(), "baseline catalog") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
