@@ -123,3 +123,22 @@ func TestApplyDecisionsTakesPrecedenceOverPolicyConfirmKinds(t *testing.T) {
 		t.Fatalf("service decision=%q, want confirmed (imported decision should win over policy excludeKinds)", got.Services[0].Decision)
 	}
 }
+
+func TestDecisionSetValidateRejectsBadSchemaVersion(t *testing.T) {
+	cases := map[string]DecisionSet{
+		"missing schemaVersion":    {SchemaVersion: ""},
+		"mismatched schemaVersion": {SchemaVersion: "linux-nixer.decisions.v0"},
+	}
+	for name, set := range cases {
+		if err := set.Validate(); err == nil {
+			t.Fatalf("%s: expected Validate to reject %+v", name, set)
+		}
+	}
+}
+
+func TestDecisionSetValidateAcceptsCurrentSchemaVersion(t *testing.T) {
+	set := DecisionSet{SchemaVersion: DecisionsSchemaVersion}
+	if err := set.Validate(); err != nil {
+		t.Fatalf("expected current schemaVersion to be accepted, got: %v", err)
+	}
+}
