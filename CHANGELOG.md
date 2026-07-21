@@ -28,6 +28,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Structural tests for the Nix package mapping table (normalized keys, non-empty values, alias targets resolve to real entries) plus a documented review checklist for adding new mappings.
 - Confirmed cron jobs with a schedule, user, and non-secret-like command render as `services.cron.systemCronJobs` entries; interactive review notes now explain the generation outcome for cron jobs the same way they do for systemd services.
 - `policy init --preset <name>` for common migration styles (`workstation`, `server`, `developer-machine`, `minimal-audit`), pre-setting `confirmKinds`/`excludeKinds` for that archetype instead of starting from the generic template.
+- `review`/`capture --export-decisions` and `--import-decisions` for repeatable migration sessions and team review: a portable, host-independent record of per-finding decisions keyed by identity (manager+name, path, or kind+path) that can be re-applied to a later scan of the same host or a similar one, taking precedence over policy category rules for the same finding.
 
 ### Changed
 

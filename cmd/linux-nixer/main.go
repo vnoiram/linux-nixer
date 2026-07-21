@@ -171,12 +171,13 @@ const captureHelp = `linux-nixer capture
 Run scan, auto-safe review, summary, and Nix generation in one workflow.
 
 Usage:
-  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--auto-safe=false] [--fail-on-pending]
+  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
 
 Examples:
   linux-nixer capture --out linux-nixer-output
   linux-nixer capture --sudo --deep --out linux-nixer-output
   linux-nixer capture --policy linux-nixer-policy.json --root /mnt/ubuntu --include /opt --out linux-nixer-output
+  linux-nixer capture --import-decisions decisions.json --export-decisions decisions.json --out linux-nixer-output
 
 Artifacts:
   DIR/scan.json
@@ -185,32 +186,39 @@ Artifacts:
   DIR/nix-config/
 
 Flags:
-  --out DIR            Write capture artifacts under DIR.
-  --policy PATH        Load repeatable scan and review policy from PATH.
-  --root PATH          Scan PATH as the root filesystem. Defaults to /.
-  --sudo               Allow read-only sudo fallback for selected host files.
-  --deep               Scan broader filesystem paths for manual installs and config.
-  --baseline ID        Compare filesystem findings against a baseline id or JSON path.
-  --include PATH       Add a path to filesystem-diff scanning. Repeatable.
-  --exclude PATH       Exclude a path prefix from scanning. Repeatable.
-  --auto-safe=false    Disable high-confidence automatic confirmations.
-  --fail-on-pending    Return an error if candidate or todo findings remain.
+  --out DIR                 Write capture artifacts under DIR.
+  --policy PATH             Load repeatable scan and review policy from PATH.
+  --root PATH               Scan PATH as the root filesystem. Defaults to /.
+  --sudo                    Allow read-only sudo fallback for selected host files.
+  --deep                    Scan broader filesystem paths for manual installs and config.
+  --baseline ID             Compare filesystem findings against a baseline id or JSON path.
+  --include PATH            Add a path to filesystem-diff scanning. Repeatable.
+  --exclude PATH            Exclude a path prefix from scanning. Repeatable.
+  --auto-safe=false         Disable high-confidence automatic confirmations.
+  --fail-on-pending         Return an error if candidate or todo findings remain.
+  --import-decisions PATH   Seed decisions from a previously exported decisions JSON before review.
+  --export-decisions PATH   Write the final decisions to a portable decisions JSON.
 
 Policy:
   Policy scan and review defaults are applied first. Explicit CLI boolean and string flags override policy values; CLI list flags are merged with policy lists.
+
+Repeatable sessions:
+  --export-decisions writes a host-independent record of every non-default decision, keyed by finding identity (e.g. "apt:curl", "systemd:app.service") rather than scan position. --import-decisions seeds a later scan (a re-scan of the same host, or a teammate's scan of a similar one) with those decisions before policy rules run, so previously reviewed findings don't need to be re-decided.
 `
 
 const reviewHelp = `linux-nixer review
 Apply repeatable review decisions or run an interactive review over scan JSON.
 
 Usage:
-  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH]
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH]
 
 Examples:
   linux-nixer review --scan scan.json --out reviewed.json --auto-safe
   linux-nixer review --scan scan.json --out reviewed.json --interactive
   linux-nixer review --scan scan.json --out reviewed.json --interactive --pending-only
   linux-nixer review --policy linux-nixer-policy.json --scan scan.json --out reviewed.json
+  linux-nixer review --scan scan-a.json --out reviewed-a.json --confirm-kind service --export-decisions decisions.json
+  linux-nixer review --scan scan-b.json --out reviewed-b.json --import-decisions decisions.json
 
 Flags:
   --scan PATH                  Read input scan JSON.
@@ -225,9 +233,14 @@ Flags:
   --migration-note-kind KIND   Mark findings of kind/category as migration-note. Repeatable.
   --confirm-manager MANAGER    Confirm packages from a package manager. Repeatable.
   --exclude-path PATH          Exclude findings with a path prefix. Repeatable.
+  --import-decisions PATH      Seed decisions from a previously exported decisions JSON before policy rules run.
+  --export-decisions PATH      Write the final decisions to a portable decisions JSON.
 
 Policy:
   Policy decisions are applied first. Explicit CLI --auto-safe overrides policy autoSafe; CLI list flags are merged with policy lists.
+
+Repeatable sessions:
+  --export-decisions writes every non-default decision keyed by finding identity (e.g. "apt:curl", "systemd:app.service"), not scan position, so it stays meaningful across a re-scan or a teammate's scan of a similar host. --import-decisions seeds those decisions into a fresh scan before policy rules run, so imported (explicit, previously reviewed) decisions win over category-level policy defaults, and previously reviewed findings don't need to be re-decided.
 `
 
 const summaryHelp = `linux-nixer summary
@@ -415,6 +428,8 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
 	autoSafe := fs.Bool("auto-safe", true, "confirm high-confidence safe findings during capture")
 	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain after capture")
+	importDecisions := fs.String("import-decisions", "", "seed decisions from a previously exported decisions JSON")
+	exportDecisions := fs.String("export-decisions", "", "write final decisions to a portable decisions JSON")
 	var includes multiFlag
 	var excludes multiFlag
 	fs.Var(&includes, "include", "additional path to scan")
@@ -450,12 +465,28 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote scan: %s\n", scanPath)
 
+	scanReport := *report
+	if *importDecisions != "" {
+		set, err := loadDecisionSet(*importDecisions)
+		if err != nil {
+			return err
+		}
+		scanReport = review.ApplyDecisions(scanReport, set)
+	}
+
 	reviewOpts := reviewOptionsFromFlags(fs, p, review.Options{AutoSafe: true}, *autoSafe, nil, nil, nil, nil, nil, nil, false)
-	reviewed := review.Apply(*report, reviewOpts)
+	reviewed := review.Apply(scanReport, reviewOpts)
 	if err := writeJSON(reviewedPath, reviewed); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote reviewed scan: %s\n", reviewedPath)
+
+	if *exportDecisions != "" {
+		if err := writeJSON(*exportDecisions, review.ExportDecisions(reviewed)); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote decisions: %s\n", *exportDecisions)
+	}
 
 	summary := review.Summarize(reviewed)
 	if err := writeText(summaryPath, review.FormatSummaryMarkdown(summary)); err != nil {
@@ -487,6 +518,8 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	autoSafe := fs.Bool("auto-safe", false, "confirm high-confidence safe findings")
 	interactive := fs.Bool("interactive", false, "review findings interactively")
 	pendingOnly := fs.Bool("pending-only", false, "in interactive mode, only prompt for findings still needing a decision")
+	importDecisions := fs.String("import-decisions", "", "seed decisions from a previously exported decisions JSON")
+	exportDecisions := fs.String("export-decisions", "", "write final decisions to a portable decisions JSON")
 	var confirmKinds multiFlag
 	var excludeKinds multiFlag
 	var todoKinds multiFlag
@@ -509,6 +542,13 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := readJSON(*scanPath, &report); err != nil {
 		return err
 	}
+	if *importDecisions != "" {
+		set, err := loadDecisionSet(*importDecisions)
+		if err != nil {
+			return err
+		}
+		report = review.ApplyDecisions(report, set)
+	}
 	p, err := policy.Load(*policyPath)
 	if err != nil {
 		return err
@@ -518,6 +558,12 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 		report = review.Interactive(stdin, stdout, report, opts)
 	} else {
 		report = review.Apply(report, opts)
+	}
+	if *exportDecisions != "" {
+		if err := writeJSON(*exportDecisions, review.ExportDecisions(report)); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote decisions: %s\n", *exportDecisions)
 	}
 	return writeJSON(*out, &report)
 }
@@ -881,4 +927,12 @@ func readJSONStrict(path string, value any) error {
 	dec := json.NewDecoder(f)
 	dec.DisallowUnknownFields()
 	return dec.Decode(value)
+}
+
+func loadDecisionSet(path string) (review.DecisionSet, error) {
+	var set review.DecisionSet
+	if err := readJSONStrict(path, &set); err != nil {
+		return review.DecisionSet{}, err
+	}
+	return set, set.Validate()
 }

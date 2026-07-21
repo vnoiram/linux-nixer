@@ -77,6 +77,15 @@ bin/linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-outpu
 
 Policy paths are plain prefixes, not globs. CLI list flags are merged with policy lists; explicitly provided boolean and string flags override policy values.
 
+`--export-decisions`/`--import-decisions` (on `review` and `capture`) make specific per-finding decisions repeatable, not just category-level policy rules. A decisions file records every non-default decision keyed by finding identity (e.g. `apt:curl`, `systemd:app.service`), so it stays meaningful across a re-scan of the same host or a teammate's scan of a similar one — commit it alongside your policy file for team review:
+
+```sh
+bin/linux-nixer review --scan scan.json --out reviewed.json --confirm-kind service --export-decisions decisions.json
+bin/linux-nixer review --scan scan-later.json --out reviewed-later.json --import-decisions decisions.json
+```
+
+Imported decisions win over policy `confirmKinds`/`excludeKinds` for the same finding — an explicit prior decision outranks a category default.
+
 Create a baseline manifest. If Docker or Podman is available, `baseline fetch` builds one from the distro's official image — no local rootfs needed:
 
 ```sh

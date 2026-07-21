@@ -518,6 +518,65 @@ func TestRunReviewAppliesPolicy(t *testing.T) {
 	}
 }
 
+func TestRunReviewExportThenImportDecisionsRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	scanAPath := filepath.Join(dir, "scan-a.json")
+	reviewedAPath := filepath.Join(dir, "reviewed-a.json")
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	scanBPath := filepath.Join(dir, "scan-b.json")
+	reviewedBPath := filepath.Join(dir, "reviewed-b.json")
+
+	writeScan(t, scanAPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service"},
+		},
+	})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanAPath, "--out", reviewedAPath, "--confirm-kind", "service", "--confirm-manager", "apt", "--export-decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "wrote decisions:") {
+		t.Fatalf("review stdout missing decisions path:\n%s", stdout.String())
+	}
+
+	// A second, freshly-generated scan of "the same host": same finding
+	// identities, plus one brand-new finding never seen before.
+	writeScan(t, scanBPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Version: "8.1"},
+			{Manager: "apt", Name: "new-tool"},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service"},
+		},
+	})
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"review", "--scan", scanBPath, "--out", reviewedBPath, "--import-decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got model.ScanReport
+	readScan(t, reviewedBPath, &got)
+	if got.Packages[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("curl decision=%q, want confirmed (imported from A)", got.Packages[0].Decision)
+	}
+	if got.Packages[1].Decision != model.DecisionCandidate {
+		t.Fatalf("new-tool decision=%q, want candidate (no decision to import)", got.Packages[1].Decision)
+	}
+	if got.Services[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("service decision=%q, want confirmed (imported from A)", got.Services[0].Decision)
+	}
+}
+
 func TestRunCaptureWritesWorkflowArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root")
