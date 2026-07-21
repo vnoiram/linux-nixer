@@ -36,7 +36,9 @@ func (DevOpsConfigScanner) Scan(ctx context.Context, opts Options, report *model
 			seen[path] = true
 			display := displayPath(opts.Root, path)
 			decision := model.DecisionMigrationNote
-			secretRisk := hasAnySuffix(path, ".json", "config")
+			details := devOpsProviderDetails(display, readLocalDevOpsFile(path))
+			_, hasSecretRefs := details["secret-refs"]
+			secretRisk := hasSecretRefs
 			if strings.Contains(display, ".aws/config") {
 				decision = model.DecisionCandidate
 				secretRisk = false
@@ -47,7 +49,7 @@ func (DevOpsConfigScanner) Scan(ctx context.Context, opts Options, report *model
 				Path:     display,
 				Decision: decision,
 				Reason:   devOpsConfigReason(display),
-				Details:  devOpsProviderDetails(display, readLocalDevOpsFile(path)),
+				Details:  details,
 			})
 			if secretRisk {
 				report.Warnings = append(report.Warnings, model.Warning{

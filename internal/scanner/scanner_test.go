@@ -683,8 +683,30 @@ func TestDevOpsConfigScannerFindsProviderConfigs(t *testing.T) {
 			}
 		}
 	}
-	if len(report.Warnings) == 0 {
-		t.Fatalf("expected secret-risk warnings, got %+v", report.Warnings)
+	secretRiskWarnings := map[string]bool{}
+	for _, w := range report.Warnings {
+		if strings.HasPrefix(w.Message, "secret-risk config detected: ") {
+			secretRiskWarnings[strings.TrimPrefix(w.Message, "secret-risk config detected: ")] = true
+		}
+	}
+	for _, path := range []string{
+		"/home/alice/.kube/config",
+		"/home/alice/.docker/config.json",
+		"/home/alice/.config/helm/repositories.yaml",
+		"/home/alice/.terraformrc",
+	} {
+		if !secretRiskWarnings[path] {
+			t.Fatalf("expected secret-risk warning for %s (has secret-refs), got warnings: %+v", path, report.Warnings)
+		}
+	}
+	for _, path := range []string{
+		"/home/alice/.aws/config",
+		"/home/alice/.azure/config",
+		"/home/alice/.config/gcloud/configurations/config_default",
+	} {
+		if secretRiskWarnings[path] {
+			t.Fatalf("did not expect secret-risk warning for %s (no secret-like content in this fixture), got warnings: %+v", path, report.Warnings)
+		}
 	}
 }
 
