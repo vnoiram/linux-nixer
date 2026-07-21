@@ -53,7 +53,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "doctor":
 		return runDoctor(ctx, args[1:], stdout)
 	case "baseline":
-		return runBaseline(ctx, args[1:], stdout)
+		return runBaseline(ctx, args[1:], stdin, stdout)
 	case "policy":
 		return runPolicy(args[1:], stdout)
 	case "version", "--version", "-v":
@@ -86,6 +86,7 @@ Usage:
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out baselines/ubuntu-24.04.json]
+  linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer help <command>
   linux-nixer version [--full]`)
@@ -118,6 +119,10 @@ func commandHelp(w io.Writer, topic []string) error {
 		}
 		if topic[1] == "fetch" {
 			fmt.Fprint(w, baselineFetchHelp)
+			return nil
+		}
+		if topic[1] == "import" {
+			fmt.Fprint(w, baselineImportHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
@@ -348,6 +353,26 @@ Flags:
   --out PATH         Write baseline JSON to PATH. Defaults to baselines/<distro>-<release>.json.
 
 Pulls the <distro>:<release> image, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data.
+`
+
+const baselineImportHelp = `linux-nixer baseline import
+Build a baseline manifest from an already-downloaded flat rootfs tar, without Docker/Podman or network access.
+
+Usage:
+  linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out PATH]
+
+Examples:
+  linux-nixer baseline import --distro ubuntu --release 24.04 --tar ubuntu-base-24.04-base-amd64.tar.gz
+  docker export web | linux-nixer baseline import --distro ubuntu --release 24.04 --tar -
+  linux-nixer scan --baseline ubuntu:24.04 --include /opt --out scan.json
+
+Flags:
+  --distro NAME      Distro name for the baseline id.
+  --release VALUE    Distro release version for the baseline id.
+  --tar PATH         Path to a flat rootfs tar or tar.gz. Use - to read from stdin.
+  --out PATH         Write baseline JSON to PATH. Defaults to baselines/<distro>-<release>.json.
+
+--tar accepts only flat rootfs tars: an official distro base-rootfs tarball, or the output of ` + "`docker export <container>`" + `. A ` + "`docker save`" + ` image tar (multi-layer, with a manifest.json) is a different format and is not supported.
 `
 
 const policyInitHelp = `linux-nixer policy init
@@ -731,21 +756,23 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	return enc.Encode(result)
 }
 
-func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
+func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
 	if len(args) == 1 && hasHelp(args) {
 		fmt.Fprint(stdout, baselineCreateHelp)
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("baseline supports: baseline create, baseline fetch")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import")
 	}
 	switch args[0] {
 	case "create":
 		return runBaselineCreate(ctx, args[1:], stdout)
 	case "fetch":
 		return runBaselineFetch(ctx, args[1:], stdout)
+	case "import":
+		return runBaselineImport(ctx, args[1:], stdin, stdout)
 	default:
-		return errors.New("baseline supports: baseline create, baseline fetch")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import")
 	}
 }
 
@@ -799,6 +826,42 @@ func runBaselineFetch(ctx context.Context, args []string, stdout io.Writer) erro
 		outPath = filepath.Join("baselines", name)
 	}
 	manifest, err := baseline.Fetch(ctx, baseline.FetchOptions{Distro: *distro, Release: *release, Backend: *backend})
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(outPath, manifest); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote baseline: %s\n", outPath)
+	return nil
+}
+
+func runBaselineImport(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, baselineImportHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("baseline import", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	distro := fs.String("distro", "", "distro name")
+	release := fs.String("release", "", "release version")
+	tarPath := fs.String("tar", "", "path to a flat rootfs tar (or tar.gz); use - for stdin")
+	out := fs.String("out", "", "output baseline JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *distro == "" || *release == "" || *tarPath == "" {
+		return errors.New("baseline import requires --distro, --release, and --tar")
+	}
+	outPath := *out
+	if outPath == "" {
+		name, ok := baseline.NormalizeID(*distro + ":" + *release)
+		if !ok {
+			return fmt.Errorf("invalid distro/release for default output path; pass --out explicitly")
+		}
+		outPath = filepath.Join("baselines", name)
+	}
+	manifest, err := baseline.Import(ctx, baseline.ImportOptions{Distro: *distro, Release: *release, TarPath: *tarPath, Stdin: stdin})
 	if err != nil {
 		return err
 	}

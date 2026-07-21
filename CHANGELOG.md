@@ -31,6 +31,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `review`/`capture --export-decisions` and `--import-decisions` for repeatable migration sessions and team review: a portable, host-independent record of per-finding decisions keyed by identity (manager+name, path, or kind+path) that can be re-applied to a later scan of the same host or a similar one, taking precedence over policy category rules for the same finding.
 - `summary --compare-decisions <path>` for migration progress tracking across repeated scans of the same host: diffs the current scan's decisions against a previously exported decisions snapshot and reports newly decided, changed, regressed-to-pending, and no-longer-present findings.
 - `reports/migration-annotations.nix`: a structured, standalone Nix attribute set tracing every confirmed container/systemd service/cron job to the Nix option it renders as, or why not — not imported into the NixOS configuration, purely a queryable trace (`nix eval --file reports/migration-annotations.nix`).
+- `baseline import --tar <path>` builds a baseline manifest from an already-downloaded flat rootfs tar (an official distro base-rootfs tarball, or a carried-over `docker export` tar), for fully offline use with neither a container backend nor network access; auto-decompresses gzip and supports `--tar -` for stdin.
 
 ### Changed
 

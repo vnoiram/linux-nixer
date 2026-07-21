@@ -17,6 +17,7 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
 - Review-first workflow: scan output is intentionally noisy but structured; review, summary, validate, and checklist steps narrow it before generation.
 - Baseline and diff support: scans can run against mounted rootfs fixtures and compare against distro baselines to identify non-base files, including files whose permissions changed with unchanged content, not just content or brand-new files.
 - `baseline fetch` builds a real baseline manifest for a distro release by pulling its official Docker/Podman image and hashing its actual filesystem, so common Ubuntu/Debian releases don't require a local rootfs and never rely on hand-curated file data.
+- `baseline import` builds the same kind of manifest from an already-downloaded flat rootfs tar (an official distro base-rootfs tarball, or a carried-over `docker export` tar) — for offline use with neither a container backend nor network access, with automatic gzip decompression and `--tar -` stdin support.
 - Standard-library core: the CLI, scanners, review flow, validation, and rendering are implemented in Go with minimal moving parts.
 
 ## Nix mapping maintenance

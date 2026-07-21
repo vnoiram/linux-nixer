@@ -106,7 +106,13 @@ mkdir -p baselines
 bin/linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baselines/ubuntu-24.04.json
 ```
 
-`--baseline` accepts either a JSON path or an ID such as `ubuntu:24.04`. IDs resolve to `baselines/ubuntu-24.04.json` in the current project first, then to the user cache under `linux-nixer/baselines/`. `baseline fetch` writes to that same default path when `--out` is omitted, so a fetched baseline is immediately usable by ID.
+For a fully offline host with neither Docker/Podman nor an extracted rootfs, but a pre-downloaded flat rootfs tarball (an official distro base-rootfs archive, or a `docker export` tar carried over from another machine), `baseline import` builds a baseline without extracting it by hand — `.tar.gz` is decompressed automatically, and `--tar -` reads from stdin for piping directly from `docker export`:
+
+```sh
+bin/linux-nixer baseline import --distro ubuntu --release 24.04 --tar ubuntu-base-24.04-base-amd64.tar.gz
+```
+
+`--baseline` accepts either a JSON path or an ID such as `ubuntu:24.04`. IDs resolve to `baselines/ubuntu-24.04.json` in the current project first, then to the user cache under `linux-nixer/baselines/`. `baseline fetch`/`baseline import` write to that same default path when `--out` is omitted, so the result is immediately usable by ID.
 
 Review decisions can be adjusted without editing JSON by hand:
 

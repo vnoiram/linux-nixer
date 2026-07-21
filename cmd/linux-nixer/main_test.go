@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -397,8 +398,63 @@ func TestRunBaselineUnknownSubcommandFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown baseline subcommand")
 	}
-	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") {
-		t.Fatalf("error should mention both subcommands: %v", err)
+	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") {
+		t.Fatalf("error should mention all three subcommands: %v", err)
+	}
+}
+
+func TestRunBaselineImportBuildsManifestFromFile(t *testing.T) {
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "rootfs.tar")
+	f, err := os.Create(tarPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tw := tar.NewWriter(f)
+	content := []byte("myhost\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "etc/hostname", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(content))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(dir, "baseline.json")
+	var stdout bytes.Buffer
+	err = run(context.Background(), []string{"baseline", "import", "--distro", "ubuntu", "--release", "24.04", "--tar", tarPath, "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "wrote baseline:") {
+		t.Fatalf("baseline import stdout missing path:\n%s", stdout.String())
+	}
+
+	b, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "/etc/hostname") {
+		t.Fatalf("baseline JSON missing /etc/hostname: %s", string(b))
+	}
+	if !strings.Contains(string(b), "\"source\": \"tar:"+tarPath+"\"") {
+		t.Fatalf("baseline JSON missing tar source: %s", string(b))
+	}
+}
+
+func TestRunBaselineImportRequiresTar(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "import", "--distro", "ubuntu", "--release", "24.04"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error when --tar is missing")
+	}
+	if !strings.Contains(err.Error(), "requires --distro, --release, and --tar") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
