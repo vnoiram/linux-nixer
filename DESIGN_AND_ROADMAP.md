@@ -185,6 +185,7 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Add a plugin protocol validation command that invokes a single plugin with a synthetic request and checks its JSON output against the schema, to catch a broken plugin before a real scan.
 - Add a small curated baseline catalog (distro/release → verified image reference, in the same conservative-table spirit as `internal/mapping/mapping.go`) plus a `baseline list` command/flag, and have `baseline fetch` validate `--distro`/`--release` against it before attempting a pull instead of failing opaquely inside `docker pull` (currently `internal/baseline/fetch.go` builds the image reference as a bare `distro:release` concatenation with no validation).
 - Document a compatibility policy for the plugin JSON protocol (what counts as an additive change a plugin may safely ignore vs. a breaking change requiring a new `schemaVersion`) and add a regression test guarding the existing `linux-nixer.plugin-request.v1`/`linux-nixer.scan.v1` constants — the protocol has already grown once compatibly (adding `packages`/`services`/`containers` merging) without this being written down anywhere.
+- Expand the baseline catalog beyond Ubuntu/Debian to at least one more distro family (e.g. Fedora) using the exact same pipeline already established (`docker pull` to verify the image, `docker inspect` for its digest, add the catalog entry, regenerate its bundled offline manifest) — not a new mechanism, just more entries.
 
 ### Mid term
 
@@ -199,6 +200,8 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Extend `reports/migration-annotations.nix` to also explain excluded/todo/migration-note findings, not just confirmed ones, so the one structured trace file answers "why isn't this in Nix" for everything, not only "why is this in Nix."
 - Bundle small pre-built baseline manifests for a handful of common releases (e.g. ubuntu 22.04/24.04, debian 11/12) as release artifacts or a `baselines/catalog/` directory, built on top of the near-term baseline catalog and `baseline import`'s existing tar-based path, so the fully offline case doesn't require separately obtaining a rootfs tar.
 - Investigate `/dev/kvm` availability on larger GitHub-hosted runners (or a self-hosted runner) to finally exercise `doctor --boot` in the `nix-verify` CI job; if no viable free option exists, document that conclusion explicitly instead of leaving the gap silently unrevisited.
+- Add a `baseline catalog check`-style diagnostic that compares each catalog entry's pinned digest (`internal/baseline/catalog.go`) against what its tag currently resolves to, and reports drift (informational only, never auto-updates the catalog) — so a stale entry surfaces as a known, visible fact instead of silently sitting unrefreshed indefinitely.
+- Once a real `nix-verify` run has actually executed the `doctor --boot` change from this round (TCG software-emulated boot instead of skipping outright, see the "Current architecture" release notes above), record the real outcome — works within the timeout, needs a longer timeout, or too slow/flaky to be worth keeping — since it was only ever a documented, untested prediction at commit time (no `nix`/`qemu` available to verify locally).
 
 ### Long term
 
