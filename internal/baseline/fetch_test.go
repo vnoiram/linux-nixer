@@ -71,7 +71,7 @@ func TestFetchBuildsManifestFromExportedTar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const wantPullRefPrefix = "ubuntu:24.04@sha256:"
+	const wantPullRefPrefix = "docker.io/library/ubuntu:24.04@sha256:"
 	if !strings.HasPrefix(manifest.Source, "docker:"+wantPullRefPrefix) {
 		t.Fatalf("source=%q, want prefix docker:%s", manifest.Source, wantPullRefPrefix)
 	}
@@ -160,7 +160,7 @@ func TestFetchRejectsDistroReleaseNotInCatalog(t *testing.T) {
 		called = true
 		return nil, nil
 	}
-	_, err := Fetch(context.Background(), FetchOptions{Distro: "fedora", Release: "40", Backend: "docker", Runner: runner})
+	_, err := Fetch(context.Background(), FetchOptions{Distro: "alpine", Release: "3.19", Backend: "docker", Runner: runner})
 	if err == nil {
 		t.Fatal("expected error for a distro/release not in the baseline catalog")
 	}

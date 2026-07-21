@@ -586,7 +586,7 @@ func TestRunBaselineListJSONOutput(t *testing.T) {
 
 func TestRunBaselineFetchRejectsDistroNotInCatalog(t *testing.T) {
 	var stdout bytes.Buffer
-	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "fedora", "--release", "40"}, strings.NewReader(""), &stdout, &stdout)
+	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "alpine", "--release", "3.19"}, strings.NewReader(""), &stdout, &stdout)
 	if err == nil {
 		t.Fatal("expected error for a distro/release not in the baseline catalog")
 	}
@@ -614,7 +614,7 @@ func TestRunBaselineFetchOfflineUsesBundledManifest(t *testing.T) {
 
 func TestRunBaselineFetchOfflineRejectsUnbundledDistro(t *testing.T) {
 	var stdout bytes.Buffer
-	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "fedora", "--release", "40", "--offline"}, strings.NewReader(""), &stdout, &stdout)
+	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "alpine", "--release", "3.19", "--offline"}, strings.NewReader(""), &stdout, &stdout)
 	if err == nil {
 		t.Fatal("expected error for a distro/release with no bundled manifest")
 	}

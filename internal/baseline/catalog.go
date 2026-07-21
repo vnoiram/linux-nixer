@@ -15,6 +15,12 @@
 // entry's digest to track a new point release is a deliberate, reviewed
 // catalog change, not something that happens silently.
 //
+// Every entry's image must be a genuine Docker Hub Official Image, and
+// Fetch/Check always pull it fully-qualified as
+// "docker.io/library/<tag>@<digest>" (see qualifiedImageRef below) rather
+// than a bare tag, so the result can never depend on local registry-alias
+// configuration.
+//
 // See DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance" section for
 // the review checklist to follow before adding a new entry.
 package baseline
@@ -39,6 +45,28 @@ var catalog = map[string]map[string]catalogEntry{
 		"11": {image: "debian:11", digest: "sha256:6cb68b1be980a0e5b19be25582b34b5cf9cb466d52d08ab4354b79051f2cd298"},
 		"12": {image: "debian:12", digest: "sha256:41a613df4beca480a97c22b1f6837f7502cb95206e2cc2daf1ea3cb28f8755ab"},
 	},
+	"fedora": {
+		"40": {image: "fedora:40", digest: "sha256:2b0571b74dee5d891610276601c6680d622686113488076e7b35c18b455ce879"},
+		"41": {image: "fedora:41", digest: "sha256:68bb1ba893be0c05991b2df55bc6571862bab7526fd6053b1ebacd53a2a75366"},
+	},
+}
+
+// dockerHubOfficialRegistry is the registry every catalog entry's image
+// must resolve against: Docker Hub's Official Images program always
+// publishes under this exact namespace. Fetch/Check fully qualify every
+// pull to this registry explicitly, rather than pulling a bare tag like
+// "fedora:40" and trusting local registry-alias configuration (Podman's
+// registries.conf short-name aliasing, unlike plain Docker, can silently
+// resolve an unqualified name to a different registry entirely — verified
+// in this repo's history: a bare "fedora:40" pull resolved to
+// registry.fedoraproject.org, a different image with a different digest
+// than docker.io/library/fedora:40).
+const dockerHubOfficialRegistry = "docker.io/library/"
+
+// qualifiedImageRef returns the fully-qualified Docker Hub reference for a
+// catalog entry's tag, e.g. "ubuntu:24.04" -> "docker.io/library/ubuntu:24.04".
+func qualifiedImageRef(tag string) string {
+	return dockerHubOfficialRegistry + tag
 }
 
 // CatalogImage returns the verified Docker Hub image tag for a

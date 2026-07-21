@@ -36,8 +36,11 @@ func Fetch(ctx context.Context, opts FetchOptions) (*Manifest, error) {
 	}
 	// Pull by the verified digest, not the floating tag: a tag like
 	// "ubuntu:24.04" gets silently rebuilt over time, which would break
-	// baseline reproducibility (see catalog.go's package doc).
-	pullRef := image + "@" + digest
+	// baseline reproducibility (see catalog.go's package doc). Also fully
+	// qualify to Docker Hub explicitly, not a bare tag, so the result can't
+	// depend on local registry-alias configuration (see
+	// dockerHubOfficialRegistry's doc comment).
+	pullRef := qualifiedImageRef(image) + "@" + digest
 
 	backend := opts.Backend
 	if backend == "" {

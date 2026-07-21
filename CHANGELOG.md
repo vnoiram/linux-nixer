@@ -53,6 +53,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `nix-verify` CI now attempts `doctor --boot` (with a longer `--timeout`) instead of skipping it: this project never sets `virtualisation.qemu.forceAccel`, so the generated VM script uses nixpkgs' default KVM-with-TCG-fallback accelerator rather than hard-requiring `/dev/kvm` as the previous CI comment assumed, so a GitHub-hosted runner without `/dev/kvm` can still attempt a real (software-emulated) boot instead of the step being skipped outright.
 - `baseline fetch` now pulls each catalog entry's exact verified image digest (`CatalogDigest`, `internal/baseline/catalog.go`), not just its floating tag, so fetched content can't silently drift as a tag like `ubuntu:24.04` gets rebuilt over time — the manifest's `source` field records the pinned `image@sha256:...` reference actually pulled. `baseline list` now also prints each entry's digest.
 - `baseline list --json` writes machine-readable JSON (one object per catalog entry: distro, release, image, digest), matching the `--json` convention already used by `summary`/`validate`/`plugin check`.
+- Baseline catalog and offline bundled manifests now cover Fedora 40 and 41, in addition to the existing Ubuntu/Debian releases.
 
 ### Fixed
 
@@ -61,6 +62,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Plugin scanner timeouts now kill the plugin's whole process group, not just its top-level process; previously a plugin that forked a subprocess before exiting (e.g. a shell script) could leave that subprocess holding the output pipe open after being killed, so the scan blocked until the orphaned subprocess exited on its own instead of at the timeout.
 - `serviceGenerationNotes`/`containerGenerationNotes` now explain a confirmed systemd service with no `ExecStart` and a confirmed container missing a name or image, respectively; previously both cases silently produced zero explanatory notes despite nothing being generated.
 - `doctor` now exits non-zero when any check fails; previously it always printed the check result JSON and exited 0 regardless of `ok`, so a CI step running `doctor` could never actually fail.
+- `baseline fetch` now pulls every catalog entry fully-qualified as `docker.io/library/<tag>@<digest>` instead of a bare tag; a bare `fedora:40` was found to resolve to a different image (`registry.fedoraproject.org/fedora`, a different digest) than Docker Hub's own `docker.io/library/fedora:40` under Podman's registry-alias resolution, a wrong-image risk that could affect any catalog entry depending on local container tooling/configuration, not just the newly-added Fedora ones.
 
 ## [0.1.0] - 2026-07-19
 

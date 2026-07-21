@@ -14,6 +14,8 @@ func TestCatalogImageKnownLookups(t *testing.T) {
 		{"ubuntu", "24.04", "ubuntu:24.04"},
 		{"ubuntu", "22.04", "ubuntu:22.04"},
 		{"debian", "12", "debian:12"},
+		{"fedora", "40", "fedora:40"},
+		{"fedora", "41", "fedora:41"},
 		{" Ubuntu ", "24.04", "ubuntu:24.04"},
 	}
 	for _, tc := range cases {
@@ -27,7 +29,7 @@ func TestCatalogImageKnownLookups(t *testing.T) {
 func TestCatalogImageUnknownStaysUnknown(t *testing.T) {
 	cases := []struct{ distro, release string }{
 		{"ubuntu", "16.04"},
-		{"fedora", "40"},
+		{"fedora", "39"},
 		{"debian", "bookworm"},
 		{"", ""},
 	}
@@ -85,8 +87,8 @@ func TestCatalogDigestKnownLookups(t *testing.T) {
 }
 
 func TestCatalogDigestUnknownStaysUnknown(t *testing.T) {
-	if _, ok := CatalogDigest("fedora", "40"); ok {
-		t.Fatal("CatalogDigest(fedora, 40) should not resolve")
+	if _, ok := CatalogDigest("fedora", "39"); ok {
+		t.Fatal("CatalogDigest(fedora, 39) should not resolve")
 	}
 }
 
