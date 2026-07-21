@@ -38,6 +38,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 ### Fixed
 
 - Baseline diff now also detects permission-only changes (e.g. a file gaining or losing its executable bit) when content is unchanged; previously only the content hash was compared.
+- `doctor`'s pre-flight file-completeness check now covers all 21 files `render.Project` generates, including `modules/services.nix` and `modules/filesystem-findings.nix` (both imported by the generated flake); previously 5 files were missing from the check, so a corrupted or missing module would only surface as an opaque Nix import error instead of a clear pre-flight failure.
 
 ## [0.1.0] - 2026-07-19
 

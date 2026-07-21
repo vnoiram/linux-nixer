@@ -60,7 +60,7 @@ Review checklist for adding a mapping entry:
   - Rendering is conservative and mostly emits confirmed packages, safe user options, safe shell/home options, container runtime enables, limited systemd service/timer options, and confirmed cron jobs with a schedule/user/command as `services.cron.systemCronJobs` entries.
 - Validation and doctor:
   - Validation rejects unsupported schema versions, unknown decisions, and unsafe confirmed protected findings.
-  - Doctor checks generated project structure and optionally validates/builds Nix VM artifacts.
+  - Doctor checks generated project structure and optionally validates/builds Nix VM artifacts. Its file-completeness check covers every file `render.Project` produces (including the modules the generated flake imports), kept in sync by a test that walks a real render output and fails if either side drifts.
 - Release:
   - CI runs Go checks.
   - Tag-based release builds Linux amd64/arm64 archives, injects version/commit/build-date metadata, smoke-tests artifacts, produces checksums, and creates a GitHub Release.

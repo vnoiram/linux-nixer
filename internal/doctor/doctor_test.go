@@ -3,11 +3,15 @@ package doctor
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vnoiram/linux-nixer/internal/model"
+	"github.com/vnoiram/linux-nixer/internal/render"
 )
 
 func TestDetectHostFromGeneratedFlake(t *testing.T) {
@@ -34,6 +38,41 @@ func TestCheckProjectFilesRequiresGeneratedFiles(t *testing.T) {
 		if check.OK {
 			t.Fatalf("empty project should fail required file check: %+v", check)
 		}
+	}
+}
+
+func TestCheckProjectFilesCoversEveryRenderedFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := render.Project(dir, model.ScanReport{}); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := CheckProjectFiles(dir)
+	checked := map[string]bool{}
+	for _, check := range checks {
+		rel := strings.TrimPrefix(check.Name, "file:")
+		checked[rel] = true
+		if !check.OK {
+			t.Fatalf("check %+v should pass against a real render.Project output", check)
+		}
+	}
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		if !checked[rel] {
+			t.Errorf("render.Project wrote %q but CheckProjectFiles does not check it", rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
