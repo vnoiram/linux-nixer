@@ -2,8 +2,8 @@ package scanner
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -767,7 +767,7 @@ func scanSystemServices(opts Options, report *model.ScanReport) {
 			Path:     displayPath(opts.Root, path),
 			Decision: model.DecisionCandidate,
 		}
-		applySystemdDetails(path, &service)
+		applySystemdDetails(opts.Root, path, &service)
 		report.Services = append(report.Services, service)
 	}
 	for _, path := range glob(opts.Root, "/etc/cron.d/*", "/var/spool/cron/crontabs/*") {
@@ -777,19 +777,18 @@ func scanSystemServices(opts Options, report *model.ScanReport) {
 			Path:     displayPath(opts.Root, path),
 			Decision: model.DecisionCandidate,
 		}
-		applyCronDetails(service.Path, path, &service)
+		applyCronDetails(opts.Root, service.Path, path, &service)
 		report.Services = append(report.Services, service)
 	}
 }
 
-func applySystemdDetails(path string, service *model.Service) {
-	f, err := os.Open(path)
-	if err != nil {
+func applySystemdDetails(root, path string, service *model.Service) {
+	data, ok := safeReadFile(root, path)
+	if !ok {
 		return
 	}
-	defer f.Close()
 	section := ""
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
@@ -855,17 +854,16 @@ func appendSystemdWords(out []string, value string) []string {
 	return out
 }
 
-func applyCronDetails(displayPath, path string, service *model.Service) {
-	f, err := os.Open(path)
-	if err != nil {
+func applyCronDetails(root, displayPath, path string, service *model.Service) {
+	data, ok := safeReadFile(root, path)
+	if !ok {
 		return
 	}
-	defer f.Close()
 	spoolUser := ""
 	if strings.HasPrefix(displayPath, "/var/spool/cron/crontabs/") {
 		spoolUser = filepath.Base(path)
 	}
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {

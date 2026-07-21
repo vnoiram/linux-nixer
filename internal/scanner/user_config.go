@@ -55,7 +55,7 @@ func scanShellAssets(opts Options, report *model.ScanReport) {
 		addUserConfigItem(opts, report, path, "shell-plugin", "shell plugin manager or plugin tree")
 	}
 	for _, path := range glob(opts.Root, "/home/*/.local/bin/*") {
-		if isRegularExecutable(path) {
+		if isRegularExecutable(opts.Root, path) {
 			addUserConfigItem(opts, report, path, "user-bin", "user-local executable")
 		}
 	}

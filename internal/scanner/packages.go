@@ -84,7 +84,7 @@ func scanFlatpak(ctx context.Context, opts Options, report *model.ScanReport) {
 		}
 	}
 	for _, path := range glob(opts.Root, "/var/lib/flatpak/app/*", "/home/*/.local/share/flatpak/app/*") {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if info, ok := safeStat(opts.Root, path); ok && info.IsDir() {
 			report.Packages = append(report.Packages, model.Package{Manager: "flatpak", Name: filepath.Base(path), Source: displayPath(opts.Root, path), Decision: model.DecisionCandidate, Details: flatpakPathDetails(opts.Root, path)})
 		}
 	}
@@ -99,13 +99,13 @@ func scanAppImages(opts Options, report *model.ScanReport) {
 func scanHomebrewLinux(opts Options, report *model.ScanReport) {
 	for _, cellar := range []string{"/home/linuxbrew/.linuxbrew/Cellar", "/opt/homebrew/Cellar"} {
 		for _, path := range glob(opts.Root, cellar+"/*") {
-			if info, err := os.Stat(path); err == nil && info.IsDir() {
+			if info, ok := safeStat(opts.Root, path); ok && info.IsDir() {
 				report.Packages = append(report.Packages, model.Package{Manager: "homebrew", Name: filepath.Base(path), Source: displayPath(opts.Root, path), Decision: model.DecisionCandidate, Details: homebrewDetails(opts.Root, path)})
 			}
 		}
 	}
 	for _, path := range glob(opts.Root, "/home/*/.linuxbrew/Cellar/*") {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if info, ok := safeStat(opts.Root, path); ok && info.IsDir() {
 			report.Packages = append(report.Packages, model.Package{Manager: "homebrew", Name: filepath.Base(path), Source: displayPath(opts.Root, path), Decision: model.DecisionCandidate, Details: homebrewDetails(opts.Root, path)})
 		}
 	}
@@ -160,7 +160,7 @@ func flatpakPathDetails(root, path string) map[string]string {
 	if exists(root, filepath.ToSlash(filepath.Join(display, "current", "active"))) {
 		details["current"] = "present"
 	}
-	metadata := readPackageFile(rootPath(root, filepath.ToSlash(filepath.Join(display, "current", "active", "metadata"))))
+	metadata := readPackageFile(root, rootPath(root, filepath.ToSlash(filepath.Join(display, "current", "active", "metadata"))))
 	mergePackageDetails(details, flatpakMetadataDetails(metadata))
 	return emptyPackageDetails(details)
 }
@@ -222,7 +222,7 @@ func appImageDetails(root, path string) map[string]string {
 	case strings.HasPrefix(display, "/usr/local/bin/"):
 		details["location"] = "usr-local-bin"
 	}
-	if isRegularExecutable(path) {
+	if isRegularExecutable(root, path) {
 		details["executable"] = "present"
 	}
 	if version := appImageVersion(filepath.Base(path)); version != "" {
@@ -259,7 +259,7 @@ func appImageDesktopEntryExists(root, path string) bool {
 			}
 			continue
 		}
-		if _, err := os.Stat(candidate); err == nil {
+		if _, ok := safeStat(root, candidate); ok {
 			return true
 		}
 	}
@@ -280,7 +280,7 @@ func homebrewDetails(root, path string) map[string]string {
 			details["current-version"] = versions[0]
 		}
 	}
-	mergePackageDetails(details, homebrewReceiptDetails(path, versions))
+	mergePackageDetails(details, homebrewReceiptDetails(root, path, versions))
 	return emptyPackageDetails(details)
 }
 
@@ -299,10 +299,10 @@ func homebrewVersions(path string) []string {
 	return versions
 }
 
-func homebrewReceiptDetails(path string, versions []string) map[string]string {
+func homebrewReceiptDetails(root, path string, versions []string) map[string]string {
 	details := map[string]string{}
 	for _, version := range versions {
-		content := readPackageFile(filepath.Join(path, version, "INSTALL_RECEIPT.json"))
+		content := readPackageFile(root, filepath.Join(path, version, "INSTALL_RECEIPT.json"))
 		if content == "" {
 			continue
 		}
@@ -334,9 +334,9 @@ func homebrewReceiptDetails(path string, versions []string) map[string]string {
 	return emptyPackageDetails(details)
 }
 
-func readPackageFile(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
+func readPackageFile(root, path string) string {
+	b, ok := safeReadFile(root, path)
+	if !ok {
 		return ""
 	}
 	return string(b)

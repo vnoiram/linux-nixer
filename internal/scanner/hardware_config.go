@@ -3,7 +3,6 @@ package scanner
 import (
 	"bufio"
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,7 +24,7 @@ func (HardwareConfigScanner) Scan(ctx context.Context, opts Options, report *mod
 func scanHardwareFiles(opts Options, report *model.ScanReport, seen map[string]bool) {
 	for _, path := range findHardwareConfigFiles(opts.Root) {
 		display := displayPath(opts.Root, path)
-		content := readLocalHardwareFile(path)
+		content := readLocalHardwareFile(opts.Root, path)
 		addHardwareItem(opts, report, seen, path, hardwareName(display), hardwareReason(display), hardwareDetails(display, content))
 	}
 }
@@ -80,8 +79,8 @@ func findHardwareConfigFiles(root string) []string {
 		"/home/*/.config/xremap/*.yaml",
 	} {
 		for _, path := range glob(root, pattern) {
-			info, err := os.Stat(path)
-			if err != nil || info.IsDir() {
+			info, ok := safeStat(root, path)
+			if !ok || info.IsDir() {
 				continue
 			}
 			out = append(out, path)
@@ -109,9 +108,9 @@ func addHardwareItem(opts Options, report *model.ScanReport, seen map[string]boo
 	})
 }
 
-func readLocalHardwareFile(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
+func readLocalHardwareFile(root, path string) string {
+	b, ok := safeReadFile(root, path)
+	if !ok {
 		return ""
 	}
 	return string(b)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -93,6 +94,84 @@ func TestUserConfigScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	for _, item := range report.Items {
 		if item.Path == "/home/alice/.gitconfig" {
 			t.Fatalf("user config scanner followed a symlink outside root: %+v", item)
+		}
+	}
+}
+
+func TestHardwareConfigScannerDoesNotFollowEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := writeOutsideSecret(t)
+	writeSymlink(t, root, "/etc/bluetooth/main.conf", outside)
+
+	report := &model.ScanReport{}
+	if err := (HardwareConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	// findHardwareConfigFiles filters the path out entirely (safeStat
+	// fails), so no item should be created for it at all.
+	for _, item := range report.Items {
+		if item.Path == "/etc/bluetooth/main.conf" {
+			t.Fatalf("hardware config scanner followed a symlink outside root: %+v", item)
+		}
+	}
+}
+
+func TestSystemConfigScannerDoesNotFollowEscapingSymlinkForSystemdOrCron(t *testing.T) {
+	root := t.TempDir()
+	outside := writeOutsideSecret(t)
+	writeSymlink(t, root, "/etc/systemd/system/evil.service", outside)
+	writeSymlink(t, root, "/etc/cron.d/evil", outside)
+
+	report := &model.ScanReport{}
+	if err := (SystemConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, service := range report.Services {
+		if service.Path == "/etc/systemd/system/evil.service" || service.Path == "/etc/cron.d/evil" {
+			if service.ExecStart != "" || service.Schedule != "" || service.User != "" {
+				t.Fatalf("systemd/cron scanner followed a symlink outside root: %+v", service)
+			}
+		}
+	}
+}
+
+func TestLanguageScannerDoesNotFollowEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outsidePkgJSON := filepath.Join(t.TempDir(), "package.json")
+	if err := os.WriteFile(outsidePkgJSON, []byte(`{"name":"leaked-outside-package","version":"9.9.9"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSymlink(t, root, "/usr/local/lib/node_modules/evil/package.json", outsidePkgJSON)
+
+	report := &model.ScanReport{}
+	if err := (LanguageScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range report.Languages.NPM {
+		if pkg.Name == "leaked-outside-package" {
+			t.Fatalf("language scanner followed a symlink outside root: %+v", pkg)
+		}
+	}
+}
+
+func TestPackageEcosystemScannerDoesNotFollowEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outsideVersionDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideVersionDir, "INSTALL_RECEIPT.json"), []byte(`{"source":{"tap":"leaked-outside-tap"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "/home/linuxbrew/.linuxbrew/Cellar/tool/.keep", "")
+	writeSymlink(t, root, "/home/linuxbrew/.linuxbrew/Cellar/tool/9.9.9", outsideVersionDir)
+
+	report := &model.ScanReport{}
+	if err := (PackageEcosystemScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, pkg := range report.Packages {
+		for _, v := range pkg.Details {
+			if strings.Contains(v, "leaked-outside-tap") {
+				t.Fatalf("package ecosystem scanner followed a symlink outside root: %+v", pkg)
+			}
 		}
 	}
 }

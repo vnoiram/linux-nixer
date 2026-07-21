@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -44,8 +43,8 @@ func scanNPM(ctx context.Context, opts Options, report *model.ScanReport) {
 		}
 	}
 	for _, pkgJSON := range glob(opts.Root, "/usr/local/lib/node_modules/*/package.json", "/home/*/.npm-global/lib/node_modules/*/package.json") {
-		text, err := os.ReadFile(pkgJSON)
-		if err != nil {
+		text, ok := safeReadFile(opts.Root, pkgJSON)
+		if !ok {
 			continue
 		}
 		var pkg struct {
@@ -80,7 +79,7 @@ func scanNodeGlobalPackages(opts Options, report *model.ScanReport) {
 	}
 	for _, group := range patterns {
 		for _, pkgJSON := range glob(opts.Root, group.globs...) {
-			name, version, ok := readPackageJSON(pkgJSON)
+			name, version, ok := readPackageJSON(opts.Root, pkgJSON)
 			if !ok {
 				continue
 			}
@@ -113,7 +112,7 @@ func scanVenvs(opts Options, report *model.ScanReport) {
 
 func scanCondaEnvs(opts Options, report *model.ScanReport) {
 	for _, env := range glob(opts.Root, "/home/*/miniconda3/envs/*", "/home/*/anaconda3/envs/*", "/home/*/.conda/envs/*") {
-		if info, err := os.Stat(env); err == nil && info.IsDir() {
+		if info, ok := safeStat(opts.Root, env); ok && info.IsDir() {
 			report.Languages.Conda = append(report.Languages.Conda, model.Package{
 				Manager:  "conda",
 				Name:     filepath.Base(env),
@@ -159,19 +158,19 @@ func scanVersionManagers(opts Options, report *model.ScanReport) {
 
 func scanInstalledBins(opts Options, report *model.ScanReport) {
 	for _, bin := range glob(opts.Root, "/home/*/.cargo/bin/*") {
-		if isRegularExecutable(bin) {
+		if isRegularExecutable(opts.Root, bin) {
 			name := filepath.Base(bin)
 			report.Languages.Cargo = append(report.Languages.Cargo, model.Package{Manager: "cargo", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("cargo", name), Decision: model.DecisionCandidate})
 		}
 	}
 	for _, bin := range glob(opts.Root, "/home/*/go/bin/*") {
-		if isRegularExecutable(bin) {
+		if isRegularExecutable(opts.Root, bin) {
 			name := filepath.Base(bin)
 			report.Languages.Go = append(report.Languages.Go, model.Package{Manager: "go-install", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("go-install", name), Decision: model.DecisionCandidate})
 		}
 	}
 	for _, bin := range glob(opts.Root, "/home/*/.gem/ruby/*/bin/*") {
-		if isRegularExecutable(bin) {
+		if isRegularExecutable(opts.Root, bin) {
 			name := filepath.Base(bin)
 			report.Languages.Gem = append(report.Languages.Gem, model.Package{Manager: "gem", Name: name, Source: displayPath(opts.Root, bin), NixNames: mapping.Candidates("gem", name), Decision: model.DecisionCandidate})
 		}
@@ -253,9 +252,9 @@ func languageProjectReason(name string) string {
 	}
 }
 
-func readPackageJSON(path string) (string, string, bool) {
-	text, err := os.ReadFile(path)
-	if err != nil {
+func readPackageJSON(root, path string) (string, string, bool) {
+	text, ok := safeReadFile(root, path)
+	if !ok {
 		return "", "", false
 	}
 	var pkg struct {
@@ -277,9 +276,9 @@ func glob(root string, patterns ...string) []string {
 	return out
 }
 
-func isRegularExecutable(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0
+func isRegularExecutable(root, path string) bool {
+	info, ok := safeStat(root, path)
+	return ok && info.Mode().IsRegular() && info.Mode()&0o111 != 0
 }
 
 func hasAnySuffix(path string, suffixes ...string) bool {
