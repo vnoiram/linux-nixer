@@ -736,6 +736,26 @@ func readFile(t *testing.T, root, rel string) string {
 	return string(b)
 }
 
+func TestQuoteEscapesNixInterpolationAndSpecialCharacters(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"dollar-brace antiquotation", `${builtins.readFile "/etc/shadow"}`, `"\${builtins.readFile \"/etc/shadow\"}"`},
+		{"bare dollar sign", "cost is $5", `"cost is \$5"`},
+		{"backslash", `C:\path`, `"C:\\path"`},
+		{"plain text unaffected", "hello world", `"hello world"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := quote(tc.input); got != tc.want {
+				t.Fatalf("quote(%q)=%s, want %s", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRedactSecretLikeTextCatchesURLCredentials(t *testing.T) {
 	cases := []struct {
 		name  string

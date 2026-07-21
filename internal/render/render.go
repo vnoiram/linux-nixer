@@ -109,8 +109,34 @@ func nixList(values []string) string {
 	return b.String()
 }
 
+// quote renders s as a Nix double-quoted string literal, safe to embed
+// directly into generated .nix files. This is NOT Go's %q: Nix recognizes
+// "${...}" inside a double-quoted string as live antiquotation (arbitrary
+// expression interpolation), and escapes that meaning only via "\$" — %q
+// has no idea "$" is special in Nix and leaves it untouched, so scanned
+// content containing "${...}" (plausible in shell scripts/ExecStart
+// lines, which routinely use shell variable syntax) would become a live,
+// evaluated Nix expression the next time this generated config is built,
+// not just inert text. Escaping "\", """, and "$" covers every character
+// Nix treats specially inside a double-quoted string; everything else,
+// including literal newlines, is valid unescaped content there.
 func quote(s string) string {
-	return fmt.Sprintf("%q", s)
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '$':
+			b.WriteString(`\$`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func nixBool(v bool) string {
