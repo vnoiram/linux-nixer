@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vnoiram/linux-nixer/internal/baseline"
 	"github.com/vnoiram/linux-nixer/internal/model"
 	policypkg "github.com/vnoiram/linux-nixer/internal/policy"
 )
@@ -557,6 +558,29 @@ func TestRunBaselineListPrintsCatalogEntries(t *testing.T) {
 	out := stdout.String()
 	if !strings.Contains(out, "ubuntu 24.04") || !strings.Contains(out, "debian 12") {
 		t.Fatalf("expected catalog entries in output, got: %q", out)
+	}
+}
+
+func TestRunBaselineListJSONOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"baseline", "list", "--json"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatalf("baseline list --json failed: %v", err)
+	}
+	var entries []baseline.CatalogEntry
+	if err := json.Unmarshal(stdout.Bytes(), &entries); err != nil {
+		t.Fatalf("baseline list --json did not produce valid JSON: %v\noutput: %s", err, stdout.String())
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Distro == "ubuntu" && e.Release == "24.04" {
+			found = true
+			if e.Image == "" || e.Digest == "" {
+				t.Fatalf("ubuntu 24.04 entry missing image/digest: %+v", e)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected an ubuntu 24.04 entry in JSON output: %s", stdout.String())
 	}
 }
 

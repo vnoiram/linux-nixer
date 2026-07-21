@@ -52,6 +52,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `doctor --boot` now scans captured VM console output for known boot-failure signatures (kernel panic, emergency mode, unable to mount root fs, etc.) regardless of how the boot script exited, instead of treating any timeout as success unconditionally; a hung or crashed VM that happens to still be running when the timeout fires is now caught instead of silently passing.
 - `nix-verify` CI now attempts `doctor --boot` (with a longer `--timeout`) instead of skipping it: this project never sets `virtualisation.qemu.forceAccel`, so the generated VM script uses nixpkgs' default KVM-with-TCG-fallback accelerator rather than hard-requiring `/dev/kvm` as the previous CI comment assumed, so a GitHub-hosted runner without `/dev/kvm` can still attempt a real (software-emulated) boot instead of the step being skipped outright.
 - `baseline fetch` now pulls each catalog entry's exact verified image digest (`CatalogDigest`, `internal/baseline/catalog.go`), not just its floating tag, so fetched content can't silently drift as a tag like `ubuntu:24.04` gets rebuilt over time — the manifest's `source` field records the pinned `image@sha256:...` reference actually pulled. `baseline list` now also prints each entry's digest.
+- `baseline list --json` writes machine-readable JSON (one object per catalog entry: distro, release, image, digest), matching the `--json` convention already used by `summary`/`validate`/`plugin check`.
 
 ### Fixed
 

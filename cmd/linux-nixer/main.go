@@ -90,7 +90,7 @@ Usage:
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--offline] [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
-  linux-nixer baseline list
+  linux-nixer baseline list [--json]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer help <command>
@@ -410,11 +410,15 @@ const baselineListHelp = `linux-nixer baseline list
 List the curated distro/release pairs "baseline fetch" knows how to pull.
 
 Usage:
-  linux-nixer baseline list
+  linux-nixer baseline list [--json]
 
 Examples:
   linux-nixer baseline list
+  linux-nixer baseline list --json
   linux-nixer baseline fetch --distro ubuntu --release 24.04
+
+Flags:
+  --json             Write machine-readable JSON (one object per catalog entry: distro, release, image, digest) instead of plain text.
 
 This is a small, hand-verified catalog (see DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance"), not every possible Docker Hub image — an unlisted distro/release is rejected by "baseline fetch" rather than guessed at. Every entry currently listed here also works fully offline via "baseline fetch --offline" (no Docker/Podman or network access needed), since its manifest is bundled directly into this binary.
 `
@@ -1013,7 +1017,19 @@ func runBaselineList(args []string, stdout io.Writer) error {
 		fmt.Fprint(stdout, baselineListHelp)
 		return nil
 	}
-	for _, entry := range baseline.CatalogEntries() {
+	fs := flag.NewFlagSet("baseline list", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	entries := baseline.CatalogEntries()
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(entries)
+	}
+	for _, entry := range entries {
 		fmt.Fprintf(stdout, "%s %s (image: %s, digest: %s)\n", entry.Distro, entry.Release, entry.Image, entry.Digest)
 	}
 	return nil
