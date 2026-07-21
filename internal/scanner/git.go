@@ -91,6 +91,13 @@ func inspectGitSource(root, path string) model.GitSource {
 	return source
 }
 
+// hasGitDirtyMarker only detects an interrupted/mid-operation git state
+// (an unfinished merge/rebase/cherry-pick/revert/bisect, or a stale index
+// lock) — not ordinary uncommitted working-tree changes. This scanner
+// reads files directly rather than shelling out to git or diffing content
+// (consistent with every other scanner here), so it has no way to tell
+// whether the working tree differs from HEAD; a repo with normal
+// uncommitted edits (the common case) reports Dirty: false.
 func hasGitDirtyMarker(gitDir string) bool {
 	for _, marker := range []string{
 		"index.lock",

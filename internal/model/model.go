@@ -77,9 +77,14 @@ type VersionTool struct {
 }
 
 type GitSource struct {
-	Path     string   `json:"path"`
-	Remote   string   `json:"remote,omitempty"`
-	Commit   string   `json:"commit,omitempty"`
+	Path   string `json:"path"`
+	Remote string `json:"remote,omitempty"`
+	Commit string `json:"commit,omitempty"`
+	// Dirty means an interrupted/mid-operation git state was found (an
+	// unfinished merge/rebase/cherry-pick/revert/bisect, or a stale index
+	// lock) — not that the working tree has uncommitted changes. Scanners
+	// read files directly rather than diffing against HEAD, so an
+	// ordinary repo with uncommitted edits reports Dirty: false.
 	Dirty    bool     `json:"dirty,omitempty"`
 	Build    []string `json:"buildHints,omitempty"`
 	Decision Decision `json:"decision,omitempty"`

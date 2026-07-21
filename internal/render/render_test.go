@@ -373,7 +373,7 @@ func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 		"Review clusters `1`, contexts `1`, current-context `present`, secret-refs `1`",
 		"Review DevOps provider configuration `/home/alice/.docker/config.json`",
 		"Review credential-helpers `1`, credential-store `present`, registries `1`, secret-refs `1`",
-		"backup dirty changes before migration",
+		"resolve the interrupted git operation (merge/rebase/cherry-pick/etc.) and back up any uncommitted changes before migration",
 		"Decide how to recreate `/usr/local/bin/tool`",
 		"Back up and restore secret-risk file `/home/alice/.ssh/id_ed25519` manually",
 		"Back up stateful data `/var/lib/postgresql` (postgresql data directory)",

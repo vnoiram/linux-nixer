@@ -230,7 +230,7 @@ Generated projects include:
 - Python venv, pipx, pyproject, requirements, Poetry, Pipenv, uv, and Conda environment markers
 - version managers such as asdf, mise, nvm, fnm, volta, pyenv, rbenv, sdkman, and conda
 - cargo, gem, `go install` style user binaries, and Rust/Go/Ruby project manifests
-- Git checkouts under common source locations with remote, commit, branch, dirty, submodule, and build hints
+- Git checkouts under common source locations with remote, commit, branch, mid-operation state (unfinished merge/rebase/etc., not general uncommitted changes), submodule, and build hints
 - Docker/Podman containers, inspect metadata, and compose files
 - stateful data markers for databases, queues, search, monitoring, container runtimes, VM images, and `/srv` application data
 - backup/sync config and job markers for restic, borg, kopia, rclone, rsync, syncthing, Timeshift, and Duplicati

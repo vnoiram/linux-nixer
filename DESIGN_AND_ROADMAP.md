@@ -100,7 +100,7 @@ Current scanner domains include:
 - Linux users, login shells, home directories, system users, supplementary groups, and privileged group membership
 - snap, flatpak, AppImage, and Homebrew with safe origin/scope/channel/location markers
 - npm/pnpm/yarn globals, Python/pipx/venv/project files, Conda, Cargo, Go-installed binaries, Ruby gems, and version managers
-- Git checkouts with remotes, commits, dirty state, submodules, and build hints
+- Git checkouts with remotes, commits, mid-operation state (unfinished merge/rebase/cherry-pick/revert/bisect, or a stale lock — not general uncommitted changes, since this scanner reads files directly rather than diffing against HEAD), submodules, and build hints
 - Docker/Podman containers, images, ports, mounts, env keys, and compose files
 - systemd services/timers, cron jobs, network/firewall/SSH/VPN summaries, sudo/PAM/polkit/AppArmor/fail2ban/auditd markers, web servers, and kernel/device tuning
 - DevOps config for Kubernetes, Docker client, Helm, Terraform, AWS, GCP, Azure, and CI/CD automation

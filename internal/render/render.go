@@ -679,7 +679,7 @@ func writeGitChecklist(b *strings.Builder, report model.ScanReport) {
 			action += fmt.Sprintf(" at commit `%s`", source.Commit)
 		}
 		if source.Dirty {
-			action += "; backup dirty changes before migration"
+			action += "; resolve the interrupted git operation (merge/rebase/cherry-pick/etc.) and back up any uncommitted changes before migration"
 		}
 		if len(source.Build) > 0 {
 			action += fmt.Sprintf("; review build hints `%s`", strings.Join(source.Build, ", "))
