@@ -50,6 +50,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Interactive review's container and systemd service notes now reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts) instead of a blanket "generates when confirmed and safe" claim.
 - Removed the `"python"` Nix mapping table (`internal/mapping`): it was an exact, unreachable duplicate of `"pipx"` that no scanner ever called.
 - `doctor --boot` now scans captured VM console output for known boot-failure signatures (kernel panic, emergency mode, unable to mount root fs, etc.) regardless of how the boot script exited, instead of treating any timeout as success unconditionally; a hung or crashed VM that happens to still be running when the timeout fires is now caught instead of silently passing.
+- `nix-verify` CI now attempts `doctor --boot` (with a longer `--timeout`) instead of skipping it: this project never sets `virtualisation.qemu.forceAccel`, so the generated VM script uses nixpkgs' default KVM-with-TCG-fallback accelerator rather than hard-requiring `/dev/kvm` as the previous CI comment assumed, so a GitHub-hosted runner without `/dev/kvm` can still attempt a real (software-emulated) boot instead of the step being skipped outright.
 
 ### Fixed
 

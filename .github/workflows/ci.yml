@@ -33,7 +33,7 @@ jobs:
 
   nix-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -45,12 +45,16 @@ jobs:
         run: go build -o bin/linux-nixer ./cmd/linux-nixer
       - name: Capture this runner (scan, auto-safe review, generate)
         run: bin/linux-nixer capture --out linux-nixer-output
-      # --boot is intentionally omitted: standard GitHub-hosted runners have
-      # no /dev/kvm (no nested virtualization), and the generated VM script
-      # defaults to -enable-kvm, so booting it here would fail or need slow
-      # software-emulated QEMU. This still exercises real `nix flake check`
-      # and a real VM derivation build (`nix build`), which needs no
-      # virtualization — the biggest real risk area (invalid generated Nix)
-      # either way.
-      - name: Doctor (nix flake check + VM build, no boot)
-        run: bin/linux-nixer doctor --project linux-nixer-output/nix-config --vm --host generated
+      # Standard GitHub-hosted runners have no /dev/kvm (no nested
+      # virtualization), but this project never sets
+      # virtualisation.qemu.forceAccel, so the generated VM script uses
+      # nixpkgs' default `-machine accel=kvm:tcg` — QEMU probes for KVM and
+      # automatically falls back to software emulation (TCG) rather than
+      # failing outright when /dev/kvm is absent. So --boot is attempted
+      # here with a longer timeout to give a TCG boot a real chance, not
+      # skipped outright; if it turns out too slow/flaky in practice,
+      # dropping back to --vm-only should be based on that evidence rather
+      # than the previous (incorrect) assumption that booting without KVM
+      # was a hard failure.
+      - name: Doctor (nix flake check + VM build + boot)
+        run: bin/linux-nixer doctor --project linux-nixer-output/nix-config --vm --boot --timeout 5m --host generated
