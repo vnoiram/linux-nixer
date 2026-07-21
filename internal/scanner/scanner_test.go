@@ -255,6 +255,7 @@ func TestFilesystemDiffAddsMigrationHintsForCommonLocations(t *testing.T) {
 	write(t, root, "/srv/app/app.service", "[Service]\nExecStart=/opt/vendor/bin/app\n")
 	write(t, root, "/home/alice/.config/tool/config.toml", "theme = 'dark'\n")
 	write(t, root, "/home/alice/.ssh/id_ed25519", "PRIVATE KEY\n")
+	write(t, root, "/home/alice/notes.txt", "grocery list: eggs, milk\n")
 	write(t, root, "/var/lib/postgresql/data/PG_VERSION", "16\n")
 
 	report := &model.ScanReport{}
@@ -291,6 +292,14 @@ func TestFilesystemDiffAddsMigrationHintsForCommonLocations(t *testing.T) {
 	}
 	if len(report.StatefulData) != 1 || report.StatefulData[0].Path != "/var/lib/postgresql" || report.StatefulData[0].Reason == "" {
 		t.Fatalf("unexpected stateful data: %+v", report.StatefulData)
+	}
+	if _, ok := findings["/home/alice/notes.txt"]; ok {
+		t.Fatalf("ordinary home file should produce no finding at all, got: %+v", findings["/home/alice/notes.txt"])
+	}
+	for _, finding := range report.StatefulData {
+		if finding.Path == "/home/alice/notes.txt" || strings.HasPrefix(finding.Path, "/home/alice/notes") {
+			t.Fatalf("ordinary home file should not be reported as stateful data: %+v", finding)
+		}
 	}
 }
 

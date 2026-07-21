@@ -64,6 +64,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - `serviceGenerationNotes`/`containerGenerationNotes` now explain a confirmed systemd service with no `ExecStart` and a confirmed container missing a name or image, respectively; previously both cases silently produced zero explanatory notes despite nothing being generated.
 - `doctor` now exits non-zero when any check fails; previously it always printed the check result JSON and exited 0 regardless of `ok`, so a CI step running `doctor` could never actually fail.
 - `baseline fetch` now pulls every catalog entry fully-qualified as `docker.io/library/<tag>@<digest>` instead of a bare tag; a bare `fedora:40` was found to resolve to a different image (`registry.fedoraproject.org/fedora`, a different digest) than Docker Hub's own `docker.io/library/fedora:40` under Podman's registry-alias resolution, a wrong-image risk that could affect any catalog entry depending on local container tooling/configuration, not just the newly-added Fedora ones.
+- `isStatefulPath` no longer treats every file under `/home` as stateful data; previously any ordinary home-directory file that wasn't a script/executable/desktop-entry/service/secret (a plain document, a dotfile) got reported as a bogus `stateful-data`/`directory` entry with `Size: 0`, one per file, since `/home` had no corresponding collapse rule in `statefulTargets()` the way `/var/lib/postgresql` etc. do — and `/home` is scanned by default, not just under `--deep`.
 
 ## [0.1.0] - 2026-07-19
 

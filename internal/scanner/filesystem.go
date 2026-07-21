@@ -237,8 +237,15 @@ func isVirtualOrNoisy(path string) bool {
 	return false
 }
 
+// isStatefulPath flags well-known service/application data roots, not
+// general home-directory content: an ordinary file under /home (a
+// document, a dotfile) has no corresponding entry in statefulTargets()
+// (stateful.go) to collapse it into a directory-level finding, so it
+// would otherwise fall through to filepath.Clean(path) and be reported as
+// one bogus stateful-data "directory" entry per file — every regular file
+// a user has, since /home is scanned by default, not just under --deep.
 func isStatefulPath(path string) bool {
-	stateful := []string{"/var/lib/postgresql", "/var/lib/mysql", "/var/lib/docker", "/var/lib/containers", "/home/"}
+	stateful := []string{"/var/lib/postgresql", "/var/lib/mysql", "/var/lib/docker", "/var/lib/containers"}
 	for _, p := range stateful {
 		if strings.HasPrefix(path, p) && !strings.Contains(path, "/.config/") && !strings.Contains(path, "/.local/bin/") {
 			return true
