@@ -52,8 +52,8 @@ func addStatefulFinding(opts Options, report *model.ScanReport, path string, rea
 	if shouldExclude(display, opts.Excludes) {
 		return
 	}
-	info, err := os.Stat(path)
-	if err != nil {
+	info, ok := safeStat(opts.Root, path)
+	if !ok {
 		return
 	}
 	finding := model.FileFinding{

@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,12 +33,12 @@ func scanDesktopEnvironment(opts Options, report *model.ScanReport) {
 
 func scanDesktopAssets(opts Options, report *model.ScanReport) {
 	for _, path := range glob(opts.Root, "/usr/share/fonts/*", "/home/*/.local/share/fonts/*") {
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		if info, ok := safeStat(opts.Root, path); ok && !info.IsDir() {
 			report.Desktop.Fonts = append(report.Desktop.Fonts, displayPath(opts.Root, path))
 		}
 	}
 	for _, path := range glob(opts.Root, "/usr/share/themes/*", "/home/*/.themes/*", "/usr/share/icons/*", "/home/*/.icons/*") {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if info, ok := safeStat(opts.Root, path); ok && info.IsDir() {
 			report.Desktop.Themes = append(report.Desktop.Themes, displayPath(opts.Root, path))
 		}
 	}
@@ -81,7 +80,7 @@ func scanDesktopConfigs(opts Options, report *model.ScanReport) {
 		"/home/*/.vimrc",
 	}
 	for _, path := range glob(opts.Root, patterns...) {
-		if info, err := os.Stat(path); err != nil || info.IsDir() {
+		if info, ok := safeStat(opts.Root, path); !ok || info.IsDir() {
 			continue
 		}
 		report.Items = append(report.Items, model.Item{
@@ -132,7 +131,7 @@ func scanGUIProfiles(opts Options, report *model.ScanReport) {
 }
 
 func addDesktopItem(opts Options, report *model.ScanReport, path string, kind string, decision model.Decision, reason string) {
-	if info, err := os.Stat(path); err != nil {
+	if info, ok := safeStat(opts.Root, path); !ok {
 		return
 	} else if !info.IsDir() && kind != "editor-profile" && kind != "browser-extension" && !strings.HasSuffix(path, "profiles.ini") {
 		return

@@ -154,6 +154,55 @@ func TestLanguageScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	}
 }
 
+func TestDesktopScannerDoesNotFollowEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir() // a directory outside root, for the theme-dir case
+	writeSymlink(t, root, "/usr/share/themes/evil", outside)
+
+	report := &model.ScanReport{}
+	if err := (DesktopScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, theme := range report.Desktop.Themes {
+		if theme == "/usr/share/themes/evil" {
+			t.Fatalf("desktop scanner followed a symlink outside root: %+v", report.Desktop.Themes)
+		}
+	}
+}
+
+func TestStatefulDataScannerDoesNotFollowEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	writeSymlink(t, root, "/var/lib/redis", outside)
+
+	report := &model.ScanReport{}
+	if err := (StatefulDataScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.StatefulData {
+		if finding.Path == "/var/lib/redis" {
+			t.Fatalf("stateful data scanner followed a symlink outside root: %+v", finding)
+		}
+	}
+}
+
+func TestAptScannerDoesNotFollowEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/var/lib/dpkg/status", "Package: curl\nStatus: install ok installed\nVersion: 8.0\n\n")
+	outside := writeOutsideSecret(t)
+	writeSymlink(t, root, "/etc/apt/preferences.d/evil", outside)
+
+	report := &model.ScanReport{}
+	if err := (AptScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range report.Items {
+		if item.Path == "/etc/apt/preferences.d/evil" {
+			t.Fatalf("apt scanner followed a symlink outside root: %+v", item)
+		}
+	}
+}
+
 func TestPackageEcosystemScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	root := t.TempDir()
 	outsideVersionDir := t.TempDir()

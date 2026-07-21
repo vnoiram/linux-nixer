@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -124,7 +123,7 @@ func findAptSupportFiles(opts Options, report *model.ScanReport) {
 	for _, group := range groups {
 		for _, pattern := range group.paths {
 			for _, match := range glob(opts.Root, pattern) {
-				if info, err := os.Stat(match); err != nil || info.IsDir() {
+				if info, ok := safeStat(opts.Root, match); !ok || info.IsDir() {
 					continue
 				}
 				report.Items = append(report.Items, model.Item{
@@ -151,8 +150,8 @@ func aptInstallReasonHints(ctx context.Context, opts Options, report *model.Scan
 }
 
 func aptAutoInstalledPackagesFromExtendedStates(opts Options, report *model.ScanReport) (map[string]bool, bool) {
-	data, err := os.ReadFile(rootPath(opts.Root, "/var/lib/apt/extended_states"))
-	if err != nil {
+	data, ok := safeReadFile(opts.Root, rootPath(opts.Root, "/var/lib/apt/extended_states"))
+	if !ok {
 		return nil, false
 	}
 	autoInstalled := map[string]bool{}
@@ -209,8 +208,8 @@ func manualPackageSource(root string) string {
 }
 
 func aptSourceHint(root, path string) string {
-	data, err := os.ReadFile(rootPath(root, path))
-	if err != nil {
+	data, ok := safeReadFile(root, rootPath(root, path))
+	if !ok {
 		return ""
 	}
 	var hints []string
