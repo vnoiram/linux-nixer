@@ -45,7 +45,7 @@ func inspectGitSource(root, path string) model.GitSource {
 		for _, line := range strings.Split(string(config), "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "url =") {
-				source.Remote = strings.TrimSpace(strings.TrimPrefix(line, "url ="))
+				source.Remote = redactRemoteCredentials(strings.TrimSpace(strings.TrimPrefix(line, "url =")))
 				break
 			}
 		}
@@ -98,6 +98,28 @@ func inspectGitSource(root, path string) model.GitSource {
 // (consistent with every other scanner here), so it has no way to tell
 // whether the working tree differs from HEAD; a repo with normal
 // uncommitted edits (the common case) reports Dirty: false.
+// redactRemoteCredentials strips embedded userinfo credentials from a git
+// remote URL (e.g. "https://oauth2:ghp_xxx@github.com/org/repo.git", a
+// common pattern for private-repo access) before it's stored in the scan
+// report and rendered into reports/reports-annotations verbatim. SSH
+// shorthand remotes (e.g. "git@github.com:org/repo.git") have no "://"
+// and rely on key-based auth, not a password, so they're left alone.
+func redactRemoteCredentials(remote string) string {
+	schemeIdx := strings.Index(remote, "://")
+	if schemeIdx < 0 {
+		return remote
+	}
+	rest := remote[schemeIdx+3:]
+	at := strings.Index(rest, "@")
+	if at < 0 {
+		return remote
+	}
+	if slash := strings.Index(rest, "/"); slash >= 0 && slash < at {
+		return remote
+	}
+	return remote[:schemeIdx+3] + "<redacted>" + rest[at:]
+}
+
 func hasGitDirtyMarker(gitDir string) bool {
 	for _, marker := range []string{
 		"index.lock",

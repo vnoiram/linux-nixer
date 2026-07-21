@@ -938,6 +938,9 @@ func TestGitScannerFindsSourceMetadataAndHints(t *testing.T) {
 	write(t, root, "/custom/source/.git/refs/heads/dev", "feedface\n")
 	write(t, root, "/custom/source/package.json", "{}")
 
+	write(t, root, "/srv/creds-repo/.git/config", "[remote \"origin\"]\n  url = https://oauth2:ghp_supersecrettoken@example.com/org/private.git\n")
+	write(t, root, "/srv/creds-repo/.git/HEAD", "cafef00d\n")
+
 	report := &model.ScanReport{}
 	if err := (GitScanner{}).Scan(context.Background(), Options{Root: root, Includes: []string{"/custom"}}, report); err != nil {
 		t.Fatal(err)
@@ -965,6 +968,13 @@ func TestGitScannerFindsSourceMetadataAndHints(t *testing.T) {
 	custom := seen["/custom/source"]
 	if custom.Remote != "https://example.com/custom.git" || custom.Commit != "feedface" || !contains(custom.Build, "branch:dev") || !contains(custom.Build, "package.json") {
 		t.Fatalf("unexpected custom git source: %+v", custom)
+	}
+	creds := seen["/srv/creds-repo"]
+	if creds.Remote != "https://<redacted>@example.com/org/private.git" {
+		t.Fatalf("expected embedded git remote credentials to be redacted, got: %+v", creds)
+	}
+	if strings.Contains(creds.Remote, "ghp_supersecrettoken") || strings.Contains(creds.Remote, "oauth2") {
+		t.Fatalf("git remote leaked embedded credentials: %+v", creds)
 	}
 }
 
