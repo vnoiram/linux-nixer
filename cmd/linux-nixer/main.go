@@ -403,7 +403,7 @@ Flags:
   --offline          Use the manifest bundled into this binary instead of pulling a live image. No Docker/Podman or network access needed. Only works for distro/release pairs bundled offline (currently the whole catalog).
   --out PATH         Write baseline JSON to PATH. Defaults to baselines/<distro>-<release>.json.
 
-Pulls the catalog's verified image for --distro/--release, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data. Run "linux-nixer baseline list" to see supported distro/release pairs before fetching. With --offline, skips the pull entirely and uses the pre-built manifest already bundled into this binary.
+Pulls the catalog's verified image for --distro/--release by its exact pinned digest (not the floating tag, so the fetched content can't silently drift as the tag gets rebuilt), exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data. Run "linux-nixer baseline list" to see supported distro/release pairs before fetching. With --offline, skips the pull entirely and uses the pre-built manifest already bundled into this binary.
 `
 
 const baselineListHelp = `linux-nixer baseline list
@@ -1014,7 +1014,7 @@ func runBaselineList(args []string, stdout io.Writer) error {
 		return nil
 	}
 	for _, entry := range baseline.CatalogEntries() {
-		fmt.Fprintf(stdout, "%s %s (image: %s)\n", entry.Distro, entry.Release, entry.Image)
+		fmt.Fprintf(stdout, "%s %s (image: %s, digest: %s)\n", entry.Distro, entry.Release, entry.Image, entry.Digest)
 	}
 	return nil
 }

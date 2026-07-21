@@ -71,8 +71,9 @@ func TestFetchBuildsManifestFromExportedTar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if manifest.Source != "docker:ubuntu:24.04" {
-		t.Fatalf("source=%q, want docker:ubuntu:24.04", manifest.Source)
+	const wantPullRefPrefix = "ubuntu:24.04@sha256:"
+	if !strings.HasPrefix(manifest.Source, "docker:"+wantPullRefPrefix) {
+		t.Fatalf("source=%q, want prefix docker:%s", manifest.Source, wantPullRefPrefix)
 	}
 
 	paths := map[string]FileEntry{}
@@ -92,11 +93,11 @@ func TestFetchBuildsManifestFromExportedTar(t *testing.T) {
 	if len(calls) != 4 {
 		t.Fatalf("expected 4 commands (pull/create/export/rm), got %d: %v", len(calls), calls)
 	}
-	if calls[0] != "docker pull ubuntu:24.04" {
+	if !strings.HasPrefix(calls[0], "docker pull "+wantPullRefPrefix) {
 		t.Fatalf("unexpected first call: %q", calls[0])
 	}
 	createParts := strings.Fields(calls[1])
-	if len(createParts) != 5 || createParts[0] != "docker" || createParts[1] != "create" || createParts[2] != "--name" || createParts[4] != "ubuntu:24.04" {
+	if len(createParts) != 5 || createParts[0] != "docker" || createParts[1] != "create" || createParts[2] != "--name" || !strings.HasPrefix(createParts[4], wantPullRefPrefix) {
 		t.Fatalf("unexpected create call: %q", calls[1])
 	}
 	containerName := createParts[3]

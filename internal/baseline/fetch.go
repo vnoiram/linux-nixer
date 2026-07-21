@@ -30,6 +30,14 @@ func Fetch(ctx context.Context, opts FetchOptions) (*Manifest, error) {
 	if !ok {
 		return nil, fmt.Errorf("%s:%s is not in the known baseline catalog; run \"linux-nixer baseline list\" for supported distro/release pairs", opts.Distro, opts.Release)
 	}
+	digest, ok := CatalogDigest(opts.Distro, opts.Release)
+	if !ok {
+		return nil, fmt.Errorf("catalog entry for %s:%s has no verified digest; this is a catalog bug, not a user error", opts.Distro, opts.Release)
+	}
+	// Pull by the verified digest, not the floating tag: a tag like
+	// "ubuntu:24.04" gets silently rebuilt over time, which would break
+	// baseline reproducibility (see catalog.go's package doc).
+	pullRef := image + "@" + digest
 
 	backend := opts.Backend
 	if backend == "" {
@@ -47,11 +55,11 @@ func Fetch(ctx context.Context, opts FetchOptions) (*Manifest, error) {
 		return runCommand(ctx, opts.Runner, backend, args...)
 	}
 
-	if _, err := run("pull", image); err != nil {
-		return nil, fmt.Errorf("pulling %s via %s: %w", image, backend, err)
+	if _, err := run("pull", pullRef); err != nil {
+		return nil, fmt.Errorf("pulling %s via %s: %w", pullRef, backend, err)
 	}
-	if _, err := run("create", "--name", container, image); err != nil {
-		return nil, fmt.Errorf("creating container from %s: %w", image, err)
+	if _, err := run("create", "--name", container, pullRef); err != nil {
+		return nil, fmt.Errorf("creating container from %s: %w", pullRef, err)
 	}
 	defer run("rm", "-f", container)
 
@@ -67,14 +75,14 @@ func Fetch(ctx context.Context, opts FetchOptions) (*Manifest, error) {
 	defer os.RemoveAll(tempDir)
 
 	if err := extractTar(exported, tempDir); err != nil {
-		return nil, fmt.Errorf("extracting %s rootfs: %w", image, err)
+		return nil, fmt.Errorf("extracting %s rootfs: %w", pullRef, err)
 	}
 
 	manifest, err := Create(ctx, opts.Distro, opts.Release, tempDir)
 	if err != nil {
 		return nil, err
 	}
-	manifest.Source = backend + ":" + image
+	manifest.Source = backend + ":" + pullRef
 	return manifest, nil
 }
 
