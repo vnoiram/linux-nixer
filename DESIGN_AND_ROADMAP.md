@@ -158,6 +158,9 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Harden release workflow with changelog checks, local release validation commands, and clearer artifact metadata.
 - Expand fixture coverage for representative Debian/Ubuntu hosts and arbitrary non-base filesystem changes.
 - Improve scanner explanations so reports make the review decision easier without exposing raw config.
+- Let policy files specify default `--plugin` paths, consistent with every other scan option (`root`, `sudo`, `deep`, `baseline`, `includes`, `excludes`) already being policy-configurable.
+- Add a `--plugin-timeout` flag to override `PluginScanner`'s default 30s timeout per invocation.
+- Add a plugin protocol validation command that invokes a single plugin with a synthetic request and checks its JSON output against the schema, to catch a broken plugin before a real scan.
 
 ### Mid term
 
@@ -166,6 +169,9 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Add more service/container/config conversion candidates while keeping raw content out of generated Nix.
 - Add policy presets for common migration styles such as workstation, server, developer machine, and minimal audit.
 - Improve import/export flows for repeatable migration sessions and team review.
+- Extend the plugin protocol to merge `Packages`/`Services`/`Containers` in addition to `Items`/`Warnings`, so plugins can contribute richer, per-domain findings.
+- Extend `reports/migration-annotations.nix` to cover packages and users, not just containers/systemd services/cron jobs.
+- Add a consistency check between `decisions.json` and the current policy's kind vocabulary, warning about stale or unresolvable decision entries.
 
 ### Long term
 
@@ -174,6 +180,8 @@ When in doubt, scanners should emit `candidate`, `todo`, or `migration-note` wit
 - Generate more structured Nix modules with explicit migration annotations.
 - Strengthen VM/dry-run validation so generated configs can be tested before touching a real host.
 - Add migration progress tracking across repeated scans of the same machine.
+- Strengthen `doctor --boot`'s VM-boot detection beyond the current timeout-as-success heuristic.
+- Add a CI job with a real Nix installation to verify `nix`-touching functionality (`doctor --vm`/`--boot`, `scripts/release-check.sh`, the generated flake/modules) that has so far only ever been designed, never executed against real `nix`.
 
 ## Non-goals for now
 
