@@ -25,10 +25,12 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Expanded stateful data inventory for common databases, queues, monitoring stores, container state, VM images, and `/srv` app data.
 - Representative-host integration test running the full scanner registry together, and expanded baseline-diff fixture coverage for content, permission, and new-file changes.
 - `baseline fetch` command that builds a baseline manifest from a distro's official Docker/Podman image, so common Ubuntu/Debian releases don't require a local rootfs.
+- Structural tests for the Nix package mapping table (normalized keys, non-empty values, alias targets resolve to real entries) plus a documented review checklist for adding new mappings.
 
 ### Changed
 
 - Interactive review's container and systemd service notes now reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts) instead of a blanket "generates when confirmed and safe" claim.
+- Removed the `"python"` Nix mapping table (`internal/mapping`): it was an exact, unreachable duplicate of `"pipx"` that no scanner ever called.
 
 ### Fixed
 

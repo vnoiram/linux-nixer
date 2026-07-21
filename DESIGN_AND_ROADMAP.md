@@ -19,6 +19,17 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
 - `baseline fetch` builds a real baseline manifest for a distro release by pulling its official Docker/Podman image and hashing its actual filesystem, so common Ubuntu/Debian releases don't require a local rootfs and never rely on hand-curated file data.
 - Standard-library core: the CLI, scanners, review flow, validation, and rendering are implemented in Go with minimal moving parts.
 
+## Nix mapping maintenance
+
+`internal/mapping/mapping.go` is the lookup table from scanned package manager names (apt, npm, pipx, cargo, go-install, gem) to Nix package attribute paths, consumed by `Candidates(manager, name)`. It is conservative by construction: an unmapped name stays unmapped rather than getting a guessed attribute path, and structural tests in `mapping_test.go` (`TestMappingKeysAreNormalized`, `TestMappingValuesAreNonEmpty`, `TestMappingAliasesResolveToRealEntries`, `TestMappingAliasManagersExist`) guard the whole table's integrity, not just a handful of example lookups.
+
+Review checklist for adding a mapping entry:
+
+1. Only add an entry for a manager a scanner actually calls (see the call sites listed in `mapping.go`'s package doc comment) — no speculative tables for managers nothing scans yet.
+2. Verify the target is a real, current nixpkgs attribute path before adding it (e.g. via `nix search nixpkgs <name>` or search.nixos.org). Never guess — if it can't be verified, leave the name unmapped rather than add a plausible-looking but wrong mapping; a wrong confirmed mapping is worse than none, per the conservative-generation principle.
+3. Add the entry to the correct manager's table with a lowercase, trimmed key (or add a `mappingAliases` entry when the scanned name differs from the canonical key).
+4. Add at least one case to `mapping_test.go` exercising the new entry, then run `go test ./internal/mapping/...` — the structural tests run automatically and need no per-entry maintenance.
+
 ## Current architecture
 
 - CLI commands:

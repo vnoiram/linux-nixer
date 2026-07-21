@@ -1,6 +1,9 @@
 package mapping
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCandidatesKnownMappings(t *testing.T) {
 	cases := []struct {
@@ -16,8 +19,6 @@ func TestCandidatesKnownMappings(t *testing.T) {
 		{"npm", "vite", "nodePackages.vite"},
 		{"pipx", "ruff", "ruff"},
 		{"pipx", "uv", "uv"},
-		{"python", "poetry", "poetry"},
-		{"python", "pre-commit", "pre-commit"},
 		{"cargo", "starship", "starship"},
 		{"cargo", "git-delta", "delta"},
 		{"go-install", "gopls", "gopls"},
@@ -66,6 +67,45 @@ func TestCandidatesUnknownAndConservativeManagers(t *testing.T) {
 	} {
 		if got := Candidates(tc.manager, tc.name); got != nil {
 			t.Fatalf("Candidates(%q, %q)=%v, want nil", tc.manager, tc.name, got)
+		}
+	}
+}
+
+func TestMappingKeysAreNormalized(t *testing.T) {
+	for manager, table := range mappings {
+		for key := range table {
+			if normalized := strings.ToLower(strings.TrimSpace(key)); normalized != key {
+				t.Fatalf("mappings[%q] key %q is not normalized (want %q); it would be unreachable via Candidates", manager, key, normalized)
+			}
+		}
+	}
+}
+
+func TestMappingValuesAreNonEmpty(t *testing.T) {
+	for manager, table := range mappings {
+		for key, value := range table {
+			if strings.TrimSpace(value) == "" {
+				t.Fatalf("mappings[%q][%q] has an empty value", manager, key)
+			}
+		}
+	}
+}
+
+func TestMappingAliasesResolveToRealEntries(t *testing.T) {
+	for manager, aliases := range mappingAliases {
+		table := mappings[manager]
+		for name, target := range aliases {
+			if _, ok := table[target]; !ok {
+				t.Fatalf("mappingAliases[%q][%q] targets %q, which is not a key in mappings[%q]", manager, name, target, manager)
+			}
+		}
+	}
+}
+
+func TestMappingAliasManagersExist(t *testing.T) {
+	for manager := range mappingAliases {
+		if _, ok := mappings[manager]; !ok {
+			t.Fatalf("mappingAliases has manager %q with no corresponding mappings table", manager)
 		}
 	}
 }
