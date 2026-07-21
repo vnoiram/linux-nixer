@@ -24,6 +24,7 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - GUI profile inventory for browser profiles, browser extensions, and editor profiles.
 - Expanded stateful data inventory for common databases, queues, monitoring stores, container state, VM images, and `/srv` app data.
 - Representative-host integration test running the full scanner registry together, and expanded baseline-diff fixture coverage for content, permission, and new-file changes.
+- `baseline fetch` command that builds a baseline manifest from a distro's official Docker/Podman image, so common Ubuntu/Debian releases don't require a local rootfs.
 
 ### Changed
 

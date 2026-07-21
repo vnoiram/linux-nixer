@@ -75,15 +75,21 @@ bin/linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-outpu
 
 Policy paths are plain prefixes, not globs. CLI list flags are merged with policy lists; explicitly provided boolean and string flags override policy values.
 
-Create a local baseline manifest:
+Create a baseline manifest. If Docker or Podman is available, `baseline fetch` builds one from the distro's official image — no local rootfs needed:
+
+```sh
+bin/linux-nixer baseline fetch --distro ubuntu --release 24.04
+bin/linux-nixer scan --root /path/to/current-root --baseline ubuntu:24.04 --out scan.json
+```
+
+Without Docker/Podman, or for a custom/offline rootfs, use `baseline create` against a mounted or extracted filesystem instead:
 
 ```sh
 mkdir -p baselines
 bin/linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baselines/ubuntu-24.04.json
-bin/linux-nixer scan --root /path/to/current-root --baseline ubuntu:24.04 --out scan.json
 ```
 
-`--baseline` accepts either a JSON path or an ID such as `ubuntu:24.04`. IDs resolve to `baselines/ubuntu-24.04.json` in the current project first, then to the user cache under `linux-nixer/baselines/`.
+`--baseline` accepts either a JSON path or an ID such as `ubuntu:24.04`. IDs resolve to `baselines/ubuntu-24.04.json` in the current project first, then to the user cache under `linux-nixer/baselines/`. `baseline fetch` writes to that same default path when `--out` is omitted, so a fetched baseline is immediately usable by ID.
 
 Review decisions can be adjusted without editing JSON by hand:
 

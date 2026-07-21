@@ -143,6 +143,16 @@ func TestRunCommandHelpTopics(t *testing.T) {
 			},
 		},
 		{
+			name: "baseline fetch help",
+			args: []string{"help", "baseline", "fetch"},
+			wants: []string{
+				"linux-nixer baseline fetch",
+				"--backend NAME",
+				"docker or podman",
+				"no hand-maintained package data",
+			},
+		},
+		{
 			name: "review help",
 			args: []string{"review", "-h"},
 			wants: []string{
@@ -317,6 +327,28 @@ func TestRunPolicyInitWritesStdoutForDash(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "-")); !os.IsNotExist(statErr) {
 		t.Fatalf("policy init --out - should not create '-' file, stat err=%v", statErr)
+	}
+}
+
+func TestRunBaselineFetchRequiresDistroAndRelease(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "ubuntu"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error when --release is missing")
+	}
+	if !strings.Contains(err.Error(), "requires --distro and --release") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunBaselineUnknownSubcommandFails(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "bogus"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error for unknown baseline subcommand")
+	}
+	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") {
+		t.Fatalf("error should mention both subcommands: %v", err)
 	}
 }
 

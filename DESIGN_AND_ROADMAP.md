@@ -16,6 +16,7 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
 - Stateful data safety: databases, queues, VM images, container volumes, uploads, and application state are reported as migration notes with backup/restore checklist items.
 - Review-first workflow: scan output is intentionally noisy but structured; review, summary, validate, and checklist steps narrow it before generation.
 - Baseline and diff support: scans can run against mounted rootfs fixtures and compare against distro baselines to identify non-base files, including files whose permissions changed with unchanged content, not just content or brand-new files.
+- `baseline fetch` builds a real baseline manifest for a distro release by pulling its official Docker/Podman image and hashing its actual filesystem, so common Ubuntu/Debian releases don't require a local rootfs and never rely on hand-curated file data.
 - Standard-library core: the CLI, scanners, review flow, validation, and rendering are implemented in Go with minimal moving parts.
 
 ## Current architecture

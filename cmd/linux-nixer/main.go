@@ -85,6 +85,7 @@ Usage:
   linux-nixer generate --scan reviewed.json --out ./nix-config
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
+  linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out baselines/ubuntu-24.04.json]
   linux-nixer policy init --out linux-nixer-policy.json
   linux-nixer help <command>
   linux-nixer version [--full]`)
@@ -113,6 +114,10 @@ func commandHelp(w io.Writer, topic []string) error {
 	case "baseline":
 		if len(topic) == 1 || topic[1] == "create" {
 			fmt.Fprint(w, baselineCreateHelp)
+			return nil
+		}
+		if topic[1] == "fetch" {
+			fmt.Fprint(w, baselineFetchHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
@@ -307,6 +312,26 @@ Flags:
   --release VALUE    Distro release version for the baseline id.
   --root PATH        Rootfs path to manifest. Defaults to /.
   --out PATH         Write baseline JSON to PATH.
+`
+
+const baselineFetchHelp = `linux-nixer baseline fetch
+Build a baseline manifest from the official Docker/Podman image for a distro release, without needing a local rootfs.
+
+Usage:
+  linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out PATH]
+
+Examples:
+  linux-nixer baseline fetch --distro ubuntu --release 24.04
+  linux-nixer baseline fetch --distro debian --release 12 --out baselines/debian-12.json
+  linux-nixer scan --baseline ubuntu:24.04 --include /opt --out scan.json
+
+Flags:
+  --distro NAME      Distro name; also used as the image name (e.g. ubuntu, debian).
+  --release VALUE    Distro release version; also used as the image tag (e.g. 24.04, 12).
+  --backend NAME     Container backend: docker or podman. Auto-detected from PATH if omitted.
+  --out PATH         Write baseline JSON to PATH. Defaults to baselines/<distro>-<release>.json.
+
+Pulls the <distro>:<release> image, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data.
 `
 
 const policyInitHelp = `linux-nixer policy init
@@ -631,10 +656,21 @@ func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
 		fmt.Fprint(stdout, baselineCreateHelp)
 		return nil
 	}
-	if len(args) == 0 || args[0] != "create" {
-		return errors.New("baseline supports only: baseline create")
+	if len(args) == 0 {
+		return errors.New("baseline supports: baseline create, baseline fetch")
 	}
-	if hasHelp(args[1:]) {
+	switch args[0] {
+	case "create":
+		return runBaselineCreate(ctx, args[1:], stdout)
+	case "fetch":
+		return runBaselineFetch(ctx, args[1:], stdout)
+	default:
+		return errors.New("baseline supports: baseline create, baseline fetch")
+	}
+}
+
+func runBaselineCreate(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
 		fmt.Fprint(stdout, baselineCreateHelp)
 		return nil
 	}
@@ -644,7 +680,7 @@ func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
 	release := fs.String("release", "", "release version")
 	root := fs.String("root", "/", "rootfs path to manifest")
 	out := fs.String("out", "", "output baseline JSON")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *distro == "" || *release == "" || *out == "" {
@@ -655,6 +691,42 @@ func runBaseline(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	return writeJSON(*out, manifest)
+}
+
+func runBaselineFetch(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, baselineFetchHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("baseline fetch", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	distro := fs.String("distro", "", "distro name")
+	release := fs.String("release", "", "release version")
+	backend := fs.String("backend", "", "container backend: docker or podman")
+	out := fs.String("out", "", "output baseline JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *distro == "" || *release == "" {
+		return errors.New("baseline fetch requires --distro and --release")
+	}
+	outPath := *out
+	if outPath == "" {
+		name, ok := baseline.NormalizeID(*distro + ":" + *release)
+		if !ok {
+			return fmt.Errorf("invalid distro/release for default output path; pass --out explicitly")
+		}
+		outPath = filepath.Join("baselines", name)
+	}
+	manifest, err := baseline.Fetch(ctx, baseline.FetchOptions{Distro: *distro, Release: *release, Backend: *backend})
+	if err != nil {
+		return err
+	}
+	if err := writeJSON(outPath, manifest); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote baseline: %s\n", outPath)
+	return nil
 }
 
 func runPolicy(args []string, stdout io.Writer) error {
