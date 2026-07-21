@@ -171,6 +171,46 @@ func TestRunBootFailureAndTimeout(t *testing.T) {
 	assertCheck(t, timeout, "vm boot:demo", true)
 }
 
+func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
+	t.Chdir(t.TempDir())
+	project := writeGeneratedProject(t, "demo")
+	mkdirVMResult(t, "demo")
+
+	timeoutButPanicked := Run(context.Background(), Options{
+		Project: project,
+		Boot:    true,
+		Host:    "demo",
+		Timeout: time.Nanosecond,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if strings.Contains(name, "run-demo-vm") {
+				<-ctx.Done()
+				return []byte("Kernel panic - not syncing: Attempted to kill init!"), ctx.Err()
+			}
+			return []byte("ok"), nil
+		},
+	})
+	assertCheck(t, timeoutButPanicked, "vm boot:demo", false)
+	if timeoutButPanicked.OK {
+		t.Fatal("result should fail when boot output contains a kernel panic, even on timeout")
+	}
+
+	cleanExitButEmergency := Run(context.Background(), Options{
+		Project: project,
+		Boot:    true,
+		Host:    "demo",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if strings.Contains(name, "run-demo-vm") {
+				return []byte("You are in emergency mode."), nil
+			}
+			return []byte("ok"), nil
+		},
+	})
+	assertCheck(t, cleanExitButEmergency, "vm boot:demo", false)
+	if cleanExitButEmergency.OK {
+		t.Fatal("result should fail when boot output shows emergency mode, even without a runner error")
+	}
+}
+
 func writeGeneratedProject(t *testing.T, host string) string {
 	t.Helper()
 	project := t.TempDir()

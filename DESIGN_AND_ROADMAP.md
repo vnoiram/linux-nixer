@@ -64,6 +64,7 @@ Review checklist for adding a mapping entry:
 - Validation and doctor:
   - Validation rejects unsupported schema versions, unknown decisions, and unsafe confirmed protected findings.
   - Doctor checks generated project structure and optionally validates/builds Nix VM artifacts. Its file-completeness check covers every file `render.Project` produces (including the modules the generated flake imports), kept in sync by a test that walks a real render output and fails if either side drifts.
+  - `doctor --boot` scans the VM boot script's captured console output for known failure signatures (kernel panic, emergency mode, unable to mount root fs, etc.) regardless of whether the process timed out, exited with an error, or exited cleanly — a hung or crashed VM no longer passes silently just because the timeout fired before it crashed outright. This is a heuristic improvement over blind timeout-as-success, not a positive proof of a successful boot (no `nix`/QEMU is available to develop or test against a real VM boot in this environment); that verification gap is intentionally left to a dedicated CI job with a real Nix installation (see roadmap).
 - Release:
   - CI runs Go checks.
   - Tag-based release builds Linux amd64/arm64 archives, injects version/commit/build-date metadata, smoke-tests artifacts, produces checksums, and creates a GitHub Release.

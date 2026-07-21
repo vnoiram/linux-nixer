@@ -9,6 +9,33 @@ import (
 	"time"
 )
 
+// bootFailureSignatures are low-false-positive markers of a hung or
+// crashed Linux boot. Checked against captured VM console output
+// regardless of how the boot script exited (timeout, error, or a clean
+// exit that still shows a failure) — a positive success string isn't
+// checked instead, since it would vary across NixOS versions/configs and
+// risk false negatives.
+var bootFailureSignatures = []string{
+	"kernel panic",
+	"you are in emergency mode",
+	"give root password for maintenance",
+	"unable to mount root fs",
+	"no working init found",
+	"segmentation fault",
+}
+
+// bootFailureSignature returns the first bootFailureSignatures entry found
+// in output (case-insensitive), or "" if none match.
+func bootFailureSignature(output string) string {
+	lower := strings.ToLower(output)
+	for _, sig := range bootFailureSignatures {
+		if strings.Contains(lower, sig) {
+			return sig
+		}
+	}
+	return ""
+}
+
 type Result struct {
 	Project     string   `json:"project"`
 	OK          bool     `json:"ok"`
@@ -123,9 +150,12 @@ func Run(ctx context.Context, opts Options) Result {
 						bootCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 						out, err := runner(bootCtx, script)
 						cancel()
-						if err != nil {
+						if sig := bootFailureSignature(string(out)); sig != "" {
+							result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: false, Message: "boot output contains a failure signature (" + sig + "): " + string(out)})
+							result.OK = false
+						} else if err != nil {
 							if bootCtx.Err() == context.DeadlineExceeded {
-								result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: true, Message: "VM process started and reached timeout without immediate failure"})
+								result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: true, Message: "VM process started, reached timeout, and its output showed no known boot-failure signature"})
 							} else {
 								result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: false, Message: string(out)})
 								result.OK = false
