@@ -88,7 +88,7 @@ Usage:
   linux-nixer generate --scan reviewed.json --out ./nix-config
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
-  linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out baselines/ubuntu-24.04.json]
+  linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--offline] [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline list
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
@@ -388,20 +388,22 @@ const baselineFetchHelp = `linux-nixer baseline fetch
 Build a baseline manifest from the official Docker/Podman image for a distro release, without needing a local rootfs.
 
 Usage:
-  linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--out PATH]
+  linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--offline] [--out PATH]
 
 Examples:
   linux-nixer baseline fetch --distro ubuntu --release 24.04
   linux-nixer baseline fetch --distro debian --release 12 --out baselines/debian-12.json
+  linux-nixer baseline fetch --distro ubuntu --release 24.04 --offline
   linux-nixer scan --baseline ubuntu:24.04 --include /opt --out scan.json
 
 Flags:
   --distro NAME      Distro name; must be in the baseline catalog (see: linux-nixer baseline list).
   --release VALUE    Distro release version; must be in the baseline catalog for --distro.
-  --backend NAME     Container backend: docker or podman. Auto-detected from PATH if omitted.
+  --backend NAME     Container backend: docker or podman. Auto-detected from PATH if omitted. Ignored with --offline.
+  --offline          Use the manifest bundled into this binary instead of pulling a live image. No Docker/Podman or network access needed. Only works for distro/release pairs bundled offline (currently the whole catalog).
   --out PATH         Write baseline JSON to PATH. Defaults to baselines/<distro>-<release>.json.
 
-Pulls the catalog's verified image for --distro/--release, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data. Run "linux-nixer baseline list" to see supported distro/release pairs before fetching.
+Pulls the catalog's verified image for --distro/--release, exports its filesystem, and builds the manifest from real file contents — no hand-maintained package data. Run "linux-nixer baseline list" to see supported distro/release pairs before fetching. With --offline, skips the pull entirely and uses the pre-built manifest already bundled into this binary.
 `
 
 const baselineListHelp = `linux-nixer baseline list
@@ -414,7 +416,7 @@ Examples:
   linux-nixer baseline list
   linux-nixer baseline fetch --distro ubuntu --release 24.04
 
-This is a small, hand-verified catalog (see DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance"), not every possible Docker Hub image — an unlisted distro/release is rejected by "baseline fetch" rather than guessed at.
+This is a small, hand-verified catalog (see DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance"), not every possible Docker Hub image — an unlisted distro/release is rejected by "baseline fetch" rather than guessed at. Every entry currently listed here also works fully offline via "baseline fetch --offline" (no Docker/Podman or network access needed), since its manifest is bundled directly into this binary.
 `
 
 const baselineImportHelp = `linux-nixer baseline import
@@ -1051,6 +1053,7 @@ func runBaselineFetch(ctx context.Context, args []string, stdout io.Writer) erro
 	distro := fs.String("distro", "", "distro name")
 	release := fs.String("release", "", "release version")
 	backend := fs.String("backend", "", "container backend: docker or podman")
+	offline := fs.Bool("offline", false, "use a bundled manifest instead of pulling a live image")
 	out := fs.String("out", "", "output baseline JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1066,9 +1069,22 @@ func runBaselineFetch(ctx context.Context, args []string, stdout io.Writer) erro
 		}
 		outPath = filepath.Join("baselines", name)
 	}
-	manifest, err := baseline.Fetch(ctx, baseline.FetchOptions{Distro: *distro, Release: *release, Backend: *backend})
-	if err != nil {
-		return err
+	var manifest *baseline.Manifest
+	var err error
+	if *offline {
+		bundled, ok, bundledErr := baseline.BundledManifest(*distro, *release)
+		if bundledErr != nil {
+			return bundledErr
+		}
+		if !ok {
+			return fmt.Errorf("no bundled manifest for %s:%s; run \"linux-nixer baseline list\" for what's bundled offline", *distro, *release)
+		}
+		manifest = bundled
+	} else {
+		manifest, err = baseline.Fetch(ctx, baseline.FetchOptions{Distro: *distro, Release: *release, Backend: *backend})
+		if err != nil {
+			return err
+		}
 	}
 	if err := writeJSON(outPath, manifest); err != nil {
 		return err

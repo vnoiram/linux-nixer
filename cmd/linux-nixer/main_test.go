@@ -571,6 +571,34 @@ func TestRunBaselineFetchRejectsDistroNotInCatalog(t *testing.T) {
 	}
 }
 
+func TestRunBaselineFetchOfflineUsesBundledManifest(t *testing.T) {
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "ubuntu-24.04.json")
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "ubuntu", "--release", "24.04", "--offline", "--out", outPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("offline fetch failed: %v", err)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	if !strings.Contains(string(data), `"distro": "ubuntu"`) {
+		t.Fatalf("output does not look like a manifest: %s", data)
+	}
+}
+
+func TestRunBaselineFetchOfflineRejectsUnbundledDistro(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "fetch", "--distro", "fedora", "--release", "40", "--offline"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error for a distro/release with no bundled manifest")
+	}
+	if !strings.Contains(err.Error(), "no bundled manifest") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunBaselineImportBuildsManifestFromFile(t *testing.T) {
 	dir := t.TempDir()
 	tarPath := filepath.Join(dir, "rootfs.tar")

@@ -36,6 +36,7 @@ This is an early implementation scaffold. It includes:
 - GitHub Actions CI and tag-based release workflow
 - A CI job installs a real Nix toolchain and validates a generated flake against it (`nix flake check`, a real VM derivation build) on every push/PR
 - `scan`/`capture --plugin PATH` to run external scanner plugins (any executable, JSON on stdin/stdout) alongside the built-in scanners
+- `baseline fetch --offline` uses a pre-built manifest bundled into the binary for common releases, no Docker/Podman or network access needed
 
 ## Usage
 
@@ -124,6 +125,12 @@ Create a baseline manifest. If Docker or Podman is available, `baseline fetch` b
 bin/linux-nixer baseline list
 bin/linux-nixer baseline fetch --distro ubuntu --release 24.04
 bin/linux-nixer scan --root /path/to/current-root --baseline ubuntu:24.04 --out scan.json
+```
+
+No Docker/Podman and no network access at all? Every catalog entry's manifest is also bundled directly into the binary — `--offline` uses it instead of pulling a live image:
+
+```sh
+bin/linux-nixer baseline fetch --distro ubuntu --release 24.04 --offline
 ```
 
 Without Docker/Podman, or for a custom/offline rootfs, use `baseline create` against a mounted or extracted filesystem instead:

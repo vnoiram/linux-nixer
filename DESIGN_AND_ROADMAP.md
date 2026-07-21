@@ -40,6 +40,9 @@ Review checklist for adding a catalog entry:
 1. Verify the image reference is a real, current official image on Docker Hub before adding it (e.g. `docker pull <image>` succeeds, or check hub.docker.com) — never guess a `distro:release` tag; if it can't be verified, leave the combination out of the catalog rather than add one that might 404 or resolve to something unexpected.
 2. Add the entry under the correct distro's table with a lowercase, trimmed distro key and a trimmed release key (`CatalogImage` normalizes the distro but not the release, matching how `--release` is typically an exact version string like `24.04`, not free text).
 3. Add at least one case to `catalog_test.go` exercising the new entry, then run `go test ./internal/baseline/...` — the structural tests run automatically and need no per-entry maintenance.
+4. Where practical, also bundle the entry for fully offline use (see below): run a real `baseline fetch` for it, gzip the resulting manifest into `internal/baseline/baselines_data/<distro>-<release>.json.gz`, and add a lookup case to `embedded_test.go`. Never hand-write a bundled manifest — it must come from a real fetch against the actual image, the same as any other manifest this tool produces.
+
+`internal/baseline/embedded.go` embeds pre-built manifests for the catalog's entries directly into the binary via `//go:embed`, so `baseline fetch --offline` works with neither Docker/Podman nor network access at all — real fetched data (metadata-only per file: path/type/mode/size/sha256, no raw file contents), not synthesized, which is also why it compresses well (~130KB per Ubuntu release, ~270-290KB per Debian release, gzipped). `BundledManifest(distro, release)` rewrites the manifest's `Source` field with a `bundled:` prefix so a caller can't mistake it for a manifest built from a fetch that just happened.
 
 ## Current architecture
 
@@ -51,7 +54,7 @@ Review checklist for adding a catalog entry:
   - `validate` checks schema, decisions, and protected finding rules.
   - `generate` renders the NixOS/Home Manager project.
   - `doctor` validates generated project files and can run Nix VM checks.
-  - `baseline create`/`fetch`/`import` record rootfs baseline manifests (from a local rootfs, a pulled distro image, or an already-downloaded tar, respectively); `baseline list` shows the curated catalog `fetch` will accept.
+  - `baseline create`/`fetch`/`import` record rootfs baseline manifests (from a local rootfs, a pulled distro image, or an already-downloaded tar, respectively); `baseline list` shows the curated catalog `fetch` will accept; `fetch --offline` uses a real manifest bundled into the binary instead of pulling one, for a fully offline host.
   - `policy init` creates repeatable review policy templates.
 - Scanner registry:
   - Dedicated scanners collect packages, language tooling, Git sources, containers, services, system config, DevOps config, user config, desktop config, hardware/peripherals, backups, secrets, stateful data, and filesystem diff findings.
