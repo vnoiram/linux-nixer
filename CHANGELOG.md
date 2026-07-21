@@ -15,10 +15,6 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Interactive review filtering (`--pending-only`), a skip-rest-of-section command, and per-section progress indicators.
 - Build-time version injection for release binaries.
 - Release tag validation and archive smoke tests in the GitHub Actions release workflow.
-
-### Changed
-
-- Interactive review's container and systemd service notes now reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts) instead of a blanket "generates when confirmed and safe" claim.
 - Scan JSON validation for schema, decisions, and protected findings.
 - Manual migration checklist report for non-automatic migration work.
 - Reusable JSON policy files for scan and review rules.
@@ -27,6 +23,15 @@ The format is based on Keep a Changelog, and this project uses Semantic Versioni
 - Service detail reporting for systemd units, timers, and cron schedules.
 - GUI profile inventory for browser profiles, browser extensions, and editor profiles.
 - Expanded stateful data inventory for common databases, queues, monitoring stores, container state, VM images, and `/srv` app data.
+- Representative-host integration test running the full scanner registry together, and expanded baseline-diff fixture coverage for content, permission, and new-file changes.
+
+### Changed
+
+- Interactive review's container and systemd service notes now reflect the exact render-time generation gates (missing name/image, secret-like exec, environment files, unmapped ports/mounts) instead of a blanket "generates when confirmed and safe" claim.
+
+### Fixed
+
+- Baseline diff now also detects permission-only changes (e.g. a file gaining or losing its executable bit) when content is unchanged; previously only the content hash was compared.
 
 ## [0.1.0] - 2026-07-19
 

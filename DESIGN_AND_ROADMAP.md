@@ -15,7 +15,7 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
 - Secret safety: credentials, keys, token-bearing config, browser profiles, and credential stores are never embedded into generated Nix.
 - Stateful data safety: databases, queues, VM images, container volumes, uploads, and application state are reported as migration notes with backup/restore checklist items.
 - Review-first workflow: scan output is intentionally noisy but structured; review, summary, validate, and checklist steps narrow it before generation.
-- Baseline and diff support: scans can run against mounted rootfs fixtures and compare against distro baselines to identify non-base files.
+- Baseline and diff support: scans can run against mounted rootfs fixtures and compare against distro baselines to identify non-base files, including files whose permissions changed with unchanged content, not just content or brand-new files.
 - Standard-library core: the CLI, scanners, review flow, validation, and rendering are implemented in Go with minimal moving parts.
 
 ## Current architecture
@@ -33,6 +33,7 @@ The goal is not to blindly convert a mutable Linux host into Nix. The goal is to
 - Scanner registry:
   - Dedicated scanners collect packages, language tooling, Git sources, containers, services, system config, DevOps config, user config, desktop config, hardware/peripherals, backups, secrets, stateful data, and filesystem diff findings.
   - Scanners prefer safe summaries and markers over raw file contents.
+  - A representative-host integration test runs the full registry together against a synthetic multi-domain tree, guarding scanner ordering and dedup (e.g. secrets vs. filesystem diff) beyond what per-scanner unit tests can catch.
 - Data model:
   - `ScanReport` is the shared JSON boundary.
   - `Package`, `Item`, `Service`, `Container`, `FileFinding`, and related structs carry review decisions and safe details.

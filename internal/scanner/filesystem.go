@@ -107,7 +107,7 @@ func changedFromBaseline(finding model.FileFinding, base baselineFile) bool {
 		return true
 	}
 	if base.SHA256 != "" && finding.SHA256 != "" {
-		return base.SHA256 != finding.SHA256
+		return base.SHA256 != finding.SHA256 || base.Mode != finding.Mode
 	}
 	return base.Size != finding.Size || base.Mode != finding.Mode || base.Type != finding.Type
 }

@@ -389,6 +389,46 @@ func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
 	}
 }
 
+func TestFilesystemDiffDetectsArbitraryBaselineChanges(t *testing.T) {
+	root := t.TempDir()
+	writeMode(t, root, "/usr/local/bin/unchanged", []byte("#!/bin/sh\necho same\n"), 0o755)
+	writeMode(t, root, "/usr/local/bin/new", []byte("#!/bin/sh\necho new\n"), 0o755)
+	writeMode(t, root, "/usr/local/bin/content-changed", []byte("#!/bin/sh\necho after\n"), 0o755)
+	writeMode(t, root, "/usr/local/bin/perm-changed", []byte("#!/bin/sh\necho perm\n"), 0o755)
+
+	unchangedSum := sha256Hex(t, filepath.Join(root, "usr/local/bin/unchanged"))
+	permSum := sha256Hex(t, filepath.Join(root, "usr/local/bin/perm-changed"))
+
+	baseline := filepath.Join(root, "baseline.json")
+	baselineJSON := `{"files":[` +
+		`{"path":"/usr/local/bin/unchanged","type":"script","mode":"-rwxr-xr-x","size":20,"sha256":"` + unchangedSum + `"},` +
+		`{"path":"/usr/local/bin/content-changed","type":"script","mode":"-rwxr-xr-x","size":21,"sha256":"deadbeef"},` +
+		`{"path":"/usr/local/bin/perm-changed","type":"script","mode":"-rw-r--r--","size":21,"sha256":"` + permSum + `"}` +
+		`]}`
+	if err := os.WriteFile(baseline, []byte(baselineJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report := &model.ScanReport{}
+	if err := (FilesystemDiffScanner{}).Scan(context.Background(), Options{Root: root, BaselineID: baseline, Includes: []string{"/usr/local/bin"}}, report); err != nil {
+		t.Fatal(err)
+	}
+
+	reported := map[string]bool{}
+	for _, finding := range report.FilesystemDiff {
+		reported[finding.Path] = true
+	}
+
+	if reported["/usr/local/bin/unchanged"] {
+		t.Fatalf("unchanged file should be skipped: %+v", report.FilesystemDiff)
+	}
+	for _, path := range []string{"/usr/local/bin/new", "/usr/local/bin/content-changed", "/usr/local/bin/perm-changed"} {
+		if !reported[path] {
+			t.Fatalf("%s should be reported as changed: %+v", path, report.FilesystemDiff)
+		}
+	}
+}
+
 func TestSecretScannerFindsCommonCredentialLocations(t *testing.T) {
 	root := t.TempDir()
 	writeMode(t, root, "/home/alice/.ssh/id_ed25519", []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-value\n"), 0o600)
