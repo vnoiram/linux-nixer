@@ -872,6 +872,21 @@ func applyCronDetails(displayPath, path string, service *model.Service) {
 			continue
 		}
 		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.HasPrefix(fields[0], "@") {
+			service.Schedule = fields[0]
+			rest := fields[1:]
+			if spoolUser != "" {
+				service.User = spoolUser
+				service.ExecStart = strings.Join(rest, " ")
+			} else if len(rest) >= 1 {
+				service.User = rest[0]
+				service.ExecStart = strings.Join(rest[1:], " ")
+			}
+			return
+		}
 		if len(fields) < 6 {
 			continue
 		}

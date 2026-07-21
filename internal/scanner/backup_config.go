@@ -255,7 +255,9 @@ func backupJobDetails(path, content string) map[string]string {
 				schedule = line
 			} else if strings.Contains(path, "/cron") {
 				fields := strings.Fields(line)
-				if len(fields) >= 6 {
+				if len(fields) > 0 && strings.HasPrefix(fields[0], "@") {
+					schedule = fields[0]
+				} else if len(fields) >= 6 {
 					schedule = strings.Join(fields[:5], " ")
 				}
 			}

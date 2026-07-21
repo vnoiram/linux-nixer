@@ -846,6 +846,7 @@ func TestBackupConfigScannerFindsBackupAndSyncConfigs(t *testing.T) {
 	write(t, root, "/etc/systemd/system/restic-backup.service", "[Service]\nExecStart=/usr/bin/restic backup /srv --password-file /etc/restic-password\n")
 	write(t, root, "/etc/systemd/system/restic-backup.timer", "[Timer]\nOnCalendar=daily\n")
 	write(t, root, "/etc/cron.d/rclone-sync", "15 3 * * * root rclone sync /srv remote:backup --token raw-secret\n")
+	write(t, root, "/etc/cron.d/borg-reboot", "@reboot root borg create /backup::snapshot /srv\n")
 
 	report := &model.ScanReport{}
 	if err := (BackupConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -878,6 +879,10 @@ func TestBackupConfigScannerFindsBackupAndSyncConfigs(t *testing.T) {
 	cron := seen["/etc/cron.d/rclone-sync"]
 	if cron.Details["tools"] != "rclone" || cron.Details["schedule"] != "15 3 * * *" || cron.Details["secret-refs"] != "1" {
 		t.Fatalf("cron backup job details missing: %+v", cron)
+	}
+	reboot := seen["/etc/cron.d/borg-reboot"]
+	if reboot.Details["tools"] != "borg" || reboot.Details["schedule"] != "@reboot" {
+		t.Fatalf("@reboot cron backup job details missing: %+v", reboot)
 	}
 	for _, item := range report.Items {
 		for _, value := range item.Details {
@@ -995,6 +1000,8 @@ WantedBy=multi-user.target
 	write(t, root, "/home/alice/.config/systemd/user/user.service", "[Unit]\nDescription=User app\n[Service]\nExecStart=/home/alice/bin/app\n")
 	write(t, root, "/etc/cron.d/job", "15 2 * * * root /usr/local/bin/job\n")
 	write(t, root, "/var/spool/cron/crontabs/alice", "*/5 * * * * /home/alice/bin/task\n")
+	write(t, root, "/etc/cron.d/reboot-job", "@reboot root /usr/local/bin/on-boot\n")
+	write(t, root, "/var/spool/cron/crontabs/bob", "@daily /home/bob/bin/daily-task\n")
 
 	report := &model.ScanReport{}
 	if err := (SystemConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -1144,6 +1151,12 @@ WantedBy=multi-user.target
 	}
 	if services["/var/spool/cron/crontabs/alice"].Schedule != "*/5 * * * *" || services["/var/spool/cron/crontabs/alice"].User != "alice" || services["/var/spool/cron/crontabs/alice"].ExecStart != "/home/alice/bin/task" {
 		t.Fatalf("spool cron details missing: %+v", services["/var/spool/cron/crontabs/alice"])
+	}
+	if services["/etc/cron.d/reboot-job"].Schedule != "@reboot" || services["/etc/cron.d/reboot-job"].User != "root" || services["/etc/cron.d/reboot-job"].ExecStart != "/usr/local/bin/on-boot" {
+		t.Fatalf("@reboot cron.d details missing: %+v", services["/etc/cron.d/reboot-job"])
+	}
+	if services["/var/spool/cron/crontabs/bob"].Schedule != "@daily" || services["/var/spool/cron/crontabs/bob"].User != "bob" || services["/var/spool/cron/crontabs/bob"].ExecStart != "/home/bob/bin/daily-task" {
+		t.Fatalf("@daily spool cron details missing: %+v", services["/var/spool/cron/crontabs/bob"])
 	}
 }
 
