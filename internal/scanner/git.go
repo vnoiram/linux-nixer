@@ -15,9 +15,7 @@ func (GitScanner) Name() string { return "git-sources" }
 
 func (GitScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
 	roots := []string{"/opt", "/usr/local/src", "/srv", "/home"}
-	for _, include := range opts.Includes {
-		roots = append(roots, include)
-	}
+	roots = append(roots, opts.Includes...)
 	for _, base := range roots {
 		abs := rootPath(opts.Root, base)
 		filepath.WalkDir(abs, func(path string, d os.DirEntry, err error) error {
