@@ -79,6 +79,7 @@ func TestTemplatePresetsSetExpectedFields(t *testing.T) {
 		wantConfirm  []string
 		wantExclude  []string
 	}{
+		{"default", true, nil, nil},
 		{"workstation", true, []string{"desktop-config", "shell-config", "user-config", "direnv"}, nil},
 		{"server", true, []string{"service", "container", "os-config"}, []string{"desktop-config", "shell-plugin"}},
 		{"developer-machine", true, []string{"dev-project", "git-source", "language-project", "shell-config", "direnv"}, nil},
@@ -131,6 +132,14 @@ func TestTemplateEmptyPresetMatchesCurrentDefault(t *testing.T) {
 	}
 	if named.AutoSafe == nil || *empty.AutoSafe != *named.AutoSafe {
 		t.Fatalf("Template(\"\") and Template(\"default\") should match: %+v vs %+v", empty, named)
+	}
+}
+
+func TestPresetNamesAreAllValidTemplateInputs(t *testing.T) {
+	for _, name := range PresetNames {
+		if _, err := Template(name); err != nil {
+			t.Fatalf("PresetNames contains %q, but Template(%q) errored: %v", name, name, err)
+		}
 	}
 }
 

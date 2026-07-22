@@ -94,6 +94,14 @@ bin/linux-nixer capture --policy linux-nixer-policy.json --out linux-nixer-outpu
 
 `policy init --preset <name>` starts from a template tuned for a common migration style instead of the generic one: `workstation`, `server`, `developer-machine`, or `minimal-audit` (confirms nothing automatically — the most conservative starting point). Run `bin/linux-nixer help policy init` for what each preset confirms.
 
+For a one-shot run with nothing to save or customize, `scan`/`capture --preset <name>` uses a built-in preset directly — no `policy init`/`--policy` file needed:
+
+```sh
+bin/linux-nixer capture --preset developer-machine --out linux-nixer-output
+```
+
+`--preset` and `--policy` are mutually exclusive (pick a built-in preset, or a custom policy file — not both); use `policy init --preset <name> --out file.json` first if you want to tweak a preset before running. Omitting both flags is equivalent to `--preset default`: root `/`, no `--deep`, auto-safe review — so plain `capture --out DIR` with no other flags already does a reasonable one-shot scan.
+
 Policy paths are plain prefixes, not globs. CLI list flags are merged with policy lists; explicitly provided boolean and string flags override policy values.
 
 `--export-decisions`/`--import-decisions` (on `review` and `capture`) make specific per-finding decisions repeatable, not just category-level policy rules. A decisions file records every non-default decision keyed by finding identity (e.g. `apt:curl`, `systemd:app.service`), so it stays meaningful across a re-scan of the same host or a teammate's scan of a similar one — commit it alongside your policy file for team review:

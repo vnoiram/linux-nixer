@@ -102,7 +102,8 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer scan",
 				"Examples:",
 				"--baseline ID",
-				"Policy include/exclude/plugin lists are merged",
+				"--preset NAME",
+				"Policy include/exclude/plugin lists",
 			},
 		},
 		{
@@ -1195,6 +1196,96 @@ Version: 8.0
 	}
 	if !found {
 		t.Fatalf("policy includePaths not applied: %+v", reviewed.FilesystemDiff)
+	}
+}
+
+func TestRunCaptureAppliesPreset(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	out := filepath.Join(dir, "capture")
+	writeFile(t, root, "/home/alice/project/go.mod", "module example.com/demo\n")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"capture", "--root", root, "--preset", "developer-machine", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewed model.ScanReport
+	readScan(t, filepath.Join(out, "reviewed.json"), &reviewed)
+	found := false
+	for _, item := range reviewed.Items {
+		if item.Path == "/home/alice/project/go.mod" {
+			found = true
+			if item.Decision != model.DecisionConfirmed {
+				t.Fatalf("developer-machine preset should confirm dev-project findings: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected go.mod dev-project item: %+v", reviewed.Items)
+	}
+}
+
+func TestRunScanRejectsPresetAndPolicyTogether(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	policyPath := filepath.Join(dir, "policy.json")
+	if err := os.WriteFile(policyPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "scan.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--policy", policyPath, "--preset", "workstation", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error when --policy and --preset are both given")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunScanRejectsUnknownPreset(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	out := filepath.Join(dir, "scan.json")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"scan", "--root", root, "--preset", "bogus", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected error for unknown preset")
+	}
+	if !strings.Contains(err.Error(), "unknown policy preset") || !strings.Contains(err.Error(), "workstation") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunCapturePresetDefaultMatchesNoPreset(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "/home/alice/project/go.mod", "module example.com/demo\n")
+
+	outNoFlag := filepath.Join(t.TempDir(), "capture-no-flag")
+	outDefault := filepath.Join(t.TempDir(), "capture-default")
+
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"capture", "--root", root, "--out", outNoFlag}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err := run(context.Background(), []string{"capture", "--root", root, "--preset", "default", "--out", outDefault}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+
+	noFlagBytes, err := os.ReadFile(filepath.Join(outNoFlag, "reviewed.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultBytes, err := os.ReadFile(filepath.Join(outDefault, "reviewed.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(noFlagBytes) != string(defaultBytes) {
+		t.Fatalf("--preset default should produce identical output to omitting --preset entirely:\nno-flag: %s\ndefault: %s", noFlagBytes, defaultBytes)
 	}
 }
 

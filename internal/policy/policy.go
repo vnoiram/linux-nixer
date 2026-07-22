@@ -16,7 +16,11 @@ const SchemaVersion = "linux-nixer.policy.v1"
 
 // PresetNames lists the valid Template preset names, in the order they're
 // documented in CLI help text. Keep this in sync with Template's switch.
-var PresetNames = []string{"workstation", "server", "developer-machine", "minimal-audit"}
+// "default" is Template's generic/no-op case (AutoSafe on, everything else
+// empty) — listed explicitly so it's a discoverable, intentional choice
+// (e.g. for `scan`/`capture --preset default`) rather than only reachable
+// by omitting a preset name.
+var PresetNames = []string{"default", "workstation", "server", "developer-machine", "minimal-audit"}
 
 type Policy struct {
 	SchemaVersion       string   `json:"schemaVersion"`

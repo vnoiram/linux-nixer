@@ -80,8 +80,8 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `linux-nixer converts Debian/Ubuntu environments into NixOS + Home Manager flakes.
 
 Usage:
-  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
-  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
+  linux-nixer scan --out scan.json [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
+  linux-nixer capture --out DIR [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
   linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
   linux-nixer validate --scan reviewed.json [--json] [--strict]
@@ -171,17 +171,19 @@ const scanHelp = `linux-nixer scan
 Scan a Debian/Ubuntu-like root filesystem and write scan JSON.
 
 Usage:
-  linux-nixer scan --out scan.json [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION]
+  linux-nixer scan --out scan.json [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION]
 
 Examples:
   linux-nixer scan --out scan.json
+  linux-nixer scan --preset developer-machine --out scan.json
   linux-nixer scan --sudo --deep --out scan.json
   linux-nixer scan --root /mnt/ubuntu --include /opt --baseline ubuntu:24.04 --out scan.json
   linux-nixer scan --plugin ./my-scanner --out scan.json
 
 Flags:
   --out PATH               Write scan JSON to PATH.
-  --policy PATH            Load repeatable scan and review policy from PATH.
+  --preset NAME            Use a built-in policy preset directly: default, workstation, server, developer-machine, or minimal-audit. Mutually exclusive with --policy.
+  --policy PATH            Load repeatable scan and review policy from PATH. Mutually exclusive with --preset.
   --root PATH              Scan PATH as the root filesystem. Defaults to /.
   --sudo                   Allow read-only sudo fallback for selected host files.
   --deep                   Scan broader filesystem paths for manual installs and config.
@@ -192,17 +194,18 @@ Flags:
   --plugin-timeout DURATION  Timeout for each plugin scanner invocation. Defaults to 30s.
 
 Policy:
-  Policy include/exclude/plugin lists are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
+  --preset picks a built-in policy.Template by name, for a one-shot run with no separate file to manage; --policy loads a custom policy JSON instead, e.g. from "policy init --preset NAME --out file.json" if you want to tweak a preset before running. Omitting both is the same as --preset default (root /, no --deep, auto-safe review). Policy include/exclude/plugin lists (whether from --preset or --policy) are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
 `
 
 const captureHelp = `linux-nixer capture
 Run scan, auto-safe review, summary, and Nix generation in one workflow.
 
 Usage:
-  linux-nixer capture --out DIR [--policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
+  linux-nixer capture --out DIR [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION] [--auto-safe=false] [--fail-on-pending] [--import-decisions PATH] [--export-decisions PATH]
 
 Examples:
   linux-nixer capture --out linux-nixer-output
+  linux-nixer capture --preset developer-machine --out linux-nixer-output
   linux-nixer capture --sudo --deep --out linux-nixer-output
   linux-nixer capture --policy linux-nixer-policy.json --root /mnt/ubuntu --include /opt --out linux-nixer-output
   linux-nixer capture --import-decisions decisions.json --export-decisions decisions.json --out linux-nixer-output
@@ -216,7 +219,8 @@ Artifacts:
 
 Flags:
   --out DIR                 Write capture artifacts under DIR.
-  --policy PATH             Load repeatable scan and review policy from PATH.
+  --preset NAME             Use a built-in policy preset directly: default, workstation, server, developer-machine, or minimal-audit. Mutually exclusive with --policy.
+  --policy PATH             Load repeatable scan and review policy from PATH. Mutually exclusive with --preset.
   --root PATH               Scan PATH as the root filesystem. Defaults to /.
   --sudo                    Allow read-only sudo fallback for selected host files.
   --deep                    Scan broader filesystem paths for manual installs and config.
@@ -231,7 +235,7 @@ Flags:
   --export-decisions PATH   Write the final decisions to a portable decisions JSON.
 
 Policy:
-  Policy scan and review defaults are applied first. Explicit CLI boolean and string flags override policy values; CLI list flags are merged with policy lists.
+  --preset picks a built-in policy.Template by name, for a one-shot run with no separate file to manage; --policy loads a custom policy JSON instead, e.g. from "policy init --preset NAME --out file.json" if you want to tweak a preset before running. Omitting both is the same as --preset default (root /, no --deep, auto-safe review) — running plain "capture --out DIR" with no other flags already does a reasonable one-shot scan. Policy scan and review defaults (from either source) are applied first. Explicit CLI boolean and string flags override policy values; CLI list flags are merged with policy lists.
 
 Repeatable sessions:
   --export-decisions writes a host-independent record of every non-default decision, keyed by finding identity (e.g. "apt:curl", "systemd:app.service") rather than scan position. --import-decisions seeds a later scan (a re-scan of the same host, or a teammate's scan of a similar one) with those decisions before policy rules run, so previously reviewed findings don't need to be re-decided.
@@ -503,6 +507,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output scan JSON path")
 	policyPath := fs.String("policy", "", "policy JSON path")
+	preset := fs.String("preset", "", "built-in policy preset: default, workstation, server, developer-machine, or minimal-audit")
 	root := fs.String("root", "/", "root filesystem to scan")
 	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
 	deep := fs.Bool("deep", false, "scan broader filesystem paths")
@@ -520,7 +525,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if *out == "" {
 		return errors.New("scan requires --out")
 	}
-	p, err := policy.Load(*policyPath)
+	p, err := loadPolicyFromFlags(*policyPath, *preset)
 	if err != nil {
 		return err
 	}
@@ -553,6 +558,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output directory")
 	policyPath := fs.String("policy", "", "policy JSON path")
+	preset := fs.String("preset", "", "built-in policy preset: default, workstation, server, developer-machine, or minimal-audit")
 	root := fs.String("root", "/", "root filesystem to scan")
 	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
 	deep := fs.Bool("deep", false, "scan broader filesystem paths")
@@ -574,7 +580,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	if *out == "" {
 		return errors.New("capture requires --out")
 	}
-	p, err := policy.Load(*policyPath)
+	p, err := loadPolicyFromFlags(*policyPath, *preset)
 	if err != nil {
 		return err
 	}
@@ -1250,6 +1256,21 @@ func runPolicy(args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote policy: %s\n", *out)
 	return nil
+}
+
+// loadPolicyFromFlags resolves a Policy from either a --preset name (a
+// built-in policy.Template, for a one-shot run with no separate policy
+// file) or a --policy file path (for a customized policy) — the two are
+// mutually exclusive alternatives, not combinable, so there's exactly one
+// source of policy settings for a given invocation.
+func loadPolicyFromFlags(policyPath, preset string) (policy.Policy, error) {
+	if policyPath != "" && preset != "" {
+		return policy.Policy{}, errors.New("--policy and --preset are mutually exclusive; use --preset for a built-in preset or --policy for a custom policy file")
+	}
+	if preset != "" {
+		return policy.Template(preset)
+	}
+	return policy.Load(policyPath)
 }
 
 func scannerOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, root string, useSudo bool, deep bool, baselineID string, includes []string, excludes []string) (scanner.Options, error) {
