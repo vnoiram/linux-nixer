@@ -89,6 +89,29 @@ func TestRunHelpIncludesCaptureSummaryAndVersion(t *testing.T) {
 	}
 }
 
+func TestRunMigrationGuide(t *testing.T) {
+	for _, args := range [][]string{{"guide"}, {"help", "guide"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout bytes.Buffer
+			err := run(context.Background(), args, strings.NewReader(""), &stdout, &stdout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"linux-nixer migration guide",
+				"linux-nixer capture --out linux-nixer-output",
+				"linux-nixer review --scan scan.json --out reviewed.json",
+				"linux-nixer validate --scan reviewed.json --strict",
+				"Generated Nix only uses confirmed findings",
+			} {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("guide missing %q:\n%s", want, stdout.String())
+				}
+			}
+		})
+	}
+}
+
 func TestRunCommandHelpTopics(t *testing.T) {
 	tests := []struct {
 		name  string

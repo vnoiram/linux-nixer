@@ -59,6 +59,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runPolicy(args[1:], stdout)
 	case "plugin":
 		return runPlugin(ctx, args[1:], stdout)
+	case "guide":
+		fmt.Fprint(stdout, migrationGuide)
+		return nil
 	case "version", "--version", "-v":
 		if len(args) > 1 && args[1] == "--full" {
 			fmt.Fprintf(stdout, "version=%s commit=%s built=%s\n", version, commit, date)
@@ -94,6 +97,7 @@ Usage:
   linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
+  linux-nixer guide
   linux-nixer help <command>
   linux-nixer version [--full]`)
 }
@@ -152,6 +156,8 @@ func commandHelp(w io.Writer, topic []string) error {
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "plugin "+topic[1])
+	case "guide", "migration-guide":
+		fmt.Fprint(w, migrationGuide)
 	default:
 		return fmt.Errorf("unknown help topic %q", topic[0])
 	}
@@ -195,6 +201,34 @@ Flags:
 
 Policy:
   --preset picks a built-in policy.Template by name, for a one-shot run with no separate file to manage; --policy loads a custom policy JSON instead, e.g. from "policy init --preset NAME --out file.json" if you want to tweak a preset before running. Omitting both is the same as --preset default (root /, no --deep, auto-safe review). Policy include/exclude/plugin lists (whether from --preset or --policy) are merged with CLI list flags. Explicit CLI boolean and string flags override policy values.
+`
+
+const migrationGuide = `linux-nixer migration guide
+
+Fast path:
+  linux-nixer capture --out linux-nixer-output
+  linux-nixer validate --scan linux-nixer-output/reviewed.json --strict
+  linux-nixer summary --scan linux-nixer-output/reviewed.json --fail-on-pending
+  linux-nixer doctor --project linux-nixer-output/nix-config
+
+Review-first path:
+  linux-nixer scan --out scan.json
+  linux-nixer policy init --out linux-nixer-policy.json
+  linux-nixer review --scan scan.json --out reviewed.json --policy linux-nixer-policy.json --interactive
+  linux-nixer validate --scan reviewed.json --strict
+  linux-nixer summary --scan reviewed.json
+  linux-nixer generate --scan reviewed.json --out nix-config
+  linux-nixer doctor --project nix-config
+
+Repeatable sessions:
+  linux-nixer review --scan scan.json --out reviewed.json --export-decisions decisions.json
+  linux-nixer capture --out linux-nixer-output --import-decisions decisions.json --export-decisions decisions.json
+  linux-nixer summary --scan linux-nixer-output/reviewed.json --compare-decisions decisions.json
+
+Notes:
+  Generated Nix only uses confirmed findings.
+  Secret-risk and stateful findings stay as manual migration notes.
+  Use "linux-nixer help <command>" for the exact flags supported by each command.
 `
 
 const captureHelp = `linux-nixer capture
