@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -68,8 +67,8 @@ func (UserScanner) Scan(ctx context.Context, opts Options, report *model.ScanRep
 }
 
 func readGroups(root string) (map[string]string, map[string][]string) {
-	b, err := os.ReadFile(rootPath(root, "/etc/group"))
-	if err != nil {
+	b, ok := safeReadFile(root, rootPath(root, "/etc/group"))
+	if !ok {
 		return nil, nil
 	}
 	byGID := map[string]string{}

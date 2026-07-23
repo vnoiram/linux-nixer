@@ -203,6 +203,64 @@ func TestAptScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	}
 }
 
+func TestGitScannerDoesNotFollowEscapingSymlinks(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/home/alice/repo/.git/refs/heads/main", "1111111111111111111111111111111111111111\n")
+
+	outsideConfig := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(outsideConfig, []byte("[remote \"origin\"]\n\turl = https://example.com/outside.git\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSymlink(t, root, "/home/alice/repo/.git/config", outsideConfig)
+
+	outsideHead := filepath.Join(t.TempDir(), "HEAD")
+	if err := os.WriteFile(outsideHead, []byte("9999999999999999999999999999999999999999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSymlink(t, root, "/home/alice/repo/.git/HEAD", outsideHead)
+
+	outsideMarker := writeOutsideSecret(t)
+	writeSymlink(t, root, "/home/alice/repo/.gitmodules", outsideMarker)
+	writeSymlink(t, root, "/home/alice/repo/go.mod", outsideMarker)
+	writeSymlink(t, root, "/home/alice/repo/.git/MERGE_HEAD", outsideMarker)
+
+	report := &model.ScanReport{}
+	if err := (GitScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.GitSources) != 1 {
+		t.Fatalf("git sources=%d, want 1: %+v", len(report.GitSources), report.GitSources)
+	}
+	source := report.GitSources[0]
+	if source.Remote != "" || source.Commit != "" || source.Dirty {
+		t.Fatalf("git scanner followed escaping symlink metadata: %+v", source)
+	}
+	if contains(source.Build, "submodules") || contains(source.Build, "go.mod") {
+		t.Fatalf("git scanner followed escaping symlink build hints: %+v", source)
+	}
+}
+
+func TestUserScannerDoesNotFollowEscapingGroupSymlink(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "/etc/passwd", "alice:x:1000:27:Alice:/home/alice:/bin/bash\n")
+	outsideGroup := filepath.Join(t.TempDir(), "group")
+	if err := os.WriteFile(outsideGroup, []byte("sudo:x:27:alice\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSymlink(t, root, "/etc/group", outsideGroup)
+
+	report := &model.ScanReport{}
+	if err := (UserScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Users) != 1 {
+		t.Fatalf("users=%d, want 1: %+v", len(report.Users), report.Users)
+	}
+	if len(report.Users[0].Groups) != 0 {
+		t.Fatalf("user scanner followed escaping /etc/group symlink: %+v", report.Users[0])
+	}
+}
+
 func TestPackageEcosystemScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	root := t.TempDir()
 	outsideVersionDir := t.TempDir()

@@ -51,15 +51,23 @@ func safeRealPath(root, path string) (string, bool) {
 // safeStat is a symlink-bounded replacement for os.Stat on a path derived
 // from scanned content.
 func safeStat(root, path string) (os.FileInfo, bool) {
+	info, _, ok := safeStatResolved(root, path)
+	return info, ok
+}
+
+// safeStatResolved is safeStat plus the resolved path used for the stat.
+// Use it when follow-up file work must use the same root-bounded path
+// decision instead of resolving the original path a second time.
+func safeStatResolved(root, path string) (os.FileInfo, string, bool) {
 	resolved, ok := safeRealPath(root, path)
 	if !ok {
-		return nil, false
+		return nil, "", false
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
-	return info, true
+	return info, resolved, true
 }
 
 // safeReadFile is a symlink-bounded replacement for os.ReadFile on a path

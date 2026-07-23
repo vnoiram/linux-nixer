@@ -153,7 +153,7 @@ func addSecretFinding(opts Options, report *model.ScanReport, path, reason strin
 	if strings.HasSuffix(display, ".pub") {
 		return
 	}
-	info, ok := safeStat(opts.Root, path)
+	info, resolved, ok := safeStatResolved(opts.Root, path)
 	if !ok || !info.Mode().IsRegular() {
 		return
 	}
@@ -168,7 +168,7 @@ func addSecretFinding(opts Options, report *model.ScanReport, path, reason strin
 		SecretRisk: true,
 	}
 	if info.Size() <= 10*1024*1024 {
-		if sum, err := sha256File(path); err == nil {
+		if sum, err := sha256File(resolved); err == nil {
 			finding.SHA256 = sum
 		}
 	}

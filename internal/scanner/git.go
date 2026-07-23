@@ -39,7 +39,7 @@ func (GitScanner) Scan(ctx context.Context, opts Options, report *model.ScanRepo
 func inspectGitSource(root, path string) model.GitSource {
 	source := model.GitSource{Path: displayPath(root, path), Decision: model.DecisionCandidate}
 	gitDir := filepath.Join(path, ".git")
-	if config, err := os.ReadFile(filepath.Join(gitDir, "config")); err == nil {
+	if config, ok := safeReadFile(root, filepath.Join(gitDir, "config")); ok {
 		for _, line := range strings.Split(string(config), "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "url =") {
@@ -48,7 +48,7 @@ func inspectGitSource(root, path string) model.GitSource {
 			}
 		}
 	}
-	if head, err := os.ReadFile(filepath.Join(gitDir, "HEAD")); err == nil {
+	if head, ok := safeReadFile(root, filepath.Join(gitDir, "HEAD")); ok {
 		ref := strings.TrimSpace(string(head))
 		if strings.HasPrefix(ref, "ref: ") {
 			refName := strings.TrimPrefix(ref, "ref: ")
@@ -67,7 +67,7 @@ func inspectGitSource(root, path string) model.GitSource {
 			source.Commit = ref
 		}
 	}
-	if _, err := os.Stat(filepath.Join(path, ".gitmodules")); err == nil {
+	if _, ok := safeStat(root, filepath.Join(path, ".gitmodules")); ok {
 		source.Build = appendUnique(source.Build, "submodules")
 	}
 	for _, hint := range []string{
@@ -85,11 +85,11 @@ func inspectGitSource(root, path string) model.GitSource {
 		"docker-compose.yml",
 		"compose.yaml",
 	} {
-		if _, err := os.Stat(filepath.Join(path, hint)); err == nil {
+		if _, ok := safeStat(root, filepath.Join(path, hint)); ok {
 			source.Build = appendUnique(source.Build, hint)
 		}
 	}
-	source.Dirty = hasGitDirtyMarker(gitDir)
+	source.Dirty = hasGitDirtyMarker(root, gitDir)
 	return source
 }
 
@@ -122,7 +122,7 @@ func redactRemoteCredentials(remote string) string {
 	return remote[:schemeIdx+3] + "<redacted>" + rest[at:]
 }
 
-func hasGitDirtyMarker(gitDir string) bool {
+func hasGitDirtyMarker(root, gitDir string) bool {
 	for _, marker := range []string{
 		"index.lock",
 		"MERGE_HEAD",
@@ -132,7 +132,7 @@ func hasGitDirtyMarker(gitDir string) bool {
 		"rebase-merge",
 		"rebase-apply",
 	} {
-		if _, err := os.Stat(filepath.Join(gitDir, marker)); err == nil {
+		if _, ok := safeStat(root, filepath.Join(gitDir, marker)); ok {
 			return true
 		}
 	}
