@@ -72,7 +72,7 @@ func Template(preset string) (Policy, error) {
 	case "minimal-audit":
 		autoSafe = false
 	default:
-		return Policy{}, fmt.Errorf("unknown policy preset %q; supported presets: %s", preset, strings.Join(PresetNames, ", "))
+		return Policy{}, fmt.Errorf("unknown policy preset %q; supported presets: %s; run `linux-nixer policy init --preset workstation --out linux-nixer-policy.json` to create a preset policy", preset, strings.Join(PresetNames, ", "))
 	}
 	p.AutoSafe = &autoSafe
 	return p, nil
@@ -84,7 +84,7 @@ func Load(path string) (Policy, error) {
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return Policy{}, err
+		return Policy{}, fmt.Errorf("could not read policy %q: %w; create one with `linux-nixer policy init --out linux-nixer-policy.json`", path, err)
 	}
 	defer f.Close()
 	dec := json.NewDecoder(f)

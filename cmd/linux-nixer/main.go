@@ -75,7 +75,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		usage(stdout)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		return fmt.Errorf("unknown command %q; run `linux-nixer help` to list commands or `linux-nixer guide` for the migration workflow", args[0])
 	}
 }
 
@@ -557,7 +557,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	if *out == "" {
-		return errors.New("scan requires --out")
+		return errors.New("scan requires --out; try `linux-nixer scan --out scan.json`")
 	}
 	p, err := loadPolicyFromFlags(*policyPath, *preset)
 	if err != nil {
@@ -612,7 +612,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	if *out == "" {
-		return errors.New("capture requires --out")
+		return errors.New("capture requires --out; try `linux-nixer capture --out linux-nixer-output`")
 	}
 	p, err := loadPolicyFromFlags(*policyPath, *preset)
 	if err != nil {
@@ -710,7 +710,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	if *scanPath == "" || *out == "" {
-		return errors.New("review requires --scan and --out")
+		return errors.New("review requires --scan and --out; try `linux-nixer review --scan scan.json --out reviewed.json`")
 	}
 	var report model.ScanReport
 	if err := readJSON(*scanPath, &report); err != nil {
@@ -757,7 +757,7 @@ func runSummary(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *scanPath == "" {
-		return errors.New("summary requires --scan")
+		return errors.New("summary requires --scan; try `linux-nixer summary --scan reviewed.json`")
 	}
 	var report model.ScanReport
 	if err := readJSON(*scanPath, &report); err != nil {
@@ -815,10 +815,10 @@ func runValidate(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *scanPath == "" && *decisionsPath == "" {
-		return errors.New("validate requires --scan or --decisions")
+		return errors.New("validate requires --scan or --decisions; try `linux-nixer validate --scan reviewed.json --strict`")
 	}
 	if *decisionsPath != "" && *policyPath == "" {
-		return errors.New("validate --decisions requires --policy")
+		return errors.New("validate --decisions requires --policy; try `linux-nixer validate --decisions decisions.json --policy linux-nixer-policy.json`")
 	}
 
 	var subjects []string
@@ -935,7 +935,7 @@ func runPluginCheck(ctx context.Context, args []string, stdout io.Writer) error 
 		return err
 	}
 	if *pluginPath == "" {
-		return errors.New("plugin check requires --plugin")
+		return errors.New("plugin check requires --plugin; try `linux-nixer plugin check --plugin ./my-scanner`")
 	}
 
 	report, err := scanner.CheckPlugin(ctx, *pluginPath, *timeout)
@@ -1005,7 +1005,7 @@ func runGenerate(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *scanPath == "" || *out == "" {
-		return errors.New("generate requires --scan and --out")
+		return errors.New("generate requires --scan and --out; try `linux-nixer generate --scan reviewed.json --out nix-config`")
 	}
 	var report model.ScanReport
 	if err := readJSON(*scanPath, &report); err != nil {
@@ -1034,7 +1034,7 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	if *project == "" {
-		return errors.New("doctor requires --project")
+		return errors.New("doctor requires --project; try `linux-nixer doctor --project nix-config`")
 	}
 	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Boot: *boot, Timeout: *timeout, Host: *host})
 	enc := json.NewEncoder(stdout)
@@ -1060,7 +1060,7 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check; run `linux-nixer help baseline fetch` for common baseline setup")
 	}
 	switch args[0] {
 	case "create":
@@ -1074,7 +1074,7 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 	case "check":
 		return runBaselineCheck(ctx, args[1:], stdout)
 	default:
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check; run `linux-nixer baseline list` to see supported fetch targets")
 	}
 }
 
@@ -1162,7 +1162,7 @@ func runBaselineCreate(ctx context.Context, args []string, stdout io.Writer) err
 		return err
 	}
 	if *distro == "" || *release == "" || *out == "" {
-		return errors.New("baseline create requires --distro, --release, and --out")
+		return errors.New("baseline create requires --distro, --release, and --out; try `linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baselines/ubuntu-24.04.json`")
 	}
 	manifest, err := baseline.Create(ctx, *distro, *release, *root)
 	if err != nil {
@@ -1187,13 +1187,13 @@ func runBaselineFetch(ctx context.Context, args []string, stdout io.Writer) erro
 		return err
 	}
 	if *distro == "" || *release == "" {
-		return errors.New("baseline fetch requires --distro and --release")
+		return errors.New("baseline fetch requires --distro and --release; try `linux-nixer baseline fetch --distro ubuntu --release 24.04 --offline`")
 	}
 	outPath := *out
 	if outPath == "" {
 		name, ok := baseline.NormalizeID(*distro + ":" + *release)
 		if !ok {
-			return fmt.Errorf("invalid distro/release for default output path; pass --out explicitly")
+			return fmt.Errorf("invalid distro/release for default output path; pass --out explicitly, e.g. `--out baselines/custom.json`")
 		}
 		outPath = filepath.Join("baselines", name)
 	}

@@ -263,6 +263,52 @@ func TestRunCommandHelpUnknownTopicFails(t *testing.T) {
 	}
 }
 
+func TestRunCLIErrorHints(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "unknown command",
+			args: []string{"bogus"},
+			want: "linux-nixer help",
+		},
+		{
+			name: "scan missing out",
+			args: []string{"scan"},
+			want: "linux-nixer scan --out scan.json",
+		},
+		{
+			name: "capture missing out",
+			args: []string{"capture"},
+			want: "linux-nixer capture --out linux-nixer-output",
+		},
+		{
+			name: "validate missing subject",
+			args: []string{"validate"},
+			want: "linux-nixer validate --scan reviewed.json --strict",
+		},
+		{
+			name: "doctor missing project",
+			args: []string{"doctor"},
+			want: "linux-nixer doctor --project nix-config",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			err := run(context.Background(), tt.args, strings.NewReader(""), &stdout, &stdout)
+			if err == nil {
+				t.Fatal("expected command to fail")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error missing hint %q: %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestRunValidateWritesTextAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	scanPath := filepath.Join(dir, "reviewed.json")
@@ -532,11 +578,26 @@ func TestRunPolicyInitRejectsUnknownPreset(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown preset")
 	}
-	if !strings.Contains(err.Error(), "unknown policy preset") {
+	if !strings.Contains(err.Error(), "unknown policy preset") || !strings.Contains(err.Error(), "linux-nixer policy init --preset workstation") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, statErr := os.Stat(policyPath); !os.IsNotExist(statErr) {
 		t.Fatalf("policy file should not be written for unknown preset, stat err=%v", statErr)
+	}
+}
+
+func TestRunPolicyLoadMissingPathHasHint(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	writeScan(t, scanPath, model.ScanReport{SchemaVersion: model.SchemaVersion})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", filepath.Join(dir, "reviewed.json"), "--policy", filepath.Join(dir, "missing-policy.json")}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected missing policy file to fail")
+	}
+	if !strings.Contains(err.Error(), "linux-nixer policy init --out linux-nixer-policy.json") {
+		t.Fatalf("error missing policy hint: %v", err)
 	}
 }
 
