@@ -76,6 +76,38 @@ func TestCheckProjectFilesCoversEveryRenderedFile(t *testing.T) {
 	}
 }
 
+func TestCheckProjectFileDiffReportsMissingAndExtraFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := render.Project(dir, model.ScanReport{}); err != nil {
+		t.Fatal(err)
+	}
+
+	diff := CheckProjectFileDiff(dir)
+	if len(diff.Missing) != 0 {
+		t.Fatalf("rendered project should have no missing files: %+v", diff)
+	}
+	if len(diff.Expected) == 0 {
+		t.Fatalf("expected file list should be populated: %+v", diff)
+	}
+
+	missingRel := "reports/users.md"
+	if err := os.Remove(filepath.Join(dir, missingRel)); err != nil {
+		t.Fatal(err)
+	}
+	extraRel := "reports/old-report.md"
+	if err := os.WriteFile(filepath.Join(dir, extraRel), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff = CheckProjectFileDiff(dir)
+	if !slicesContain(diff.Missing, missingRel) {
+		t.Fatalf("missing file diff did not include %q: %+v", missingRel, diff)
+	}
+	if !slicesContain(diff.Extra, extraRel) {
+		t.Fatalf("extra file diff did not include %q: %+v", extraRel, diff)
+	}
+}
+
 func TestRunVMSuggestsBootScriptWhenBuildSucceeds(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
@@ -277,6 +309,15 @@ func assertCheck(t *testing.T, result Result, name string, ok bool) {
 		}
 	}
 	t.Fatalf("check %s missing from %+v", name, result.Checks)
+}
+
+func slicesContain(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDefaultRunnerKillsWholeProcessGroupOnTimeout(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -38,10 +39,11 @@ func bootFailureSignature(output string) string {
 }
 
 type Result struct {
-	Project     string   `json:"project"`
-	OK          bool     `json:"ok"`
-	Checks      []Check  `json:"checks"`
-	Suggestions []string `json:"suggestions,omitempty"`
+	Project         string          `json:"project"`
+	OK              bool            `json:"ok"`
+	Checks          []Check         `json:"checks"`
+	ProjectFileDiff ProjectFileDiff `json:"projectFileDiff"`
+	Suggestions     []string        `json:"suggestions,omitempty"`
 }
 
 type Options struct {
@@ -61,37 +63,71 @@ type Check struct {
 	Message string `json:"message,omitempty"`
 }
 
+type ProjectFileDiff struct {
+	Expected []string `json:"expected"`
+	Missing  []string `json:"missing,omitempty"`
+	Extra    []string `json:"extra,omitempty"`
+}
+
+var expectedProjectFiles = []string{
+	"flake.nix",
+	"hosts/generated/configuration.nix",
+	"users/home.nix",
+	"modules/containers.nix",
+	"modules/services.nix",
+	"modules/filesystem-findings.nix",
+	"reports/package-sources.md",
+	"reports/filesystem.md",
+	"reports/users.md",
+	"reports/containers.md",
+	"reports/git-sources.md",
+	"reports/languages.md",
+	"reports/dev-projects.md",
+	"reports/user-config.md",
+	"reports/desktop.md",
+	"reports/migration-report.md",
+	"reports/migration-checklist.md",
+	"reports/migration-annotations.nix",
+	"reports/system-config.md",
+	"reports/devops-config.md",
+	"reports/backup-sync.md",
+	"reports/hardware.md",
+}
+
 func CheckProjectFiles(project string) []Check {
-	required := []string{
-		"flake.nix",
-		"hosts/generated/configuration.nix",
-		"users/home.nix",
-		"modules/containers.nix",
-		"modules/services.nix",
-		"modules/filesystem-findings.nix",
-		"reports/package-sources.md",
-		"reports/filesystem.md",
-		"reports/users.md",
-		"reports/containers.md",
-		"reports/git-sources.md",
-		"reports/languages.md",
-		"reports/dev-projects.md",
-		"reports/user-config.md",
-		"reports/desktop.md",
-		"reports/migration-report.md",
-		"reports/migration-checklist.md",
-		"reports/migration-annotations.nix",
-		"reports/system-config.md",
-		"reports/devops-config.md",
-		"reports/backup-sync.md",
-		"reports/hardware.md",
-	}
 	var checks []Check
-	for _, rel := range required {
+	for _, rel := range expectedProjectFiles {
 		_, err := os.Stat(filepath.Join(project, rel))
 		checks = append(checks, Check{Name: "file:" + rel, OK: err == nil, Message: errorMessage(err)})
 	}
 	return checks
+}
+
+func CheckProjectFileDiff(project string) ProjectFileDiff {
+	diff := ProjectFileDiff{Expected: append([]string{}, expectedProjectFiles...)}
+	expected := map[string]bool{}
+	for _, rel := range expectedProjectFiles {
+		expected[rel] = true
+		if _, err := os.Stat(filepath.Join(project, rel)); err != nil {
+			diff.Missing = append(diff.Missing, rel)
+		}
+	}
+	filepath.WalkDir(project, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(project, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if !expected[rel] {
+			diff.Extra = append(diff.Extra, rel)
+		}
+		return nil
+	})
+	sort.Strings(diff.Extra)
+	return diff
 }
 
 func Run(ctx context.Context, opts Options) Result {
@@ -106,6 +142,7 @@ func Run(ctx context.Context, opts Options) Result {
 		runner = defaultRunner
 	}
 	result := Result{Project: opts.Project, OK: true}
+	result.ProjectFileDiff = CheckProjectFileDiff(opts.Project)
 	result.Checks = append(result.Checks, CheckProjectFiles(opts.Project)...)
 	for _, c := range result.Checks {
 		if !c.OK {
