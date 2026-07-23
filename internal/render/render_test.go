@@ -38,6 +38,20 @@ func TestProjectRendersFlakeAndReport(t *testing.T) {
 	if !strings.Contains(string(cfg), "pkgs.curl") {
 		t.Fatalf("configuration missing package: %s", cfg)
 	}
+	index, err := os.ReadFile(filepath.Join(out, "reports/index.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# Report index",
+		"[migration-checklist.md](migration-checklist.md)",
+		"[package-sources.md](package-sources.md)",
+		"- packages: 1",
+	} {
+		if !strings.Contains(string(index), want) {
+			t.Fatalf("report index missing %q:\n%s", want, index)
+		}
+	}
 }
 
 func TestProjectUsesPrimaryUserAndSafeHostAttr(t *testing.T) {

@@ -44,6 +44,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/containers.md":             renderContainersReport(report),
 		"reports/git-sources.md":            renderGitSourcesReport(report),
 		"reports/languages.md":              renderLanguagesReport(report),
+		"reports/index.md":                  renderReportIndex(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
 		"reports/backup-sync.md":            renderBackupSyncReport(report),
@@ -447,6 +448,47 @@ func renderReport(report model.ScanReport) string {
 		for _, w := range report.Warnings {
 			b.WriteString(fmt.Sprintf("- %s: %s\n", w.Source, w.Message))
 		}
+	}
+	return b.String()
+}
+
+func renderReportIndex(report model.ScanReport) string {
+	type reportLink struct {
+		file        string
+		description string
+	}
+	links := []reportLink{
+		{file: "migration-report.md", description: "Overall migration summary and generated Nix highlights."},
+		{file: "migration-checklist.md", description: "Manual tasks to complete before switching systems."},
+		{file: "package-sources.md", description: "Package managers, mapped packages, and package source context."},
+		{file: "filesystem.md", description: "Filesystem differences, secret-risk paths, and stateful data notes."},
+		{file: "users.md", description: "Detected users, homes, shells, and group-sensitive accounts."},
+		{file: "containers.md", description: "Container runtimes, compose files, images, ports, and mounts."},
+		{file: "git-sources.md", description: "Git repositories, remotes, commits, and build hints."},
+		{file: "languages.md", description: "Language package managers, version managers, and project markers."},
+		{file: "dev-projects.md", description: "Development project files that may need dev shells or flakes."},
+		{file: "user-config.md", description: "User shell and tool configuration markers."},
+		{file: "desktop.md", description: "Desktop environment, fonts, themes, autostart, and editor markers."},
+		{file: "system-config.md", description: "System configuration files that need NixOS option review."},
+		{file: "devops-config.md", description: "Cloud, Kubernetes, CI/CD, and deployment configuration markers."},
+		{file: "backup-sync.md", description: "Backup and sync configuration that should be restored manually."},
+		{file: "hardware.md", description: "Hardware, peripheral, audio, printer, and security-device hints."},
+		{file: "migration-annotations.nix", description: "Nix comments carrying migration annotations."},
+	}
+	var b strings.Builder
+	b.WriteString("# Report index\n\n")
+	b.WriteString("Generated reports are review aids. Confirmed findings may render into Nix; protected and stateful findings stay as manual migration work.\n\n")
+	b.WriteString("## Snapshot\n\n")
+	fmt.Fprintf(&b, "- packages: %d\n", len(report.Packages))
+	fmt.Fprintf(&b, "- services: %d\n", len(report.Services))
+	fmt.Fprintf(&b, "- containers: %d\n", len(report.Containers))
+	fmt.Fprintf(&b, "- git sources: %d\n", len(report.GitSources))
+	fmt.Fprintf(&b, "- filesystem findings: %d\n", len(report.FilesystemDiff))
+	fmt.Fprintf(&b, "- stateful data findings: %d\n", len(report.StatefulData))
+	fmt.Fprintf(&b, "- config/items: %d\n\n", len(report.Items))
+	b.WriteString("## Reports\n\n")
+	for _, link := range links {
+		fmt.Fprintf(&b, "- [%s](%s): %s\n", link.file, link.file, link.description)
 	}
 	return b.String()
 }
