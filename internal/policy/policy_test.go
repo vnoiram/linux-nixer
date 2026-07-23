@@ -115,6 +115,28 @@ func TestTemplateUnknownPresetReturnsError(t *testing.T) {
 	}
 }
 
+func TestDiffPresetsReportsListAndAutoSafeChanges(t *testing.T) {
+	diff, err := DiffPresets("server", "minimal-audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diff.AutoSafeChanged || !diff.FromAutoSafe || diff.ToAutoSafe {
+		t.Fatalf("unexpected autoSafe diff: %+v", diff)
+	}
+	fields := map[string]FieldDiff{}
+	for _, field := range diff.Fields {
+		fields[field.Name] = field
+	}
+	confirm := fields["confirmKinds"]
+	if !slices.Equal(confirm.Removed, []string{"service", "container", "os-config"}) {
+		t.Fatalf("unexpected confirmKinds diff: %+v", confirm)
+	}
+	exclude := fields["excludeKinds"]
+	if !slices.Equal(exclude.Removed, []string{"desktop-config", "shell-plugin"}) {
+		t.Fatalf("unexpected excludeKinds diff: %+v", exclude)
+	}
+}
+
 func TestTemplateEmptyPresetMatchesCurrentDefault(t *testing.T) {
 	empty, err := Template("")
 	if err != nil {

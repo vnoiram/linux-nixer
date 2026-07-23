@@ -569,6 +569,47 @@ func TestRunPolicyInitWithPresetWritesConfirmKinds(t *testing.T) {
 	}
 }
 
+func TestRunPolicyDiffWritesTextAndJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "diff", "--from", "default", "--to", "developer-machine"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Policy preset diff: default -> developer-machine",
+		"autoSafe: unchanged (true)",
+		"confirmKinds added=dev-project,git-source,language-project,shell-config,direnv",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("policy diff text missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"policy", "diff", "--from", "server", "--to", "minimal-audit", "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got policypkg.PresetDiff
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid policy diff json: %v\n%s", err, stdout.String())
+	}
+	if got.From != "server" || got.To != "minimal-audit" || !got.AutoSafeChanged || got.ToAutoSafe {
+		t.Fatalf("unexpected policy diff json: %+v", got)
+	}
+}
+
+func TestRunPolicyDiffRequiresPresets(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "diff", "--from", "server"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected missing --to to fail")
+	}
+	if !strings.Contains(err.Error(), "requires --from and --to") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunPolicyInitRejectsUnknownPreset(t *testing.T) {
 	dir := t.TempDir()
 	policyPath := filepath.Join(dir, "bogus-policy.json")

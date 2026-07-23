@@ -96,6 +96,7 @@ Usage:
   linux-nixer baseline list [--json]
   linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
+  linux-nixer policy diff --from workstation --to server [--json]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer guide
   linux-nixer help <command>
@@ -147,6 +148,10 @@ func commandHelp(w io.Writer, topic []string) error {
 	case "policy":
 		if len(topic) == 1 || topic[1] == "init" {
 			fmt.Fprint(w, policyInitHelp)
+			return nil
+		}
+		if topic[1] == "diff" {
+			fmt.Fprint(w, policyDiffHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "policy "+topic[1])
@@ -530,6 +535,22 @@ Flags:
 
 Policy:
   The template uses schemaVersion "linux-nixer.policy.v1". Policy values supply defaults; explicit CLI boolean and string flags override them, and CLI list flags are merged with policy lists.
+`
+
+const policyDiffHelp = `linux-nixer policy diff
+Compare two built-in policy presets before choosing one.
+
+Usage:
+  linux-nixer policy diff --from workstation --to server [--json]
+
+Examples:
+  linux-nixer policy diff --from default --to developer-machine
+  linux-nixer policy diff --from server --to minimal-audit --json
+
+Flags:
+  --from NAME   Source preset: default, workstation, server, developer-machine, or minimal-audit.
+  --to NAME     Target preset: default, workstation, server, developer-machine, or minimal-audit.
+  --json        Write machine-readable JSON.
 `
 
 func runScan(ctx context.Context, args []string, stdout io.Writer) error {
@@ -1262,10 +1283,21 @@ func runPolicy(args []string, stdout io.Writer) error {
 		fmt.Fprint(stdout, policyInitHelp)
 		return nil
 	}
-	if len(args) == 0 || args[0] != "init" {
-		return errors.New("policy supports only: policy init")
+	if len(args) == 0 {
+		return errors.New("policy supports: policy init, policy diff")
 	}
-	if hasHelp(args[1:]) {
+	switch args[0] {
+	case "init":
+		return runPolicyInit(args[1:], stdout)
+	case "diff":
+		return runPolicyDiff(args[1:], stdout)
+	default:
+		return errors.New("policy supports: policy init, policy diff")
+	}
+}
+
+func runPolicyInit(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
 		fmt.Fprint(stdout, policyInitHelp)
 		return nil
 	}
@@ -1273,7 +1305,7 @@ func runPolicy(args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output policy JSON")
 	preset := fs.String("preset", "", "policy preset: workstation, server, developer-machine, or minimal-audit")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *out == "-" {
@@ -1290,6 +1322,57 @@ func runPolicy(args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote policy: %s\n", *out)
 	return nil
+}
+
+func runPolicyDiff(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, policyDiffHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("policy diff", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	from := fs.String("from", "", "source policy preset")
+	to := fs.String("to", "", "target policy preset")
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	diff, err := policy.DiffPresets(*from, *to)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(diff)
+	}
+	fmt.Fprint(stdout, formatPolicyDiff(diff))
+	return nil
+}
+
+func formatPolicyDiff(diff policy.PresetDiff) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Policy preset diff: %s -> %s\n\n", diff.From, diff.To)
+	if diff.AutoSafeChanged {
+		fmt.Fprintf(&b, "- autoSafe: %t -> %t\n", diff.FromAutoSafe, diff.ToAutoSafe)
+	} else {
+		fmt.Fprintf(&b, "- autoSafe: unchanged (%t)\n", diff.FromAutoSafe)
+	}
+	if len(diff.Fields) == 0 {
+		b.WriteString("- list fields: no changes\n")
+		return b.String()
+	}
+	for _, field := range diff.Fields {
+		fmt.Fprintf(&b, "- %s", field.Name)
+		if len(field.Added) > 0 {
+			fmt.Fprintf(&b, " added=%s", strings.Join(field.Added, ","))
+		}
+		if len(field.Removed) > 0 {
+			fmt.Fprintf(&b, " removed=%s", strings.Join(field.Removed, ","))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // loadPolicyFromFlags resolves a Policy from either a --preset name (a

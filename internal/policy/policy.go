@@ -39,6 +39,21 @@ type Policy struct {
 	Plugins             []string `json:"plugins,omitempty"`
 }
 
+type PresetDiff struct {
+	From            string      `json:"from"`
+	To              string      `json:"to"`
+	AutoSafeChanged bool        `json:"autoSafeChanged"`
+	FromAutoSafe    bool        `json:"fromAutoSafe"`
+	ToAutoSafe      bool        `json:"toAutoSafe"`
+	Fields          []FieldDiff `json:"fields"`
+}
+
+type FieldDiff struct {
+	Name    string   `json:"name"`
+	Added   []string `json:"added,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+}
+
 // Template returns a policy template, optionally tuned by a named preset
 // for a common migration style. preset == "" (or "default") returns the
 // generic template: AutoSafe on, everything else empty. A known preset name
@@ -76,6 +91,54 @@ func Template(preset string) (Policy, error) {
 	}
 	p.AutoSafe = &autoSafe
 	return p, nil
+}
+
+func DiffPresets(from, to string) (PresetDiff, error) {
+	if from == "" || to == "" {
+		return PresetDiff{}, errors.New("policy diff requires --from and --to")
+	}
+	fromPolicy, err := Template(from)
+	if err != nil {
+		return PresetDiff{}, err
+	}
+	toPolicy, err := Template(to)
+	if err != nil {
+		return PresetDiff{}, err
+	}
+	diff := PresetDiff{From: from, To: to}
+	if fromPolicy.AutoSafe != nil {
+		diff.FromAutoSafe = *fromPolicy.AutoSafe
+	}
+	if toPolicy.AutoSafe != nil {
+		diff.ToAutoSafe = *toPolicy.AutoSafe
+	}
+	diff.AutoSafeChanged = diff.FromAutoSafe != diff.ToAutoSafe
+	fields := []struct {
+		name string
+		a    []string
+		b    []string
+	}{
+		{name: "confirmKinds", a: fromPolicy.ConfirmKinds, b: toPolicy.ConfirmKinds},
+		{name: "excludeKinds", a: fromPolicy.ExcludeKinds, b: toPolicy.ExcludeKinds},
+		{name: "todoKinds", a: fromPolicy.TODOKinds, b: toPolicy.TODOKinds},
+		{name: "migrationNoteKinds", a: fromPolicy.MigrationNoteKinds, b: toPolicy.MigrationNoteKinds},
+		{name: "confirmManagers", a: fromPolicy.ConfirmManagers, b: toPolicy.ConfirmManagers},
+		{name: "excludePathPrefixes", a: fromPolicy.ExcludePathPrefixes, b: toPolicy.ExcludePathPrefixes},
+		{name: "includePaths", a: fromPolicy.IncludePaths, b: toPolicy.IncludePaths},
+		{name: "excludePaths", a: fromPolicy.ExcludePaths, b: toPolicy.ExcludePaths},
+		{name: "plugins", a: fromPolicy.Plugins, b: toPolicy.Plugins},
+	}
+	for _, field := range fields {
+		fd := FieldDiff{
+			Name:    field.name,
+			Added:   listDifference(field.b, field.a),
+			Removed: listDifference(field.a, field.b),
+		}
+		if len(fd.Added) > 0 || len(fd.Removed) > 0 {
+			diff.Fields = append(diff.Fields, fd)
+		}
+	}
+	return diff, nil
 }
 
 func Load(path string) (Policy, error) {
@@ -184,6 +247,21 @@ func Merge(primary []string, secondary []string) []string {
 			seen[value] = true
 			out = append(out, value)
 		}
+	}
+	return out
+}
+
+func listDifference(values, subtract []string) []string {
+	skip := map[string]bool{}
+	for _, value := range subtract {
+		skip[value] = true
+	}
+	var out []string
+	for _, value := range values {
+		if value == "" || skip[value] {
+			continue
+		}
+		out = append(out, value)
 	}
 	return out
 }
