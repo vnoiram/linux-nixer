@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
+	"github.com/vnoiram/linux-nixer/internal/review"
 )
 
 func Project(out string, report model.ScanReport) error {
@@ -45,6 +46,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/git-sources.md":            renderGitSourcesReport(report),
 		"reports/languages.md":              renderLanguagesReport(report),
 		"reports/index.md":                  renderReportIndex(report),
+		"reports/migration-dashboard.md":    renderMigrationDashboard(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
 		"reports/backup-sync.md":            renderBackupSyncReport(report),
@@ -459,6 +461,7 @@ func renderReportIndex(report model.ScanReport) string {
 	}
 	links := []reportLink{
 		{file: "migration-report.md", description: "Overall migration summary and generated Nix highlights."},
+		{file: "migration-dashboard.md", description: "High-level counts, risks, generated Nix impact, and next actions."},
 		{file: "migration-checklist.md", description: "Manual tasks to complete before switching systems."},
 		{file: "package-sources.md", description: "Package managers, mapped packages, and package source context."},
 		{file: "filesystem.md", description: "Filesystem differences, secret-risk paths, and stateful data notes."},
@@ -489,6 +492,61 @@ func renderReportIndex(report model.ScanReport) string {
 	b.WriteString("## Reports\n\n")
 	for _, link := range links {
 		fmt.Fprintf(&b, "- [%s](%s): %s\n", link.file, link.file, link.description)
+	}
+	return b.String()
+}
+
+func renderMigrationDashboard(report model.ScanReport) string {
+	summary := review.Summarize(report)
+	var b strings.Builder
+	b.WriteString("# Migration dashboard\n\n")
+	fmt.Fprintf(&b, "- total findings: %d\n", summary.Total)
+	fmt.Fprintf(&b, "- pending findings: %d\n", summary.Pending)
+	fmt.Fprintf(&b, "- manual migration notes: %d\n", summary.ManualMigrationNotes)
+	fmt.Fprintf(&b, "- protected findings: %d\n", summary.ProtectedFindings)
+	fmt.Fprintf(&b, "- unmapped packages: %d\n", summary.UnmappedPackages)
+	fmt.Fprintf(&b, "- generated Nix candidates: %d\n\n", summary.GeneratedCandidates)
+
+	b.WriteString("## Generated Nix impact\n\n")
+	fmt.Fprintf(&b, "- system packages: %d\n", summary.NixImpact.SystemPackages)
+	fmt.Fprintf(&b, "- home packages: %d\n", summary.NixImpact.HomePackages)
+	fmt.Fprintf(&b, "- users: %d\n", summary.NixImpact.Users)
+	fmt.Fprintf(&b, "- host shell programs: %d\n", summary.NixImpact.HostShellPrograms)
+	fmt.Fprintf(&b, "- home programs: %d\n", summary.NixImpact.HomePrograms)
+	fmt.Fprintf(&b, "- systemd services: %d\n", summary.NixImpact.SystemdServices)
+	fmt.Fprintf(&b, "- cron jobs: %d\n", summary.NixImpact.CronJobs)
+	fmt.Fprintf(&b, "- container runtime enables: %d\n", summary.NixImpact.ContainerRuntimeEnables)
+	fmt.Fprintf(&b, "- confirmed containers: %d\n\n", summary.NixImpact.ConfirmedContainers)
+
+	b.WriteString("## Domains\n\n")
+	for _, domain := range summary.Domains {
+		fmt.Fprintf(&b, "- %s: total=%d pending=%d", domain.Domain, domain.Total, domain.Pending)
+		if domain.ProtectedFindings > 0 {
+			fmt.Fprintf(&b, " protected=%d", domain.ProtectedFindings)
+		}
+		if domain.UnmappedPackages > 0 {
+			fmt.Fprintf(&b, " unmapped=%d", domain.UnmappedPackages)
+		}
+		if domain.MigrationNotes > 0 {
+			fmt.Fprintf(&b, " migration-notes=%d", domain.MigrationNotes)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n## Next actions\n\n")
+	if summary.Pending > 0 {
+		fmt.Fprintf(&b, "- Resolve %d pending findings before relying on generated Nix.\n", summary.Pending)
+	} else {
+		b.WriteString("- No pending candidate/todo findings remain.\n")
+	}
+	if summary.UnmappedPackages > 0 {
+		b.WriteString("- Review `unmapped-packages.md` and decide whether to map, replace, or document those packages.\n")
+	}
+	if summary.ManualMigrationNotes > 0 {
+		b.WriteString("- Review `migration-checklist.md` for manual restore and migration work.\n")
+	}
+	if summary.ProtectedFindings > 0 {
+		b.WriteString("- Keep protected and stateful data outside generated Nix.\n")
 	}
 	return b.String()
 }

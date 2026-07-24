@@ -44,12 +44,28 @@ func TestProjectRendersFlakeAndReport(t *testing.T) {
 	}
 	for _, want := range []string{
 		"# Report index",
+		"[migration-dashboard.md](migration-dashboard.md)",
 		"[migration-checklist.md](migration-checklist.md)",
 		"[package-sources.md](package-sources.md)",
 		"- packages: 1",
 	} {
 		if !strings.Contains(string(index), want) {
 			t.Fatalf("report index missing %q:\n%s", want, index)
+		}
+	}
+	dashboard, err := os.ReadFile(filepath.Join(out, "reports/migration-dashboard.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# Migration dashboard",
+		"- total findings: 1",
+		"- pending findings: 0",
+		"- system packages: 1",
+		"No pending candidate/todo findings remain.",
+	} {
+		if !strings.Contains(string(dashboard), want) {
+			t.Fatalf("migration dashboard missing %q:\n%s", want, dashboard)
 		}
 	}
 }
