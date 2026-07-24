@@ -47,6 +47,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/languages.md":              renderLanguagesReport(report),
 		"reports/index.md":                  renderReportIndex(report),
 		"reports/migration-dashboard.md":    renderMigrationDashboard(report),
+		"reports/unmapped-packages.md":      renderUnmappedPackagesReport(report),
 		"reports/system-config.md":          renderSystemConfigReport(report),
 		"reports/devops-config.md":          renderDevOpsConfigReport(report),
 		"reports/backup-sync.md":            renderBackupSyncReport(report),
@@ -463,6 +464,7 @@ func renderReportIndex(report model.ScanReport) string {
 		{file: "migration-report.md", description: "Overall migration summary and generated Nix highlights."},
 		{file: "migration-dashboard.md", description: "High-level counts, risks, generated Nix impact, and next actions."},
 		{file: "migration-checklist.md", description: "Manual tasks to complete before switching systems."},
+		{file: "unmapped-packages.md", description: "Package findings without a known Nix package mapping, grouped by manager."},
 		{file: "package-sources.md", description: "Package managers, mapped packages, and package source context."},
 		{file: "filesystem.md", description: "Filesystem differences, secret-risk paths, and stateful data notes."},
 		{file: "users.md", description: "Detected users, homes, shells, and group-sensitive accounts."},
@@ -549,6 +551,92 @@ func renderMigrationDashboard(report model.ScanReport) string {
 		b.WriteString("- Keep protected and stateful data outside generated Nix.\n")
 	}
 	return b.String()
+}
+
+func renderUnmappedPackagesReport(report model.ScanReport) string {
+	grouped := unmappedPackagesByManager(report)
+	var managers []string
+	for manager := range grouped {
+		managers = append(managers, manager)
+	}
+	sort.Strings(managers)
+
+	var b strings.Builder
+	b.WriteString("# Unmapped packages\n\n")
+	b.WriteString("These package findings do not currently have a known Nix package mapping. Review them as mapping candidates, replacements, manual installs, or exclusions.\n\n")
+	if len(managers) == 0 {
+		b.WriteString("No unmapped packages were found.\n")
+		return b.String()
+	}
+	total := 0
+	for _, manager := range managers {
+		total += len(grouped[manager])
+	}
+	fmt.Fprintf(&b, "Total unmapped packages: %d\n\n", total)
+	for _, manager := range managers {
+		pkgs := grouped[manager]
+		sort.Slice(pkgs, func(i, j int) bool {
+			if pkgs[i].Name == pkgs[j].Name {
+				return pkgs[i].Source < pkgs[j].Source
+			}
+			return pkgs[i].Name < pkgs[j].Name
+		})
+		fmt.Fprintf(&b, "## %s\n\n", manager)
+		for _, pkg := range pkgs {
+			fmt.Fprintf(&b, "- `%s`", pkg.Name)
+			if pkg.Version != "" {
+				fmt.Fprintf(&b, " version `%s`", pkg.Version)
+			}
+			if pkg.Source != "" {
+				fmt.Fprintf(&b, " source `%s`", pkg.Source)
+			}
+			fmt.Fprintf(&b, " [%s]\n", printableDecision(pkg.Decision))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func unmappedPackagesByManager(report model.ScanReport) map[string][]model.Package {
+	grouped := map[string][]model.Package{}
+	add := func(pkg model.Package) {
+		if !unmappedPackageReportable(pkg) {
+			return
+		}
+		manager := pkg.Manager
+		if manager == "" {
+			manager = "unknown"
+		}
+		grouped[manager] = append(grouped[manager], pkg)
+	}
+	for _, pkg := range report.Packages {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.NPM {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Conda {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Cargo {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Gem {
+		add(pkg)
+	}
+	for _, pkg := range report.Languages.Go {
+		add(pkg)
+	}
+	for _, env := range report.Languages.Python {
+		for _, pkg := range env.Packages {
+			add(pkg)
+		}
+	}
+	return grouped
+}
+
+func unmappedPackageReportable(pkg model.Package) bool {
+	return len(pkg.NixNames) == 0 && pkg.Decision != model.DecisionExcluded && pkg.Decision != model.DecisionMigrationNote
 }
 
 func writeGeneratedNixSummary(b *strings.Builder, report model.ScanReport) {

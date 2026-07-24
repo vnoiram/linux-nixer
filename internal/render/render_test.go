@@ -524,6 +524,44 @@ func TestProjectSkipsUnsafeContainerPortsAndMounts(t *testing.T) {
 	}
 }
 
+func TestProjectRendersUnmappedPackageReport(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "unknown-tool", Version: "1.0", Source: "apt-mark:manual", Decision: model.DecisionCandidate},
+			{Manager: "apt", Name: "mapped-tool", NixNames: []string{"mapped-tool"}, Decision: model.DecisionCandidate},
+			{Manager: "apt", Name: "excluded-tool", Decision: model.DecisionExcluded},
+		},
+		Languages: model.Languages{
+			NPM: []model.Package{
+				{Manager: "npm", Name: "unknown-js", Source: "/home/alice/.npm", Decision: model.DecisionTODO},
+				{Manager: "npm", Name: "mapped-js", NixNames: []string{"nodePackages.mapped-js"}, Decision: model.DecisionCandidate},
+			},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	text := readFile(t, out, "reports/unmapped-packages.md")
+	for _, want := range []string{
+		"# Unmapped packages",
+		"Total unmapped packages: 2",
+		"## apt",
+		"`unknown-tool` version `1.0` source `apt-mark:manual` [candidate]",
+		"## npm",
+		"`unknown-js` source `/home/alice/.npm` [todo]",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("unmapped report missing %q:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{"mapped-tool", "excluded-tool", "mapped-js"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("unmapped report should not include %q:\n%s", unwanted, text)
+		}
+	}
+}
+
 func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{
