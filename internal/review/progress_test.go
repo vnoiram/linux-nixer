@@ -126,6 +126,16 @@ func TestFormatProgressTimelineMarkdown(t *testing.T) {
 			PreviousDecision: model.DecisionConfirmed,
 			CurrentDecision:  model.DecisionExcluded,
 		}},
+		Regressed: []ProgressEntry{{
+			Domain:           "container",
+			Key:              "docker:web",
+			PreviousDecision: model.DecisionConfirmed,
+		}},
+		Removed: []ProgressEntry{{
+			Domain:           "git-source",
+			Key:              "/home/alice/old",
+			PreviousDecision: model.DecisionTODO,
+		}},
 	})
 	for _, want := range []string{
 		"# Progress timeline",
@@ -133,9 +143,32 @@ func TestFormatProgressTimelineMarkdown(t *testing.T) {
 		"package `apt:curl` became confirmed",
 		"## 2. Changed decisions",
 		"service `systemd:app.service` changed from confirmed to excluded",
+		"## 3. Regressed to pending",
+		"container `docker:web` was confirmed and is pending again",
+		"## 4. No longer present",
+		"git-source `/home/alice/old` was todo and disappeared from the current scan",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("timeline missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatProgressTimelineMarkdownEmptyState(t *testing.T) {
+	got := FormatProgressTimelineMarkdown(Progress{
+		PreviousDecided: 2,
+		CurrentDecided:  2,
+		StillPending:    0,
+	})
+	for _, want := range []string{
+		"# Progress timeline",
+		"- previously decided: 2",
+		"- currently decided: 2",
+		"- still pending: 0",
+		"No decision changes were detected.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("empty timeline missing %q:\n%s", want, got)
 		}
 	}
 }

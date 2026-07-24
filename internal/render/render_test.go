@@ -249,6 +249,12 @@ func TestProjectPrioritizesManualChecklistItems(t *testing.T) {
 			SecretRisk: true,
 			Decision:   model.DecisionMigrationNote,
 		}},
+		StatefulData: []model.FileFinding{{
+			Path:     "/var/lib/postgresql",
+			Category: "stateful-data",
+			Type:     "directory",
+			Decision: model.DecisionMigrationNote,
+		}},
 		GitSources: []model.GitSource{{
 			Path:     "/home/alice/app",
 			Decision: model.DecisionTODO,
@@ -258,15 +264,16 @@ func TestProjectPrioritizesManualChecklistItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readFile(t, out, "reports/migration-checklist.md")
-	for _, want := range []string{"- [ ] [P0] Back up and restore secret-risk file", "- [ ] [P1] Translate systemd service", "- [ ] [P2] Decide clone/build strategy"} {
+	for _, want := range []string{"- [ ] [P0] Back up and restore secret-risk file", "- [ ] [P0] Back up stateful data `/var/lib/postgresql`", "- [ ] [P1] Translate systemd service", "- [ ] [P2] Decide clone/build strategy"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("checklist missing priority %q:\n%s", want, got)
 		}
 	}
 	p0 := strings.Index(got, "[P0] Back up")
+	stateful := strings.Index(got, "[P0] Back up stateful data")
 	p1 := strings.Index(got, "[P1] Translate")
 	p2 := strings.Index(got, "[P2] Decide")
-	if p0 < 0 || p1 < 0 || p2 < 0 || !(p0 < p1 && p1 < p2) {
+	if p0 < 0 || stateful < 0 || p1 < 0 || p2 < 0 || !(p0 < p1 && stateful < p1 && p1 < p2) {
 		t.Fatalf("checklist priority order unexpected:\n%s", got)
 	}
 }
