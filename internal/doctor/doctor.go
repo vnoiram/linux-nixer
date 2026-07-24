@@ -67,6 +67,7 @@ type Check struct {
 type ProjectFileDiff struct {
 	Expected []string `json:"expected"`
 	Missing  []string `json:"missing,omitempty"`
+	Stale    []string `json:"stale,omitempty"`
 	Extra    []string `json:"extra,omitempty"`
 }
 
@@ -164,12 +165,28 @@ func CheckProjectFileDiff(project string) ProjectFileDiff {
 		}
 		rel = filepath.ToSlash(rel)
 		if !expected[rel] {
-			diff.Extra = append(diff.Extra, rel)
+			if staleGeneratedProjectFile(rel) {
+				diff.Stale = append(diff.Stale, rel)
+			} else {
+				diff.Extra = append(diff.Extra, rel)
+			}
 		}
 		return nil
 	})
+	sort.Strings(diff.Stale)
 	sort.Strings(diff.Extra)
 	return diff
+}
+
+func staleGeneratedProjectFile(rel string) bool {
+	switch {
+	case strings.HasPrefix(rel, "reports/"):
+		return true
+	case strings.HasPrefix(rel, "modules/") && strings.HasSuffix(rel, ".nix"):
+		return true
+	default:
+		return false
+	}
 }
 
 func Run(ctx context.Context, opts Options) Result {
@@ -217,7 +234,7 @@ func Run(ctx context.Context, opts Options) Result {
 			script := vmScriptPath(host)
 			message := "host=" + host + " timeout=" + opts.Timeout.String() + " script=" + script + " command=" + script + "; readiness only, VM was not started"
 			result.Checks = append(result.Checks, Check{Name: "vm boot readiness:" + host, OK: true, Message: message})
-			result.Suggestions = append(result.Suggestions, "Before running `doctor --boot`, expect a VM build, local qemu/KVM availability differences, and a timeout-based smoke check rather than a full login validation.")
+			result.Suggestions = append(result.Suggestions, "Before running `doctor --boot`, expect a VM build, local qemu/KVM acceleration availability differences, and a timeout-based smoke check rather than a full login validation.")
 		}
 	}
 	if opts.VM {

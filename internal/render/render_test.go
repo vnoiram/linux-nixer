@@ -228,6 +228,9 @@ func TestProjectRendersFilesystemBaselineChanges(t *testing.T) {
 	if !strings.Contains(string(got), "baseline `hash-changed,mode-changed`") {
 		t.Fatalf("filesystem report missing baseline changes:\n%s", got)
 	}
+	if !strings.Contains(string(got), "baseline changes: content hash changed, mode changed") {
+		t.Fatalf("filesystem report missing baseline change explanation:\n%s", got)
+	}
 }
 
 func TestProjectPrioritizesManualChecklistItems(t *testing.T) {
@@ -733,6 +736,24 @@ func TestProjectRendersUnmappedPackageReport(t *testing.T) {
 	for _, unwanted := range []string{"mapped-tool", "excluded-tool", "mapped-js"} {
 		if strings.Contains(text, unwanted) {
 			t.Fatalf("unmapped report should not include %q:\n%s", unwanted, text)
+		}
+	}
+}
+
+func TestProjectRendersUnmappedPackageReportEmptyState(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	text := readFile(t, out, "reports/unmapped-packages.md")
+	for _, want := range []string{"# Unmapped packages", "No unmapped packages were found."} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("unmapped empty-state missing %q:\n%s", want, text)
 		}
 	}
 }

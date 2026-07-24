@@ -101,7 +101,7 @@ func TestCheckProjectFilesCoversSingleModuleLayout(t *testing.T) {
 	}
 }
 
-func TestCheckProjectFileDiffReportsMissingAndExtraFiles(t *testing.T) {
+func TestCheckProjectFileDiffReportsMissingStaleAndExtraFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := render.Project(dir, model.ScanReport{}); err != nil {
 		t.Fatal(err)
@@ -123,13 +123,20 @@ func TestCheckProjectFileDiffReportsMissingAndExtraFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, extraRel), []byte("stale\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	unmanagedRel := "README.local"
+	if err := os.WriteFile(filepath.Join(dir, unmanagedRel), []byte("local notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	diff = CheckProjectFileDiff(dir)
 	if !slicesContain(diff.Missing, missingRel) {
 		t.Fatalf("missing file diff did not include %q: %+v", missingRel, diff)
 	}
-	if !slicesContain(diff.Extra, extraRel) {
-		t.Fatalf("extra file diff did not include %q: %+v", extraRel, diff)
+	if !slicesContain(diff.Stale, extraRel) {
+		t.Fatalf("stale file diff did not include %q: %+v", extraRel, diff)
+	}
+	if !slicesContain(diff.Extra, unmanagedRel) {
+		t.Fatalf("extra file diff did not include %q: %+v", unmanagedRel, diff)
 	}
 }
 
@@ -218,10 +225,13 @@ func TestRunBootReadinessDoesNotBuildOrStartVM(t *testing.T) {
 
 	assertCheck(t, result, "vm boot readiness:demo", true)
 	check := findCheck(t, result, "vm boot readiness:demo")
-	for _, want := range []string{"host=demo", "timeout=20s", "result/bin/run-demo-vm", "VM was not started"} {
+	for _, want := range []string{"host=demo", "timeout=20s", "result/bin/run-demo-vm", "command=result/bin/run-demo-vm", "VM was not started"} {
 		if !strings.Contains(check.Message, want) {
 			t.Fatalf("readiness message missing %q: %+v", want, check)
 		}
+	}
+	if len(result.Suggestions) == 0 || !strings.Contains(result.Suggestions[0], "qemu/KVM acceleration") || !strings.Contains(result.Suggestions[0], "full login validation") {
+		t.Fatalf("readiness suggestion should explain VM limitations: %+v", result.Suggestions)
 	}
 	if len(called) != 1 || !strings.Contains(called[0], "nix flake check") {
 		t.Fatalf("unexpected runner calls: %v", called)

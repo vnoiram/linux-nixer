@@ -2973,6 +2973,8 @@ func fileFindingLine(finding model.FileFinding) string {
 		b.WriteString(" baseline `")
 		b.WriteString(strings.Join(finding.BaselineChanges, ","))
 		b.WriteString("`")
+		b.WriteString(" baseline changes: ")
+		b.WriteString(strings.Join(baselineChangeDescriptions(finding.BaselineChanges), ", "))
 	}
 	if finding.Reason != "" {
 		b.WriteString(": ")
@@ -2980,6 +2982,27 @@ func fileFindingLine(finding model.FileFinding) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+func baselineChangeDescriptions(changes []string) []string {
+	descriptions := make([]string, 0, len(changes))
+	for _, change := range changes {
+		switch change {
+		case "new-file":
+			descriptions = append(descriptions, "new file")
+		case "type-changed":
+			descriptions = append(descriptions, "file type changed")
+		case "mode-changed":
+			descriptions = append(descriptions, "mode changed")
+		case "size-changed":
+			descriptions = append(descriptions, "size changed")
+		case "hash-changed":
+			descriptions = append(descriptions, "content hash changed")
+		default:
+			descriptions = append(descriptions, change)
+		}
+	}
+	return descriptions
 }
 
 func devProjectItems(report model.ScanReport) []model.Item {

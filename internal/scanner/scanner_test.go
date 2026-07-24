@@ -463,6 +463,21 @@ func TestFilesystemDiffDetectsArbitraryBaselineChanges(t *testing.T) {
 	}
 }
 
+func TestBaselineChangesClassifiesSpecificDifferences(t *testing.T) {
+	finding := model.FileFinding{Path: "/usr/local/bin/tool", Type: "script", Mode: "-rwxr-xr-x", Size: 42, SHA256: "after"}
+	base := baselineFile{Path: "/usr/local/bin/tool", Type: "elf", Mode: "-rw-r--r--", Size: 41, SHA256: "before"}
+
+	changes := baselineChanges(finding, base)
+	for _, want := range []string{"type-changed", "mode-changed", "size-changed", "hash-changed"} {
+		if !slicesContain(changes, want) {
+			t.Fatalf("baseline change %q missing from %+v", want, changes)
+		}
+	}
+	if got := baselineChanges(finding, baselineFile{}); len(got) != 1 || got[0] != "new-file" {
+		t.Fatalf("new file baseline change=%+v, want new-file", got)
+	}
+}
+
 func TestSecretScannerFindsCommonCredentialLocations(t *testing.T) {
 	root := t.TempDir()
 	writeMode(t, root, "/home/alice/.ssh/id_ed25519", []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-value\n"), 0o600)
