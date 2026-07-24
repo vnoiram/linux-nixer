@@ -363,7 +363,7 @@ const reviewHelp = `linux-nixer review
 Apply repeatable review decisions or run an interactive review over scan JSON.
 
 Usage:
-  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH] [--export-decisions-report PATH] [--explain-policy PATH]
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--filter NAME] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH] [--export-decisions-report PATH] [--explain-policy PATH]
 
 Examples:
   linux-nixer review --scan scan.json --out reviewed.json --auto-safe
@@ -380,6 +380,7 @@ Flags:
   --auto-safe                  Confirm high-confidence safe findings.
   --interactive                Prompt for each finding with c/k/t/m/x/s/n/q choices, safe context notes, and per-section progress. n skips the rest of the current section.
   --pending-only               In interactive mode, only prompt for findings still at candidate; skip ones already resolved by policy or safety rules.
+  --filter NAME                In interactive mode, prompt only matching findings. Repeatable: pending, unmapped, protected, packages, services, filesystem, stateful, items, containers, git-sources.
   --confirm-kind KIND          Mark findings of kind/category as confirmed. Repeatable.
   --exclude-kind KIND          Mark findings of kind/category as excluded. Repeatable.
   --todo-kind KIND             Mark findings of kind/category as todo. Repeatable.
@@ -980,13 +981,18 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	var noteKinds multiFlag
 	var confirmManagers multiFlag
 	var excludePaths multiFlag
+	var filters multiFlag
 	fs.Var(&confirmKinds, "confirm-kind", "mark findings of kind/category as confirmed")
 	fs.Var(&excludeKinds, "exclude-kind", "mark findings of kind/category as excluded")
 	fs.Var(&todoKinds, "todo-kind", "mark findings of kind/category as todo")
 	fs.Var(&noteKinds, "migration-note-kind", "mark findings of kind/category as migration-note")
 	fs.Var(&confirmManagers, "confirm-manager", "mark packages from manager as confirmed")
 	fs.Var(&excludePaths, "exclude-path", "exclude findings with path prefix")
+	fs.Var(&filters, "filter", "interactive quick filter. Repeatable.")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateReviewFilters(filters); err != nil {
 		return err
 	}
 	if *scanPath == "" || *out == "" {
@@ -1010,6 +1016,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	opts := reviewOptionsFromFlags(fs, p, review.Options{}, *autoSafe, confirmKinds, excludeKinds, todoKinds, noteKinds, confirmManagers, excludePaths, *pendingOnly)
+	opts.Filters = filters
 	if *interactive {
 		report = review.Interactive(stdin, stdout, report, opts)
 	} else {
@@ -1866,6 +1873,27 @@ func reviewOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, base review.Optio
 	opts.ExcludePathPrefixes = policy.Merge(excludePaths, opts.ExcludePathPrefixes)
 	opts.PendingOnly = pendingOnly
 	return opts
+}
+
+func validateReviewFilters(filters []string) error {
+	allowed := map[string]bool{
+		"pending":     true,
+		"unmapped":    true,
+		"protected":   true,
+		"packages":    true,
+		"services":    true,
+		"filesystem":  true,
+		"stateful":    true,
+		"items":       true,
+		"containers":  true,
+		"git-sources": true,
+	}
+	for _, filter := range filters {
+		if !allowed[strings.ToLower(strings.TrimSpace(filter))] {
+			return fmt.Errorf("unknown review filter %q; use pending, unmapped, protected, packages, services, filesystem, stateful, items, containers, or git-sources", filter)
+		}
+	}
+	return nil
 }
 
 func resolveBaselineID(baselineID string) (string, error) {

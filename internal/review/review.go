@@ -19,6 +19,7 @@ type Options struct {
 	ConfirmManagers     []string
 	ExcludePathPrefixes []string
 	PendingOnly         bool
+	Filters             []string
 }
 
 func Apply(report model.ScanReport, opts Options) model.ScanReport {
@@ -32,7 +33,7 @@ func Apply(report model.ScanReport, opts Options) model.ScanReport {
 
 func Interactive(in io.Reader, out io.Writer, report model.ScanReport, opts Options) model.ScanReport {
 	report = applyDecisions(report, opts)
-	session := interactiveSession{in: bufio.NewScanner(in), out: out, quit: false, pendingOnly: opts.PendingOnly}
+	session := interactiveSession{in: bufio.NewScanner(in), out: out, quit: false, pendingOnly: opts.PendingOnly || contains(opts.Filters, "pending"), filters: filterSet(opts.Filters)}
 	session.reviewPackages("packages", report.Packages, func(i int, decision model.Decision) { report.Packages[i].Decision = decision })
 	session.reviewPackages("npm", report.Languages.NPM, func(i int, decision model.Decision) { report.Languages.NPM[i].Decision = decision })
 	session.reviewPackages("conda", report.Languages.Conda, func(i int, decision model.Decision) { report.Languages.Conda[i].Decision = decision })
@@ -101,17 +102,32 @@ type interactiveSession struct {
 	quit        bool
 	skipSection bool
 	pendingOnly bool
+	filters     map[string]bool
 }
 
-func (s *interactiveSession) shouldPrompt(decision model.Decision) bool {
-	return !s.pendingOnly || decision == model.DecisionCandidate
+func (s *interactiveSession) shouldPrompt(section string, decision model.Decision, special ...string) bool {
+	if s.pendingOnly && decision != model.DecisionCandidate {
+		return false
+	}
+	if len(s.filters) == 0 || (len(s.filters) == 1 && s.filters["pending"]) {
+		return true
+	}
+	if s.filters[section] {
+		return true
+	}
+	for _, name := range special {
+		if s.filters[name] {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *interactiveSession) reviewPackages(section string, pkgs []model.Package, set func(int, model.Decision)) {
 	s.skipSection = false
 	total := 0
 	for _, pkg := range pkgs {
-		if s.shouldPrompt(pkg.Decision) {
+		if s.shouldPrompt("packages", pkg.Decision, packageFilters(section, pkg)...) {
 			total++
 		}
 	}
@@ -120,7 +136,7 @@ func (s *interactiveSession) reviewPackages(section string, pkgs []model.Package
 		if s.quit || s.skipSection {
 			return
 		}
-		if !s.shouldPrompt(pkg.Decision) {
+		if !s.shouldPrompt("packages", pkg.Decision, packageFilters(section, pkg)...) {
 			continue
 		}
 		shown++
@@ -132,7 +148,7 @@ func (s *interactiveSession) reviewGitSources(items []model.GitSource, set func(
 	s.skipSection = false
 	total := 0
 	for _, item := range items {
-		if s.shouldPrompt(item.Decision) {
+		if s.shouldPrompt("git-sources", item.Decision) {
 			total++
 		}
 	}
@@ -141,7 +157,7 @@ func (s *interactiveSession) reviewGitSources(items []model.GitSource, set func(
 		if s.quit || s.skipSection {
 			return
 		}
-		if !s.shouldPrompt(item.Decision) {
+		if !s.shouldPrompt("git-sources", item.Decision) {
 			continue
 		}
 		shown++
@@ -153,7 +169,7 @@ func (s *interactiveSession) reviewContainers(items []model.Container, set func(
 	s.skipSection = false
 	total := 0
 	for _, item := range items {
-		if s.shouldPrompt(item.Decision) {
+		if s.shouldPrompt("containers", item.Decision) {
 			total++
 		}
 	}
@@ -162,7 +178,7 @@ func (s *interactiveSession) reviewContainers(items []model.Container, set func(
 		if s.quit || s.skipSection {
 			return
 		}
-		if !s.shouldPrompt(item.Decision) {
+		if !s.shouldPrompt("containers", item.Decision) {
 			continue
 		}
 		shown++
@@ -178,7 +194,7 @@ func (s *interactiveSession) reviewServices(items []model.Service, set func(int,
 	s.skipSection = false
 	total := 0
 	for _, item := range items {
-		if s.shouldPrompt(item.Decision) {
+		if s.shouldPrompt("services", item.Decision) {
 			total++
 		}
 	}
@@ -187,7 +203,7 @@ func (s *interactiveSession) reviewServices(items []model.Service, set func(int,
 		if s.quit || s.skipSection {
 			return
 		}
-		if !s.shouldPrompt(item.Decision) {
+		if !s.shouldPrompt("services", item.Decision) {
 			continue
 		}
 		shown++
@@ -199,7 +215,8 @@ func (s *interactiveSession) reviewFiles(section string, items []model.FileFindi
 	s.skipSection = false
 	total := 0
 	for _, item := range items {
-		if s.shouldPrompt(item.Decision) {
+		protected := item.SecretRisk || forceMigrationNote
+		if s.shouldPrompt(fileSectionFilter(section), item.Decision, protectedFilter(protected)...) {
 			total++
 		}
 	}
@@ -208,11 +225,11 @@ func (s *interactiveSession) reviewFiles(section string, items []model.FileFindi
 		if s.quit || s.skipSection {
 			return
 		}
-		if !s.shouldPrompt(item.Decision) {
+		protected := item.SecretRisk || forceMigrationNote
+		if !s.shouldPrompt(fileSectionFilter(section), item.Decision, protectedFilter(protected)...) {
 			continue
 		}
 		shown++
-		protected := item.SecretRisk || forceMigrationNote
 		s.reviewDecision(section, shown, total, fmt.Sprintf("%s %s %s", item.Category, item.Path, item.Reason), fileFindingNotes(item, protected), item.Decision, protected, func(decision model.Decision) { set(i, decision) })
 	}
 }
@@ -221,7 +238,7 @@ func (s *interactiveSession) reviewItems(items []model.Item, set func(int, model
 	s.skipSection = false
 	total := 0
 	for _, item := range items {
-		if s.shouldPrompt(item.Decision) {
+		if s.shouldPrompt("items", item.Decision) {
 			total++
 		}
 	}
@@ -230,7 +247,7 @@ func (s *interactiveSession) reviewItems(items []model.Item, set func(int, model
 		if s.quit || s.skipSection {
 			return
 		}
-		if !s.shouldPrompt(item.Decision) {
+		if !s.shouldPrompt("items", item.Decision) {
 			continue
 		}
 		shown++
@@ -291,6 +308,47 @@ func choiceDecision(choice string) (model.Decision, bool) {
 	default:
 		return "", false
 	}
+}
+
+func filterSet(filters []string) map[string]bool {
+	if len(filters) == 0 {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, filter := range filters {
+		filter = strings.TrimSpace(strings.ToLower(filter))
+		if filter != "" {
+			set[filter] = true
+		}
+	}
+	return set
+}
+
+func packageFilter(pkg model.Package) []string {
+	if len(pkg.NixNames) == 0 {
+		return []string{"unmapped"}
+	}
+	return nil
+}
+
+func packageFilters(section string, pkg model.Package) []string {
+	filters := []string{section}
+	filters = append(filters, packageFilter(pkg)...)
+	return filters
+}
+
+func protectedFilter(protected bool) []string {
+	if protected {
+		return []string{"protected"}
+	}
+	return nil
+}
+
+func fileSectionFilter(section string) string {
+	if section == "stateful data" {
+		return "stateful"
+	}
+	return "filesystem"
 }
 
 func packageSummary(pkg model.Package) string {

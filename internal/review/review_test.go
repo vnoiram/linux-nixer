@@ -238,6 +238,38 @@ func TestInteractivePendingOnlySkipsAlreadyDecidedFindings(t *testing.T) {
 	}
 }
 
+func TestInteractiveQuickFilterPromptsOnlyMatchingFindings(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+			{Manager: "apt", Name: "custom-tool"},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service"},
+		},
+	}
+	in := strings.NewReader("c\n")
+	var out bytes.Buffer
+
+	got := Interactive(in, &out, report, Options{Filters: []string{"unmapped"}})
+
+	if got.Packages[0].Decision != model.DecisionCandidate {
+		t.Fatalf("mapped package should not be prompted: %+v", got.Packages[0])
+	}
+	if got.Packages[1].Decision != model.DecisionConfirmed {
+		t.Fatalf("unmapped package decision=%q, want confirmed", got.Packages[1].Decision)
+	}
+	if got.Services[0].Decision != model.DecisionCandidate {
+		t.Fatalf("service should not be prompted: %+v", got.Services[0])
+	}
+	if strings.Contains(out.String(), "apt curl") || strings.Contains(out.String(), "app.service") {
+		t.Fatalf("quick filter prompted non-matching findings:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "[packages #1/1]") {
+		t.Fatalf("quick filter did not show filtered package progress:\n%s", out.String())
+	}
+}
+
 func TestInteractiveProtectsSecretAndStatefulData(t *testing.T) {
 	report := model.ScanReport{
 		FilesystemDiff: []model.FileFinding{

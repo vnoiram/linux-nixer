@@ -106,6 +106,34 @@ func TestRunReviewWritesDecisionsReport(t *testing.T) {
 	}
 }
 
+func TestRunReviewInteractiveFilter(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+			{Manager: "apt", Name: "custom-tool"},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--interactive", "--filter", "unmapped"}, strings.NewReader("c\n"), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	if got.Packages[0].Decision != model.DecisionCandidate || got.Packages[1].Decision != model.DecisionConfirmed {
+		t.Fatalf("unexpected filtered decisions: %+v", got.Packages)
+	}
+	if strings.Contains(stdout.String(), "apt curl") || !strings.Contains(stdout.String(), "custom-tool") {
+		t.Fatalf("unexpected filtered prompt output:\n%s", stdout.String())
+	}
+}
+
 func TestRunVersionWritesBuildVersion(t *testing.T) {
 	oldVersion := version
 	version = "v9.8.7"
@@ -299,6 +327,7 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer review",
 				"c/k/t/m/x/s/n/q",
 				"--pending-only",
+				"--filter NAME",
 				"Policy decisions are applied first",
 			},
 		},
