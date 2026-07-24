@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/vnoiram/linux-nixer/internal/review"
@@ -52,6 +53,18 @@ type FieldDiff struct {
 	Name    string   `json:"name"`
 	Added   []string `json:"added,omitempty"`
 	Removed []string `json:"removed,omitempty"`
+}
+
+type LintIssue struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+type LintResult struct {
+	OK       bool        `json:"ok"`
+	Checked  int         `json:"checked"`
+	Errors   []LintIssue `json:"errors,omitempty"`
+	Warnings []LintIssue `json:"warnings,omitempty"`
 }
 
 // Template returns a policy template, optionally tuned by a named preset
@@ -208,6 +221,67 @@ func (p Policy) Validate() error {
 	return nil
 }
 
+func Lint(p Policy) LintResult {
+	result := LintResult{OK: true}
+	if err := p.Validate(); err != nil {
+		result.OK = false
+		result.Errors = append(result.Errors, LintIssue{Path: "policy", Message: err.Error()})
+		return result
+	}
+	lists := map[string][]string{
+		"confirmKinds":       p.ConfirmKinds,
+		"excludeKinds":       p.ExcludeKinds,
+		"todoKinds":          p.TODOKinds,
+		"migrationNoteKinds": p.MigrationNoteKinds,
+		"confirmManagers":    p.ConfirmManagers,
+		"includePaths":       p.IncludePaths,
+		"excludePaths":       p.ExcludePaths,
+		"plugins":            p.Plugins,
+	}
+	for field, values := range lists {
+		result.Checked += len(values)
+		for _, duplicate := range duplicates(values) {
+			result.Warnings = append(result.Warnings, LintIssue{Path: field, Message: fmt.Sprintf("duplicate value %q", duplicate)})
+		}
+	}
+	kindFields := map[string][]string{
+		"confirmKinds":       p.ConfirmKinds,
+		"excludeKinds":       p.ExcludeKinds,
+		"todoKinds":          p.TODOKinds,
+		"migrationNoteKinds": p.MigrationNoteKinds,
+	}
+	for field, values := range kindFields {
+		for _, value := range values {
+			if !knownPolicyKind(value) {
+				result.Warnings = append(result.Warnings, LintIssue{Path: field, Message: fmt.Sprintf("unknown kind %q; custom plugin kinds are allowed but should be intentional", value)})
+			}
+		}
+	}
+	fields := []struct {
+		name   string
+		values []string
+	}{
+		{name: "confirmKinds", values: p.ConfirmKinds},
+		{name: "excludeKinds", values: p.ExcludeKinds},
+		{name: "todoKinds", values: p.TODOKinds},
+		{name: "migrationNoteKinds", values: p.MigrationNoteKinds},
+	}
+	for i := 0; i < len(fields); i++ {
+		for j := i + 1; j < len(fields); j++ {
+			for _, value := range intersection(fields[i].values, fields[j].values) {
+				result.Errors = append(result.Errors, LintIssue{
+					Path:    fields[i].name + "/" + fields[j].name,
+					Message: fmt.Sprintf("kind %q appears in contradictory decision lists", value),
+				})
+			}
+		}
+	}
+	if len(result.Errors) > 0 {
+		result.OK = false
+	}
+	return result
+}
+
 func (p Policy) ScanOptions(base scanner.Options) scanner.Options {
 	if p.Sudo != nil {
 		base.UseSudo = *p.Sudo
@@ -264,4 +338,69 @@ func listDifference(values, subtract []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func duplicates(values []string) []string {
+	seen := map[string]bool{}
+	reported := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		if seen[value] && !reported[value] {
+			out = append(out, value)
+			reported[value] = true
+		}
+		seen[value] = true
+	}
+	sort.Strings(out)
+	return out
+}
+
+func intersection(a, b []string) []string {
+	inB := map[string]bool{}
+	for _, value := range b {
+		inB[value] = true
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range a {
+		if value != "" && inB[value] && !seen[value] {
+			out = append(out, value)
+			seen[value] = true
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func knownPolicyKind(kind string) bool {
+	known := map[string]bool{
+		"apt-config":        true,
+		"apt-keyring":       true,
+		"apt-preference":    true,
+		"apt-source":        true,
+		"backup-config":     true,
+		"browser-extension": true,
+		"browser-profile":   true,
+		"cicd-config":       true,
+		"config":            true,
+		"container":         true,
+		"credential-store":  true,
+		"desktop-autostart": true,
+		"desktop-config":    true,
+		"dev-project":       true,
+		"devops-config":     true,
+		"direnv":            true,
+		"editor-profile":    true,
+		"git-source":        true,
+		"hardware-config":   true,
+		"language-project":  true,
+		"os-config":         true,
+		"service":           true,
+		"shell-config":      true,
+		"shell-plugin":      true,
+		"stateful-data":     true,
+		"user-bin":          true,
+		"user-config":       true,
+	}
+	return known[kind]
 }

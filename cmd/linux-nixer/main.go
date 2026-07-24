@@ -132,6 +132,7 @@ Usage:
   linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer policy diff --from workstation --to server [--json]
+  linux-nixer policy lint --policy linux-nixer-policy.json [--json]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer guide
   linux-nixer help <command>
@@ -189,6 +190,10 @@ func commandHelp(w io.Writer, topic []string) error {
 		}
 		if topic[1] == "diff" {
 			fmt.Fprint(w, policyDiffHelp)
+			return nil
+		}
+		if topic[1] == "lint" {
+			fmt.Fprint(w, policyLintHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "policy "+topic[1])
@@ -618,6 +623,21 @@ Examples:
 Flags:
   --from NAME   Source preset: default, workstation, server, developer-machine, or minimal-audit.
   --to NAME     Target preset: default, workstation, server, developer-machine, or minimal-audit.
+  --json        Write machine-readable JSON.
+`
+
+const policyLintHelp = `linux-nixer policy lint
+Check a policy file for duplicate values, contradictory kind decisions, and suspicious unknown kinds.
+
+Usage:
+  linux-nixer policy lint --policy linux-nixer-policy.json [--json]
+
+Examples:
+  linux-nixer policy lint --policy linux-nixer-policy.json
+  linux-nixer policy lint --policy linux-nixer-policy.json --json
+
+Flags:
+  --policy PATH Policy JSON to lint.
   --json        Write machine-readable JSON.
 `
 
@@ -1488,15 +1508,17 @@ func runPolicy(args []string, stdout io.Writer) error {
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("policy supports: policy init, policy diff")
+		return errors.New("policy supports: policy init, policy diff, policy lint")
 	}
 	switch args[0] {
 	case "init":
 		return runPolicyInit(args[1:], stdout)
 	case "diff":
 		return runPolicyDiff(args[1:], stdout)
+	case "lint":
+		return runPolicyLint(args[1:], stdout)
 	default:
-		return errors.New("policy supports: policy init, policy diff")
+		return errors.New("policy supports: policy init, policy diff, policy lint")
 	}
 }
 
@@ -1575,6 +1597,63 @@ func formatPolicyDiff(diff policy.PresetDiff) string {
 			fmt.Fprintf(&b, " removed=%s", strings.Join(field.Removed, ","))
 		}
 		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func runPolicyLint(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, policyLintHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("policy lint", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	policyPath := fs.String("policy", "", "policy JSON path")
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *policyPath == "" {
+		return errors.New("policy lint requires --policy; try `linux-nixer policy lint --policy linux-nixer-policy.json`")
+	}
+	p, err := policy.Load(*policyPath)
+	if err != nil {
+		return err
+	}
+	result := policy.Lint(p)
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(result); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprint(stdout, formatPolicyLint(result))
+	}
+	if !result.OK {
+		return fmt.Errorf("policy lint failed with %d errors", len(result.Errors))
+	}
+	return nil
+}
+
+func formatPolicyLint(result policy.LintResult) string {
+	var b strings.Builder
+	if result.OK {
+		fmt.Fprintf(&b, "policy lint OK: checked %d values\n", result.Checked)
+	} else {
+		fmt.Fprintf(&b, "policy lint failed: %d errors, checked %d values\n", len(result.Errors), result.Checked)
+	}
+	if len(result.Errors) > 0 {
+		b.WriteString("\nErrors:\n")
+		for _, issue := range result.Errors {
+			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
+	}
+	if len(result.Warnings) > 0 {
+		b.WriteString("\nWarnings:\n")
+		for _, issue := range result.Warnings {
+			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
 	}
 	return b.String()
 }

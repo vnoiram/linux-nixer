@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/vnoiram/linux-nixer/internal/review"
@@ -134,6 +135,28 @@ func TestDiffPresetsReportsListAndAutoSafeChanges(t *testing.T) {
 	exclude := fields["excludeKinds"]
 	if !slices.Equal(exclude.Removed, []string{"desktop-config", "shell-plugin"}) {
 		t.Fatalf("unexpected excludeKinds diff: %+v", exclude)
+	}
+}
+
+func TestLintReportsDuplicatesUnknownKindsAndContradictions(t *testing.T) {
+	ok := Lint(Policy{SchemaVersion: SchemaVersion, ConfirmKinds: []string{"service"}})
+	if !ok.OK || len(ok.Errors) != 0 || len(ok.Warnings) != 0 {
+		t.Fatalf("valid lint result should be clean: %+v", ok)
+	}
+
+	got := Lint(Policy{
+		SchemaVersion: SchemaVersion,
+		ConfirmKinds:  []string{"service", "service", "typo-kind"},
+		ExcludeKinds:  []string{"service"},
+	})
+	if got.OK {
+		t.Fatalf("contradictory policy should fail lint: %+v", got)
+	}
+	if len(got.Errors) != 1 || !strings.Contains(got.Errors[0].Message, "contradictory") {
+		t.Fatalf("expected contradictory-kind error: %+v", got)
+	}
+	if len(got.Warnings) < 2 {
+		t.Fatalf("expected duplicate and unknown-kind warnings: %+v", got)
 	}
 }
 

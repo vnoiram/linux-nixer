@@ -645,6 +645,38 @@ func TestRunPolicyDiffRequiresPresets(t *testing.T) {
 	}
 }
 
+func TestRunPolicyLintWritesTextAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	cleanPath := filepath.Join(dir, "clean-policy.json")
+	if err := os.WriteFile(cleanPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","confirmKinds":["service"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"policy", "lint", "--policy", cleanPath}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "policy lint OK") {
+		t.Fatalf("policy lint text missing OK:\n%s", stdout.String())
+	}
+
+	badPath := filepath.Join(dir, "bad-policy.json")
+	if err := os.WriteFile(badPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","confirmKinds":["service","service","typo-kind"],"excludeKinds":["service"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	err := run(context.Background(), []string{"policy", "lint", "--policy", badPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected contradictory policy lint to fail")
+	}
+	var got policypkg.LintResult
+	if jsonErr := json.Unmarshal(stdout.Bytes(), &got); jsonErr != nil {
+		t.Fatalf("policy lint --json did not emit JSON: %v\n%s", jsonErr, stdout.String())
+	}
+	if got.OK || len(got.Errors) == 0 || len(got.Warnings) < 2 {
+		t.Fatalf("unexpected policy lint JSON: %+v", got)
+	}
+}
+
 func TestRunPolicyInitRejectsUnknownPreset(t *testing.T) {
 	dir := t.TempDir()
 	policyPath := filepath.Join(dir, "bogus-policy.json")
