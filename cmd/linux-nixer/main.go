@@ -133,6 +133,7 @@ Usage:
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer policy diff --from workstation --to server [--json]
   linux-nixer policy lint --policy linux-nixer-policy.json [--json]
+  linux-nixer policy examples --out policy-examples
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer guide
   linux-nixer help <command>
@@ -194,6 +195,10 @@ func commandHelp(w io.Writer, topic []string) error {
 		}
 		if topic[1] == "lint" {
 			fmt.Fprint(w, policyLintHelp)
+			return nil
+		}
+		if topic[1] == "examples" {
+			fmt.Fprint(w, policyExamplesHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "policy "+topic[1])
@@ -639,6 +644,25 @@ Examples:
 Flags:
   --policy PATH Policy JSON to lint.
   --json        Write machine-readable JSON.
+`
+
+const policyExamplesHelp = `linux-nixer policy examples
+Write review profile example policies that are valid inputs to --policy.
+
+Usage:
+  linux-nixer policy examples --out DIR
+
+Examples:
+  linux-nixer policy examples --out policy-examples
+
+Artifacts:
+  DIR/home-workstation.json
+  DIR/server.json
+  DIR/dev-laptop.json
+  DIR/audit-only.json
+
+Flags:
+  --out DIR Write example policy JSON files under DIR.
 `
 
 func runScan(ctx context.Context, args []string, stdout io.Writer) error {
@@ -1508,7 +1532,7 @@ func runPolicy(args []string, stdout io.Writer) error {
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("policy supports: policy init, policy diff, policy lint")
+		return errors.New("policy supports: policy init, policy diff, policy lint, policy examples")
 	}
 	switch args[0] {
 	case "init":
@@ -1517,8 +1541,10 @@ func runPolicy(args []string, stdout io.Writer) error {
 		return runPolicyDiff(args[1:], stdout)
 	case "lint":
 		return runPolicyLint(args[1:], stdout)
+	case "examples":
+		return runPolicyExamples(args[1:], stdout)
 	default:
-		return errors.New("policy supports: policy init, policy diff, policy lint")
+		return errors.New("policy supports: policy init, policy diff, policy lint, policy examples")
 	}
 }
 
@@ -1656,6 +1682,43 @@ func formatPolicyLint(result policy.LintResult) string {
 		}
 	}
 	return b.String()
+}
+
+func runPolicyExamples(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, policyExamplesHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("policy examples", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	out := fs.String("out", "", "output directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *out == "" {
+		return errors.New("policy examples requires --out; try `linux-nixer policy examples --out policy-examples`")
+	}
+	examples := []struct {
+		file   string
+		preset string
+	}{
+		{file: "home-workstation.json", preset: "workstation"},
+		{file: "server.json", preset: "server"},
+		{file: "dev-laptop.json", preset: "developer-machine"},
+		{file: "audit-only.json", preset: "minimal-audit"},
+	}
+	for _, example := range examples {
+		tmpl, err := policy.Template(example.preset)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(*out, example.file)
+		if err := writeJSON(path, tmpl); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote policy example: %s\n", path)
+	}
+	return nil
 }
 
 // loadPolicyFromFlags resolves a Policy from either a --preset name (a

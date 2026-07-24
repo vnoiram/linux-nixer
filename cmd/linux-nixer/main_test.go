@@ -677,6 +677,28 @@ func TestRunPolicyLintWritesTextAndJSON(t *testing.T) {
 	}
 }
 
+func TestRunPolicyExamplesWritesLoadableProfiles(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "examples")
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"policy", "examples", "--out", out}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"home-workstation.json", "server.json", "dev-laptop.json", "audit-only.json"} {
+		path := filepath.Join(out, file)
+		if !strings.Contains(stdout.String(), path) {
+			t.Fatalf("stdout missing written path %s:\n%s", path, stdout.String())
+		}
+		p, err := policypkg.Load(path)
+		if err != nil {
+			t.Fatalf("example %s was not loadable: %v", file, err)
+		}
+		if p.SchemaVersion != policypkg.SchemaVersion {
+			t.Fatalf("example %s schemaVersion=%q", file, p.SchemaVersion)
+		}
+	}
+}
+
 func TestRunPolicyInitRejectsUnknownPreset(t *testing.T) {
 	dir := t.TempDir()
 	policyPath := filepath.Join(dir, "bogus-policy.json")
