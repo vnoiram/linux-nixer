@@ -47,12 +47,13 @@ type Result struct {
 }
 
 type Options struct {
-	Project string
-	VM      bool
-	Boot    bool
-	Host    string
-	Timeout time.Duration
-	Runner  Runner
+	Project       string
+	VM            bool
+	Boot          bool
+	BootReadiness bool
+	Host          string
+	Timeout       time.Duration
+	Runner        Runner
 }
 
 type Runner func(context.Context, string, ...string) ([]byte, error)
@@ -166,6 +167,21 @@ func Run(ctx context.Context, opts Options) Result {
 		result.OK = false
 	} else {
 		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: true})
+	}
+	if opts.BootReadiness {
+		host := opts.Host
+		if host == "" {
+			host = detectHost(opts.Project)
+		}
+		if host == "" {
+			result.Checks = append(result.Checks, Check{Name: "vm boot readiness", OK: false, Message: "could not detect host; pass --host"})
+			result.OK = false
+		} else {
+			script := vmScriptPath(host)
+			message := "host=" + host + " timeout=" + opts.Timeout.String() + " script=" + script + " command=" + script + "; readiness only, VM was not started"
+			result.Checks = append(result.Checks, Check{Name: "vm boot readiness:" + host, OK: true, Message: message})
+			result.Suggestions = append(result.Suggestions, "Before running `doctor --boot`, expect a VM build, local qemu/KVM availability differences, and a timeout-based smoke check rather than a full login validation.")
+		}
 	}
 	if opts.VM {
 		host := opts.Host

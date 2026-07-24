@@ -267,6 +267,7 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer doctor",
 				"--vm",
 				"--boot",
+				"--boot-readiness",
 			},
 		},
 	}

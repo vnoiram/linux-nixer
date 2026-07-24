@@ -169,6 +169,40 @@ func TestRunBootUsesRunner(t *testing.T) {
 	assertCheck(t, result, "vm boot:demo", true)
 }
 
+func TestRunBootReadinessDoesNotBuildOrStartVM(t *testing.T) {
+	t.Chdir(t.TempDir())
+	project := writeGeneratedProject(t, "demo")
+	var called []string
+
+	result := Run(context.Background(), Options{
+		Project:       project,
+		BootReadiness: true,
+		Host:          "demo",
+		Timeout:       20 * time.Second,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			called = append(called, name+" "+strings.Join(args, " "))
+			if name == "nix" && len(args) > 0 && args[0] == "build" {
+				t.Fatalf("boot readiness should not build VM: %s %v", name, args)
+			}
+			if strings.Contains(name, "run-demo-vm") {
+				t.Fatalf("boot readiness should not start VM: %s", name)
+			}
+			return []byte("ok"), nil
+		},
+	})
+
+	assertCheck(t, result, "vm boot readiness:demo", true)
+	check := findCheck(t, result, "vm boot readiness:demo")
+	for _, want := range []string{"host=demo", "timeout=20s", "result/bin/run-demo-vm", "VM was not started"} {
+		if !strings.Contains(check.Message, want) {
+			t.Fatalf("readiness message missing %q: %+v", want, check)
+		}
+	}
+	if len(called) != 1 || !strings.Contains(called[0], "nix flake check") {
+		t.Fatalf("unexpected runner calls: %v", called)
+	}
+}
+
 func TestRunBootFailureAndTimeout(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
@@ -300,15 +334,21 @@ func successRunner(ctx context.Context, name string, args ...string) ([]byte, er
 
 func assertCheck(t *testing.T, result Result, name string, ok bool) {
 	t.Helper()
+	check := findCheck(t, result, name)
+	if check.OK != ok {
+		t.Fatalf("check %s OK=%v, want %v: %+v", name, check.OK, ok, result.Checks)
+	}
+}
+
+func findCheck(t *testing.T, result Result, name string) Check {
+	t.Helper()
 	for _, check := range result.Checks {
 		if check.Name == name {
-			if check.OK != ok {
-				t.Fatalf("check %s OK=%v, want %v: %+v", name, check.OK, ok, result.Checks)
-			}
-			return
+			return check
 		}
 	}
 	t.Fatalf("check %s missing from %+v", name, result.Checks)
+	return Check{}
 }
 
 func slicesContain(values []string, want string) bool {

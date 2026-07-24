@@ -475,17 +475,19 @@ const doctorHelp = `linux-nixer doctor
 Validate generated Nix files and optionally build or boot a NixOS VM.
 
 Usage:
-  linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
+  linux-nixer doctor --project ./nix-config [--vm] [--boot] [--boot-readiness] [--timeout 15s] [--host generated]
 
 Examples:
   linux-nixer doctor --project nix-config
   linux-nixer doctor --project nix-config --vm --host generated
+  linux-nixer doctor --project nix-config --boot-readiness --host generated
   linux-nixer doctor --project nix-config --vm --boot --timeout 30s
 
 Flags:
   --project DIR      Generated flake project to check.
   --vm               Attempt NixOS VM build validation.
   --boot             Attempt to start the generated VM script.
+  --boot-readiness   Report VM boot command, timeout, and limitations without building or starting the VM.
   --timeout VALUE    VM boot validation timeout. Defaults to 15s.
   --host NAME        NixOS configuration name for VM validation.
 
@@ -1297,6 +1299,7 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	project := fs.String("project", "", "generated flake project")
 	vm := fs.Bool("vm", false, "attempt VM validation")
 	boot := fs.Bool("boot", false, "attempt to start the generated VM script")
+	bootReadiness := fs.Bool("boot-readiness", false, "report VM boot readiness without starting the VM")
 	timeout := fs.Duration("timeout", 15*time.Second, "VM boot validation timeout")
 	host := fs.String("host", "", "NixOS configuration name for VM validation")
 	if err := fs.Parse(args); err != nil {
@@ -1305,7 +1308,7 @@ func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
 	if *project == "" {
 		return errors.New("doctor requires --project; try `linux-nixer doctor --project nix-config`")
 	}
-	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Boot: *boot, Timeout: *timeout, Host: *host})
+	result := doctor.Run(ctx, doctor.Options{Project: *project, VM: *vm, Boot: *boot, BootReadiness: *bootReadiness, Timeout: *timeout, Host: *host})
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(result); err != nil {
