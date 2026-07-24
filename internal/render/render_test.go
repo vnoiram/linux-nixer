@@ -600,7 +600,7 @@ func TestProjectSkipsUnsafeContainerPortsAndMounts(t *testing.T) {
 				Mounts:   []string{"tmpfs::/tmp/x"},
 				Decision: model.DecisionConfirmed,
 			},
-			{Runtime: "compose", Compose: "/srv/app/compose.yml", Decision: model.DecisionConfirmed},
+			{Runtime: "compose", Compose: "/srv/app/compose.yml", Decision: model.DecisionConfirmed, Details: map[string]string{"service-count": "2", "image-count": "2"}},
 		},
 	}
 	if err := Project(out, report); err != nil {
@@ -618,6 +618,14 @@ func TestProjectSkipsUnsafeContainerPortsAndMounts(t *testing.T) {
 	}
 	if strings.Contains(containers, "oci-containers.containers.compose") {
 		t.Fatalf("compose-only entries should not render an individual container block:\n%s", containers)
+	}
+	containersReport := readFile(t, out, "reports/containers.md")
+	if !strings.Contains(containersReport, "service-count `2`") || !strings.Contains(containersReport, "image-count `2`") {
+		t.Fatalf("compose report missing shallow details:\n%s", containersReport)
+	}
+	checklist := readFile(t, out, "reports/migration-checklist.md")
+	if !strings.Contains(checklist, "Translate compose `/srv/app/compose.yml`") || !strings.Contains(checklist, "service-count `2`") {
+		t.Fatalf("compose checklist missing manual migration hints:\n%s", checklist)
 	}
 }
 
@@ -795,6 +803,10 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Manager: "systemd", Name: "empty.service", Path: "/etc/systemd/system/empty.service", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "candidate.service", Path: "/etc/systemd/system/candidate.service", Decision: model.DecisionCandidate},
 			{Manager: "systemd", Name: "todo.service", Path: "/etc/systemd/system/todo.service", Decision: model.DecisionTODO},
+			{Manager: "systemd", Name: "user-app.service", Path: "/home/alice/.config/systemd/user/user-app.service", Description: "User app", WorkingDirectory: "/home/alice/app", ExecStart: "/home/alice/bin/app --serve", WantedBy: []string{"default.target"}, Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "user-secret.service", Path: "/home/alice/.config/systemd/user/user-secret.service", ExecStart: "/home/alice/bin/app --token=super-secret", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "user-relative.service", Path: "/home/alice/.config/systemd/user/user-relative.service", ExecStart: "app --serve", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "user-backup.timer", Path: "/home/alice/.config/systemd/user/user-backup.timer", Schedule: "OnCalendar=daily", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "backup-job", Path: "/etc/cron.d/backup-job", User: "root", ExecStart: "/usr/local/bin/backup", Schedule: "15 2 * * *", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "secret-job", Path: "/etc/cron.d/secret-job", User: "root", ExecStart: "/usr/local/bin/job --token=super-secret", Schedule: "0 3 * * *", Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "no-user-job", Path: "/etc/cron.d/no-user-job", ExecStart: "/usr/local/bin/job", Schedule: "0 4 * * *", Decision: model.DecisionConfirmed},
@@ -808,6 +820,10 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 			{Kind: "user-config", Name: ".gitconfig", Path: "/home/alice/.gitconfig", Decision: model.DecisionConfirmed, Reason: "user tool configuration", Details: map[string]string{"sections": "2", "secret-refs": "1"}},
 			{Kind: "user-config", Name: ".tmux.conf", Path: "/home/alice/.tmux.conf", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
 			{Kind: "user-config", Name: "starship.toml", Path: "/home/alice/.config/starship.toml", Decision: model.DecisionConfirmed, Reason: "user tool configuration"},
+			{Kind: "desktop-config", Name: "init.lua", Path: "/home/alice/.config/nvim/init.lua", Decision: model.DecisionConfirmed, Reason: "desktop environment configuration"},
+			{Kind: "desktop-config", Name: "kitty.conf", Path: "/home/alice/.config/kitty/kitty.conf", Decision: model.DecisionConfirmed, Reason: "desktop environment configuration"},
+			{Kind: "editor-profile", Name: "settings.json", Path: "/home/alice/.config/Code/User/settings.json", Decision: model.DecisionConfirmed, Reason: "editor settings, extensions, or IDE profile"},
+			{Kind: "direnv", Name: ".envrc", Path: "/home/alice/app/.envrc", Decision: model.DecisionConfirmed, Reason: "direnv project environment"},
 			{Kind: "shell-config", Name: ".bashrc", Path: "/home/alice/.bashrc", Decision: model.DecisionCandidate, Reason: "candidate shell config"},
 			{Kind: "user-config", Name: ".gitconfig", Path: "/home/bob/.gitconfig", Decision: model.DecisionConfirmed, Reason: "other user config"},
 		},
@@ -842,7 +858,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 	}
 
 	home := readFile(t, out, "users/home.nix")
-	for _, want := range []string{`programs.zsh.enable = true;`, `programs.git.enable = true;`, `programs.tmux.enable = true;`, `programs.starship.enable = true;`} {
+	for _, want := range []string{`programs.zsh.enable = true;`, `programs.git.enable = true;`, `programs.tmux.enable = true;`, `programs.starship.enable = true;`, `programs.direnv.enable = true;`, `programs.neovim.enable = true;`, `programs.kitty.enable = true;`, `programs.vscode.enable = true;`, `systemd.user.services."user-app" = {`, `ExecStart = "/home/alice/bin/app --serve";`} {
 		if !strings.Contains(home, want) {
 			t.Fatalf("home missing %q:\n%s", want, home)
 		}
@@ -850,7 +866,7 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 	if !strings.Contains(home, "details: secret-refs `1`, sections `2`") {
 		t.Fatalf("home TODO missing safe details:\n%s", home)
 	}
-	for _, notWant := range []string{`programs.bash.enable = true;`, `PRIVATE KEY`, `programs.fish.enable = true;`} {
+	for _, notWant := range []string{`programs.bash.enable = true;`, `PRIVATE KEY`, `programs.fish.enable = true;`, `user-secret`, `user-relative`, `user-backup`} {
 		if strings.Contains(home, notWant) {
 			t.Fatalf("home should not contain %q:\n%s", notWant, home)
 		}
@@ -869,6 +885,9 @@ func TestProjectRendersConservativeNixOptions(t *testing.T) {
 		`secret.service ExecStart contains secret-like text and was not generated`,
 		`secret.service environment files require manual migration`,
 		`envfile.service environment files require manual migration`,
+		`user-secret.service ExecStart contains secret-like text and was not generated`,
+		`user-relative.service ExecStart is not an absolute path and was not generated`,
+		`user-backup.timer is a user timer and requires manual Home Manager migration`,
 		`services.cron.enable = true;`,
 		`"15 2 * * * root /usr/local/bin/backup"`,
 		`secret-job command contains secret-like text and was not generated`,

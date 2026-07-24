@@ -100,6 +100,7 @@ type Container struct {
 	Ports    []string          `json:"ports,omitempty"`
 	Mounts   []string          `json:"mounts,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
+	Details  map[string]string `json:"details,omitempty"`
 	Decision Decision          `json:"decision,omitempty"`
 }
 

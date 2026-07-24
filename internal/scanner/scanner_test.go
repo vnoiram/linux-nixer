@@ -916,6 +916,7 @@ func TestBackupConfigScannerFindsBackupAndSyncConfigs(t *testing.T) {
 	write(t, root, "/etc/systemd/system/restic-backup.timer", "[Timer]\nOnCalendar=daily\n")
 	write(t, root, "/etc/cron.d/rclone-sync", "15 3 * * * root rclone sync /srv remote:backup --token raw-secret\n")
 	write(t, root, "/etc/cron.d/borg-reboot", "@reboot root borg create /backup::snapshot /srv\n")
+	write(t, root, "/var/cache/restic/latest", "snapshot marker")
 
 	report := &model.ScanReport{}
 	if err := (BackupConfigScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -940,6 +941,12 @@ func TestBackupConfigScannerFindsBackupAndSyncConfigs(t *testing.T) {
 	job := seen["/etc/systemd/system/restic-backup.service"]
 	if job.Reason != "backup or sync job" || job.Details["tools"] != "restic" || job.Details["secret-refs"] != "1" {
 		t.Fatalf("systemd backup job details missing: %+v", job)
+	}
+	if seen["/home/alice/.config/rclone/rclone.conf"].Details["destination-present"] != "true" || !strings.Contains(seen["/home/alice/.config/rclone/rclone.conf"].Details["destination-kind"], "cloud") {
+		t.Fatalf("backup destination readiness missing: %+v", seen["/home/alice/.config/rclone/rclone.conf"])
+	}
+	if seen["/var/cache/restic/latest"].Details["recent-state"] != "cache-marker" {
+		t.Fatalf("backup recent state missing: %+v", seen["/var/cache/restic/latest"])
 	}
 	timer := seen["/etc/systemd/system/restic-backup.timer"]
 	if timer.Details["tools"] != "restic" || timer.Details["schedule"] != "OnCalendar=daily" {
@@ -973,7 +980,7 @@ func TestGitScannerFindsSourceMetadataAndHints(t *testing.T) {
 	write(t, root, "/home/alice/app/justfile", "build:\n")
 	write(t, root, "/home/alice/app/Taskfile.yml", "version: '3'\n")
 	write(t, root, "/home/alice/app/docker-compose.yml", "services: {}\n")
-	write(t, root, "/home/alice/app/compose.yaml", "services: {}\n")
+	write(t, root, "/home/alice/app/compose.yaml", "services:\n  web:\n    image: nginx\n    ports:\n      - \"8080:80\"\n    volumes:\n      - ./data:/data\n")
 	write(t, root, "/home/alice/app/.git/MERGE_HEAD", "def456\n")
 
 	write(t, root, "/opt/tool/.git/config", "[remote \"origin\"]\n  url = git@example.com:tool.git\n")
@@ -1096,6 +1103,9 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/audit/rules.d/hardening.rules", "-w /etc/passwd -p wa -k identity\n-a always,exit -F arch=b64 -S execve -k exec\n")
 	write(t, root, "/etc/apparmor.d/usr.bin.demo", "#include <tunables/global>\nprofile demo /usr/bin/demo {\n  capability net_bind_service,\n}\n")
 	write(t, root, "/etc/apparmor.d/local/usr.bin.demo", "capability dac_override,\n")
+	write(t, root, "/etc/selinux/config", "SELINUX=enforcing\nSELINUXTYPE=targeted\n")
+	write(t, root, "/etc/rkhunter.conf", "UPDATE_MIRRORS=1\nWEB_CMD=\"\"\n")
+	write(t, root, "/etc/clamav/clamd.conf", "LocalSocket /run/clamav/clamd.ctl\nDatabaseDirectory /var/lib/clamav\n")
 	write(t, root, "/etc/firewalld/firewalld.conf", "DefaultZone=public\nFirewallBackend=nftables\n")
 	write(t, root, "/etc/firewalld/zones/public.xml", "<zone><service name=\"ssh\"/><port port=\"8443\" protocol=\"tcp\"/><rule family=\"ipv4\"/></zone>\n")
 	write(t, root, "/etc/iptables/rules.v4", "*filter\n:INPUT DROP [0:0]\n-A INPUT -p tcp --dport 22 -j ACCEPT\nCOMMIT\n")
@@ -1171,6 +1181,9 @@ WantedBy=multi-user.target
 		"/etc/audit/rules.d/hardening.rules":                       "auth and security configuration",
 		"/etc/apparmor.d/usr.bin.demo":                             "auth and security configuration",
 		"/etc/apparmor.d/local/usr.bin.demo":                       "auth and security configuration",
+		"/etc/selinux/config":                                      "auth and security configuration",
+		"/etc/rkhunter.conf":                                       "auth and security configuration",
+		"/etc/clamav/clamd.conf":                                   "auth and security configuration",
 		"/etc/firewalld/firewalld.conf":                            "firewall configuration",
 		"/etc/firewalld/zones/public.xml":                          "firewall configuration",
 		"/etc/iptables/rules.v4":                                   "firewall configuration",
@@ -1265,6 +1278,9 @@ WantedBy=multi-user.target
 	}
 	if seen["/etc/apparmor.d/usr.bin.demo"].Details["profiles"] != "1" || seen["/etc/apparmor.d/usr.bin.demo"].Details["includes"] != "1" || seen["/etc/apparmor.d/usr.bin.demo"].Details["capabilities"] != "1" {
 		t.Fatalf("apparmor details missing: %+v", seen["/etc/apparmor.d/usr.bin.demo"])
+	}
+	if seen["/etc/selinux/config"].Details["SELINUX"] != "enforcing" || seen["/etc/rkhunter.conf"].Details["tool"] != "rkhunter" || seen["/etc/clamav/clamd.conf"].Details["component"] != "clamd" {
+		t.Fatalf("security tooling details missing: selinux=%+v rkhunter=%+v clamav=%+v", seen["/etc/selinux/config"], seen["/etc/rkhunter.conf"], seen["/etc/clamav/clamd.conf"])
 	}
 	services := map[string]model.Service{}
 	for _, service := range report.Services {
@@ -1648,7 +1664,7 @@ func TestContainerScannerUsesInspectForRuntimeDetails(t *testing.T) {
 
 func TestContainerScannerMountedRootFindsComposeWithoutRuntimeCommands(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "/home/alice/app/compose.yaml", "services: {}\n")
+	write(t, root, "/home/alice/app/compose.yaml", "services:\n  web:\n    image: nginx\n    ports:\n      - \"8080:80\"\n    volumes:\n      - ./data:/data\n")
 	write(t, root, "/home/alice/app/compose.yml", "services: {}\n")
 	write(t, root, "/home/alice/app/docker-compose.yml", "services: {}\n")
 	write(t, root, "/home/alice/app/docker-compose.yaml", "services: {}\n")
@@ -1670,8 +1686,10 @@ func TestContainerScannerMountedRootFindsComposeWithoutRuntimeCommands(t *testin
 		t.Fatal("runtime command should not be called for mounted root")
 	}
 	seen := map[string]bool{}
+	details := map[string]map[string]string{}
 	for _, container := range report.Containers {
 		seen[container.Compose] = true
+		details[container.Compose] = container.Details
 	}
 	for _, want := range []string{
 		"/home/alice/app/compose.yaml",
@@ -1683,6 +1701,9 @@ func TestContainerScannerMountedRootFindsComposeWithoutRuntimeCommands(t *testin
 		if !seen[want] {
 			t.Fatalf("missing compose %s in %+v", want, report.Containers)
 		}
+	}
+	if details["/home/alice/app/compose.yaml"]["service-count"] != "1" || details["/home/alice/app/compose.yaml"]["image-count"] != "1" || details["/home/alice/app/compose.yaml"]["port-sections"] != "1" || details["/home/alice/app/compose.yaml"]["volume-sections"] != "1" {
+		t.Fatalf("compose details missing: %+v", details["/home/alice/app/compose.yaml"])
 	}
 }
 

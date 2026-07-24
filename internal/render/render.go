@@ -90,6 +90,7 @@ func renderTemplate(tpl string, d data) string {
 		"hostUserOptions":    hostUserOptions,
 		"hostShellOptions":   hostShellOptions,
 		"homeProgramOptions": homeProgramOptions,
+		"userSystemdOptions": userSystemdOptions,
 		"containerOptions":   containerOptions,
 	}).Parse(tpl))
 	var buf bytes.Buffer
@@ -258,6 +259,19 @@ func homeProgramOptions(report model.ScanReport) string {
 		return ""
 	}
 	return "\n" + strings.Join(lines, "\n") + "\n"
+}
+
+func userSystemdOptions(report model.ScanReport) string {
+	var blocks []string
+	for _, service := range report.Services {
+		if rendered := renderHomeSystemdUserService(service); rendered != "" {
+			blocks = append(blocks, rendered)
+		}
+	}
+	if len(blocks) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(blocks, "\n")
 }
 
 func dockerDetected(report model.ScanReport) bool {
@@ -945,10 +959,21 @@ func serviceChecklistItem(service model.Service) string {
 func writeContainerChecklist(b *strings.Builder, report model.ScanReport) {
 	var items []string
 	for _, container := range report.Containers {
-		if !manualDecision(container.Decision) {
+		if container.Runtime == "compose" {
+			if !reportDecision(container.Decision) {
+				continue
+			}
+		} else if !manualDecision(container.Decision) {
 			continue
 		}
-		items = append(items, fmt.Sprintf("Translate %s into Nix/container config, including image, ports, mounts, volumes, and redacted env keys.", containerSummary(container)))
+		action := fmt.Sprintf("Translate %s into Nix/container config, including image, ports, mounts, volumes, and redacted env keys.", containerSummary(container))
+		if container.Runtime == "compose" {
+			action = fmt.Sprintf("Translate compose `%s` manually to NixOS containers, services, or documented deployment steps.", container.Compose)
+		}
+		if details := detailsMapLines(container.Details); len(details) > 0 {
+			action += " Review " + strings.Join(details, ", ") + "."
+		}
+		items = append(items, action)
 	}
 	writeChecklistSection(b, "Containers", items)
 }
@@ -1253,11 +1278,13 @@ func renderServicesModule(report model.ScanReport) string {
 		b.WriteString(comment(fmt.Sprintf("%s %s at %s [%s]", service.Manager, service.Name, service.Path, printableDecision(service.Decision))))
 		b.WriteString("\n")
 		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" {
-			if rendered := renderSystemdServiceOption(service); rendered != "" {
-				b.WriteString(rendered)
-			}
-			if rendered := renderSystemdTimerOption(service); rendered != "" {
-				b.WriteString(rendered)
+			if !isUserSystemdUnit(service) {
+				if rendered := renderSystemdServiceOption(service); rendered != "" {
+					b.WriteString(rendered)
+				}
+				if rendered := renderSystemdTimerOption(service); rendered != "" {
+					b.WriteString(rendered)
+				}
 			}
 			for _, note := range serviceGenerationNotes(service) {
 				b.WriteString("  # TODO service detail: ")
@@ -1358,6 +1385,47 @@ func renderSystemdServiceOption(service model.Service) string {
 	return b.String()
 }
 
+func renderHomeSystemdUserService(service model.Service) string {
+	if !renderableHomeSystemdUserService(service) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("  systemd.user.services.%s = {\n", quote(serviceNameAttr(service.Name))))
+	if service.Description != "" {
+		b.WriteString(fmt.Sprintf("    Unit.Description = %s;\n", quote(service.Description)))
+	}
+	b.WriteString("    Service = {\n")
+	if service.WorkingDirectory != "" {
+		b.WriteString(fmt.Sprintf("      WorkingDirectory = %s;\n", quote(service.WorkingDirectory)))
+	}
+	b.WriteString(fmt.Sprintf("      ExecStart = %s;\n", quote(service.ExecStart)))
+	b.WriteString("    };\n")
+	if len(service.WantedBy) > 0 {
+		b.WriteString("    Install.WantedBy = ")
+		b.WriteString(nixStringList(service.WantedBy, 4))
+		b.WriteString(";\n")
+	} else {
+		b.WriteString("    Install.WantedBy = [ \"default.target\" ];\n")
+	}
+	b.WriteString("  };\n")
+	return b.String()
+}
+
+func renderableHomeSystemdUserService(service model.Service) bool {
+	if service.Decision != model.DecisionConfirmed || service.Manager != "systemd" || !isUserSystemdUnit(service) || strings.HasSuffix(service.Name, ".timer") {
+		return false
+	}
+	fields := strings.Fields(service.ExecStart)
+	return len(fields) > 0 &&
+		filepath.IsAbs(fields[0]) &&
+		!secretLikeText(service.ExecStart) &&
+		len(service.EnvironmentFiles) == 0
+}
+
+func isUserSystemdUnit(service model.Service) bool {
+	return strings.Contains(service.Path, "/.config/systemd/user/")
+}
+
 func renderSystemdTimerOption(service model.Service) string {
 	if !strings.HasSuffix(service.Name, ".timer") || service.Schedule == "" || secretLikeText(service.Schedule) {
 		return ""
@@ -1376,8 +1444,17 @@ func renderSystemdTimerOption(service model.Service) string {
 
 func serviceGenerationNotes(service model.Service) []string {
 	var notes []string
+	if isUserSystemdUnit(service) && strings.HasSuffix(service.Name, ".timer") {
+		notes = append(notes, fmt.Sprintf("%s is a user timer and requires manual Home Manager migration", service.Name))
+	}
 	if service.ExecStart == "" && !strings.HasSuffix(service.Name, ".timer") {
 		notes = append(notes, fmt.Sprintf("%s missing exec start and was not generated", service.Name))
+	}
+	if isUserSystemdUnit(service) && service.ExecStart != "" {
+		fields := strings.Fields(service.ExecStart)
+		if len(fields) == 0 || !filepath.IsAbs(fields[0]) {
+			notes = append(notes, fmt.Sprintf("%s ExecStart is not an absolute path and was not generated", service.Name))
+		}
 	}
 	if service.ExecStart != "" && secretLikeText(service.ExecStart) {
 		notes = append(notes, fmt.Sprintf("%s ExecStart contains secret-like text and was not generated", service.Name))
@@ -1521,11 +1598,13 @@ func systemdServiceAnnotations(report model.ScanReport) []migrationAnnotation {
 			out = append(out, a)
 			continue
 		}
-		if strings.HasSuffix(s.Name, ".timer") {
+		if renderableHomeSystemdUserService(s) {
+			a.nixOption = "systemd.user.services." + serviceNameAttr(s.Name)
+		} else if strings.HasSuffix(s.Name, ".timer") && !isUserSystemdUnit(s) {
 			if rendered := renderSystemdTimerOption(s); rendered != "" {
 				a.nixOption = "systemd.timers." + timerNameAttr(s.Name)
 			}
-		} else if rendered := renderSystemdServiceOption(s); rendered != "" {
+		} else if rendered := renderSystemdServiceOption(s); !isUserSystemdUnit(s) && rendered != "" {
 			a.nixOption = "systemd.services." + serviceNameAttr(s.Name)
 		}
 		a.note = strings.Join(serviceGenerationNotes(s), "; ")
@@ -1802,6 +1881,11 @@ func renderContainersReport(report model.ScanReport) string {
 		b.WriteString("## Compose files\n\n")
 		for _, container := range composeFiles {
 			b.WriteString(fmt.Sprintf("- `%s` [%s]\n", container.Compose, printableDecision(container.Decision)))
+			for _, detail := range detailsMapLines(container.Details) {
+				b.WriteString("  - ")
+				b.WriteString(detail)
+				b.WriteString("\n")
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -1976,17 +2060,21 @@ func serviceDetails(service model.Service) []string {
 }
 
 func itemDetails(item model.Item) []string {
-	if len(item.Details) == 0 {
+	return detailsMapLines(item.Details)
+}
+
+func detailsMapLines(values map[string]string) []string {
+	if len(values) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(item.Details))
-	for key := range item.Details {
+	keys := make([]string, 0, len(values))
+	for key := range values {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	details := make([]string, 0, len(keys))
 	for _, key := range keys {
-		value := redactSecretLikeText(item.Details[key])
+		value := redactSecretLikeText(values[key])
 		if value == "" {
 			continue
 		}
@@ -2447,9 +2535,23 @@ func generatedHomePrograms(report model.ScanReport) []string {
 			programs["tmux"] = true
 		case item.Kind == "user-config" && strings.HasSuffix(item.Path, "/.config/starship.toml"):
 			programs["starship"] = true
+		case item.Kind == "desktop-config" && strings.Contains(item.Path, "/.config/nvim/"):
+			programs["neovim"] = true
+		case item.Kind == "desktop-config" && (strings.HasSuffix(item.Path, "/.emacs") || strings.Contains(item.Path, "/.emacs.d/") || strings.Contains(item.Path, "/.config/emacs/")):
+			programs["emacs"] = true
+		case item.Kind == "desktop-config" && strings.Contains(item.Path, "/.config/alacritty/"):
+			programs["alacritty"] = true
+		case item.Kind == "desktop-config" && strings.Contains(item.Path, "/.config/kitty/"):
+			programs["kitty"] = true
+		case item.Kind == "desktop-config" && strings.Contains(item.Path, "/.config/wezterm/"):
+			programs["wezterm"] = true
+		case item.Kind == "editor-profile" && (strings.Contains(item.Path, "/.config/Code/") || strings.Contains(item.Path, "/.vscode/")):
+			programs["vscode"] = true
+		case item.Kind == "direnv":
+			programs["direnv"] = true
 		}
 	}
-	order := []string{"bash", "zsh", "fish", "git", "tmux", "starship"}
+	order := []string{"bash", "zsh", "fish", "git", "tmux", "starship", "direnv", "neovim", "emacs", "alacritty", "kitty", "wezterm", "vscode"}
 	var out []string
 	for _, program := range order {
 		if programs[program] {
@@ -2462,7 +2564,7 @@ func generatedHomePrograms(report model.ScanReport) []string {
 func generatedSystemdServices(report model.ScanReport) []model.Service {
 	var services []model.Service
 	for _, service := range report.Services {
-		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" && renderSystemdServiceOption(service) != "" {
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" && !isUserSystemdUnit(service) && renderSystemdServiceOption(service) != "" {
 			services = append(services, service)
 		}
 	}
@@ -2472,7 +2574,7 @@ func generatedSystemdServices(report model.ScanReport) []model.Service {
 func generatedSystemdTimers(report model.ScanReport) []model.Service {
 	var timers []model.Service
 	for _, service := range report.Services {
-		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" && renderSystemdTimerOption(service) != "" {
+		if service.Decision == model.DecisionConfirmed && service.Manager == "systemd" && !isUserSystemdUnit(service) && renderSystemdTimerOption(service) != "" {
 			timers = append(timers, service)
 		}
 	}
@@ -3128,6 +3230,7 @@ var homeTemplate = `# Generated by linux-nixer. Review before applying.
   programs.home-manager.enable = true;
   home.packages = {{ nixList (homePackages .Report) }};
 {{ homeProgramOptions .Report }}
+{{ userSystemdOptions .Report }}
 
 {{- range todoComments .Report }}
   # TODO home: {{ . }}

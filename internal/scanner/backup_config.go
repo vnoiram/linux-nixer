@@ -65,6 +65,13 @@ func findBackupFiles(root string) []string {
 		"/etc/timeshift/*",
 		"/var/lib/duplicati/*",
 		"/var/lib/syncthing/*",
+		"/var/cache/restic/*",
+		"/var/cache/borg/*",
+		"/var/lib/restic/*",
+		"/var/lib/borg/*",
+		"/var/lib/kopia/*",
+		"/home/*/.cache/restic/*",
+		"/home/*/.cache/borg/*",
 	} {
 		for _, path := range glob(root, pattern) {
 			info, ok := safeStat(root, path)
@@ -149,6 +156,7 @@ func backupDetails(path, content string) map[string]string {
 	case "restic", "borg", "kopia", "duplicati", "timeshift":
 		mergeDetails(details, genericBackupConfigDetails(content))
 	}
+	mergeDetails(details, backupReadinessDetails(path, content))
 	return emptyNil(details)
 }
 
@@ -227,6 +235,45 @@ func genericBackupConfigDetails(content string) map[string]string {
 	return emptyNil(details)
 }
 
+func backupReadinessDetails(path, content string) map[string]string {
+	details := map[string]string{}
+	lowerPath := strings.ToLower(path)
+	switch {
+	case strings.Contains(lowerPath, "/cache/") || strings.Contains(lowerPath, "/var/cache/"):
+		details["recent-state"] = "cache-marker"
+	case strings.Contains(lowerPath, "/var/lib/") || strings.Contains(lowerPath, "/.config/"):
+		details["restore-state"] = "config-marker"
+	}
+	destinationKinds := map[string]bool{}
+	secretRefs := 0
+	for _, line := range strings.Split(content, "\n") {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if lower == "" || strings.HasPrefix(lower, "#") || strings.HasPrefix(lower, ";") {
+			continue
+		}
+		if isBackupSecretReference(lower) {
+			secretRefs++
+			continue
+		}
+		switch {
+		case strings.Contains(lower, "s3") || strings.Contains(lower, "b2") || strings.Contains(lower, "azure") || strings.Contains(lower, "gcs"):
+			destinationKinds["cloud"] = true
+		case strings.Contains(lower, "ssh") || strings.Contains(lower, "sftp"):
+			destinationKinds["ssh"] = true
+		case strings.Contains(lower, "http://") || strings.Contains(lower, "https://"):
+			destinationKinds["url"] = true
+		case strings.Contains(lower, "repository") || strings.Contains(lower, "repo") || strings.Contains(lower, "remote") || strings.Contains(lower, "target") || strings.Contains(lower, "path"):
+			destinationKinds["local-or-named"] = true
+		}
+	}
+	if len(destinationKinds) > 0 {
+		details["destination-present"] = "true"
+		details["destination-kind"] = strings.Join(sortedDevOpsKeys(destinationKinds), ",")
+	}
+	setBackupPositiveDetail(details, "secret-refs", secretRefs)
+	return emptyNil(details)
+}
+
 func backupJobDetails(path, content string) map[string]string {
 	details := map[string]string{}
 	tools := map[string]bool{}
@@ -248,6 +295,14 @@ func backupJobDetails(path, content string) map[string]string {
 		}
 		if isBackupSecretReference(line) {
 			secretRefs++
+		}
+		switch {
+		case strings.Contains(lower, "s3") || strings.Contains(lower, "b2") || strings.Contains(lower, "azure") || strings.Contains(lower, "gcs"):
+			details["destination-kind"] = "cloud"
+			details["destination-present"] = "true"
+		case strings.Contains(lower, "ssh") || strings.Contains(lower, "sftp"):
+			details["destination-kind"] = "ssh"
+			details["destination-present"] = "true"
 		}
 		if schedule == "" {
 			if strings.HasPrefix(line, "OnCalendar=") || strings.HasPrefix(line, "OnBootSec=") || strings.HasPrefix(line, "OnUnitActiveSec=") {

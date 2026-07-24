@@ -53,6 +53,10 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/iptables",
 		"/etc/fail2ban/jail.local",
 		"/etc/audit/auditd.conf",
+		"/etc/selinux/config",
+		"/etc/rkhunter.conf",
+		"/etc/clamav/clamd.conf",
+		"/etc/clamav/freshclam.conf",
 		"/var/lib/tailscale",
 		"/var/lib/zerotier-one",
 		"/etc/tailscale",
@@ -88,6 +92,8 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 		"/etc/audit/rules.d/*.rules",
 		"/etc/apparmor.d/*",
 		"/etc/apparmor.d/local/*",
+		"/etc/selinux/*/contexts/files/file_contexts.local",
+		"/etc/clamav/*.conf",
 		"/etc/X11/xorg.conf.d/*keyboard*.conf",
 		"/etc/ssh/ssh_config.d/*.conf",
 		"/etc/wireguard/*.conf",
@@ -206,6 +212,12 @@ func systemConfigDetails(path, content string) map[string]string {
 		return auditDetails(content)
 	case strings.Contains(path, "/apparmor.d/"):
 		return apparmorDetails(content)
+	case strings.Contains(path, "/selinux/"):
+		return selinuxDetails(content)
+	case strings.Contains(path, "rkhunter"):
+		return rkhunterDetails(content)
+	case strings.Contains(path, "/clamav/"):
+		return clamAVDetails(path, content)
 	default:
 		return nil
 	}
@@ -899,6 +911,54 @@ func apparmorDetails(content string) map[string]string {
 	return countDetails("profiles", profiles, "includes", includes, "capabilities", capabilities)
 }
 
+func selinuxDetails(content string) map[string]string {
+	details := map[string]string{"tool": "selinux"}
+	lines := 0
+	for _, line := range linesWithoutComments(content) {
+		lines++
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "SELINUX", "SELINUXTYPE":
+			setDetail(details, key, value)
+		}
+	}
+	setBackupPositiveDetail(details, "entries", lines)
+	return emptyNil(details)
+}
+
+func rkhunterDetails(content string) map[string]string {
+	details := map[string]string{"tool": "rkhunter"}
+	settings := 0
+	for _, line := range linesWithoutComments(content) {
+		if strings.Contains(line, "=") {
+			settings++
+		}
+	}
+	setBackupPositiveDetail(details, "settings", settings)
+	return emptyNil(details)
+}
+
+func clamAVDetails(path, content string) map[string]string {
+	details := map[string]string{"tool": "clamav"}
+	if strings.Contains(path, "freshclam") {
+		details["component"] = "freshclam"
+	} else {
+		details["component"] = "clamd"
+	}
+	settings := 0
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(line)
+		if len(fields) > 0 {
+			settings++
+		}
+	}
+	setBackupPositiveDetail(details, "settings", settings)
+	return emptyNil(details)
+}
+
 func countDetails(pairs ...any) map[string]string {
 	details := map[string]string{}
 	for i := 0; i+1 < len(pairs); i += 2 {
@@ -1168,7 +1228,10 @@ func systemConfigReason(path string) string {
 		strings.Contains(path, "/polkit-1/") ||
 		strings.Contains(path, "/fail2ban/") ||
 		strings.Contains(path, "/audit/") ||
-		strings.Contains(path, "/apparmor.d/"):
+		strings.Contains(path, "/apparmor.d/") ||
+		strings.Contains(path, "/selinux/") ||
+		strings.Contains(path, "rkhunter") ||
+		strings.Contains(path, "/clamav/"):
 		return "auth and security configuration"
 	case strings.Contains(path, "sysctl") ||
 		strings.Contains(path, "/modprobe.d/") ||

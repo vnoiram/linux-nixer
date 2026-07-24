@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -107,7 +108,68 @@ func scanComposeFiles(opts Options, report *model.ScanReport) {
 		"/srv/**/docker-compose.yaml",
 	}
 	for _, path := range recursiveGlob(opts.Root, patterns...) {
-		report.Containers = append(report.Containers, model.Container{Runtime: "compose", Compose: displayPath(opts.Root, path), Decision: model.DecisionCandidate})
+		report.Containers = append(report.Containers, model.Container{
+			Runtime:  "compose",
+			Compose:  displayPath(opts.Root, path),
+			Decision: model.DecisionCandidate,
+			Details:  composeDetails(opts.Root, path),
+		})
+	}
+}
+
+func composeDetails(root, path string) map[string]string {
+	content := readPackageFile(root, path)
+	if content == "" {
+		return nil
+	}
+	details := map[string]string{}
+	services := 0
+	images := 0
+	ports := 0
+	volumes := 0
+	inServices := false
+	seenService := map[string]bool{}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := sc.Text()
+		trimmed := strings.TrimSpace(stripInlineComment(line))
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			inServices = strings.TrimSuffix(trimmed, ":") == "services"
+			continue
+		}
+		if inServices {
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			if indent <= 2 && strings.HasSuffix(trimmed, ":") {
+				name := strings.TrimSuffix(trimmed, ":")
+				if name != "" && name != "services" && !seenService[name] {
+					seenService[name] = true
+					services++
+				}
+			}
+		}
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.HasPrefix(lower, "image:"):
+			images++
+		case strings.HasPrefix(lower, "ports:"):
+			ports++
+		case strings.HasPrefix(lower, "volumes:"):
+			volumes++
+		}
+	}
+	setPositiveContainerDetail(details, "service-count", services)
+	setPositiveContainerDetail(details, "image-count", images)
+	setPositiveContainerDetail(details, "port-sections", ports)
+	setPositiveContainerDetail(details, "volume-sections", volumes)
+	return emptyPackageDetails(details)
+}
+
+func setPositiveContainerDetail(details map[string]string, key string, value int) {
+	if value > 0 {
+		details[key] = strconv.Itoa(value)
 	}
 }
 
