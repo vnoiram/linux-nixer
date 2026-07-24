@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vnoiram/linux-nixer/internal/model"
 	"github.com/vnoiram/linux-nixer/internal/review"
 	"github.com/vnoiram/linux-nixer/internal/scanner"
 )
@@ -197,6 +198,27 @@ func TestMergeDeduplicatesWithStableOrder(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("merge=%v, want %v", got, want)
+		}
+	}
+}
+
+func TestFormatDecisionConflictsMarkdown(t *testing.T) {
+	result := CheckDecisions(review.DecisionSet{
+		SchemaVersion: review.DecisionsSchemaVersion,
+		Entries: []review.DecisionEntry{
+			{Domain: "service", Key: "systemd:sshd.service", Decision: model.DecisionExcluded},
+		},
+	}, Policy{ConfirmKinds: []string{"service"}})
+
+	got := FormatDecisionConflictsMarkdown(result)
+	for _, want := range []string{
+		"# Decision conflict report",
+		"- Checked decisions: 1",
+		"## Warnings",
+		"`service:systemd:sshd.service`: decision \"excluded\" conflicts with current policy",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("conflict report missing %q:\n%s", want, got)
 		}
 	}
 }

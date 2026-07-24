@@ -421,18 +421,20 @@ Validate scan or reviewed scan JSON before using it for generation or CI gates, 
 
 Usage:
   linux-nixer validate --scan reviewed.json [--json] [--strict]
-  linux-nixer validate --decisions decisions.json --policy policy.json [--json]
+  linux-nixer validate --decisions decisions.json --policy policy.json [--json] [--conflicts-out conflicts.md]
 
 Examples:
   linux-nixer validate --scan reviewed.json
   linux-nixer validate --scan reviewed.json --json
   linux-nixer validate --scan reviewed.json --strict
   linux-nixer validate --decisions decisions.json --policy policy.json
+  linux-nixer validate --decisions decisions.json --policy policy.json --conflicts-out conflicts.md
 
 Flags:
   --scan PATH        Read scan JSON.
   --decisions PATH   Check a decisions JSON (see --export-decisions) for stale or unresolvable entries against --policy. Combinable with --scan.
   --policy PATH      Policy JSON to check --decisions against. Required together with --decisions.
+  --conflicts-out PATH  Write a markdown companion report for --decisions conflicts and stale entries.
   --json             Write machine-readable JSON validation result.
   --strict           Reject unknown JSON fields in addition to semantic validation. Applies to --scan only.
 
@@ -1091,6 +1093,7 @@ func runValidate(args []string, stdout io.Writer) error {
 	scanPath := fs.String("scan", "", "input scan JSON")
 	decisionsPath := fs.String("decisions", "", "decisions JSON to check for consistency with --policy")
 	policyPath := fs.String("policy", "", "policy JSON to check --decisions against")
+	conflictsOut := fs.String("conflicts-out", "", "write a markdown companion report for decision conflicts")
 	jsonOutput := fs.Bool("json", false, "write machine-readable JSON validation result")
 	strict := fs.Bool("strict", false, "reject unknown JSON fields")
 	if err := fs.Parse(args); err != nil {
@@ -1101,6 +1104,9 @@ func runValidate(args []string, stdout io.Writer) error {
 	}
 	if *decisionsPath != "" && *policyPath == "" {
 		return errors.New("validate --decisions requires --policy; try `linux-nixer validate --decisions decisions.json --policy linux-nixer-policy.json`")
+	}
+	if *conflictsOut != "" && *decisionsPath == "" {
+		return errors.New("validate --conflicts-out requires --decisions")
 	}
 
 	var subjects []string
@@ -1135,7 +1141,13 @@ func runValidate(args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		result = mergeValidateResults(result, policy.CheckDecisions(set, p))
+		decisionResult := policy.CheckDecisions(set, p)
+		result = mergeValidateResults(result, decisionResult)
+		if *conflictsOut != "" {
+			if err := writeText(*conflictsOut, policy.FormatDecisionConflictsMarkdown(decisionResult)); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := writeValidateResult(stdout, strings.Join(subjects, " and "), result, *jsonOutput); err != nil {

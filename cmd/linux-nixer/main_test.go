@@ -375,6 +375,36 @@ func TestRunCLIErrorHints(t *testing.T) {
 	}
 }
 
+func TestRunValidateWritesDecisionConflictReport(t *testing.T) {
+	dir := t.TempDir()
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	policyPath := filepath.Join(dir, "policy.json")
+	conflictsPath := filepath.Join(dir, "conflicts.md")
+	writeJSONFile(t, decisionsPath, map[string]any{
+		"schemaVersion": "linux-nixer.decisions.v1",
+		"entries": []map[string]string{
+			{"domain": "service", "key": "systemd:sshd.service", "decision": "excluded"},
+		},
+	})
+	writeJSONFile(t, policyPath, map[string]any{
+		"schemaVersion": "linux-nixer.policy.v1",
+		"confirmKinds":  []string{"service"},
+	})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"validate", "--decisions", decisionsPath, "--policy", policyPath, "--conflicts-out", conflictsPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(conflictsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "decision \"excluded\" conflicts with current policy") {
+		t.Fatalf("unexpected conflicts report:\n%s", got)
+	}
+}
+
 func TestRunValidateWritesTextAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	scanPath := filepath.Join(dir, "reviewed.json")
@@ -1722,12 +1752,17 @@ func TestRunSummaryFailOnPending(t *testing.T) {
 
 func writeScan(t *testing.T, path string, report model.ScanReport) {
 	t.Helper()
+	writeJSONFile(t, path, report)
+}
+
+func writeJSONFile(t *testing.T, path string, value any) {
+	t.Helper()
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if err := json.NewEncoder(f).Encode(report); err != nil {
+	if err := json.NewEncoder(f).Encode(value); err != nil {
 		t.Fatal(err)
 	}
 }
