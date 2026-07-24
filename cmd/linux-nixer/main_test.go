@@ -318,6 +318,7 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer generate",
 				"--scan PATH",
 				"--out DIR",
+				"--format-nix",
 			},
 		},
 		{
@@ -432,6 +433,29 @@ func TestRunValidateWritesDecisionConflictReport(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "decision \"excluded\" conflicts with current policy") {
 		t.Fatalf("unexpected conflicts report:\n%s", got)
+	}
+}
+
+func TestRunGenerateFormatNixWarnsWhenFormatterMissing(t *testing.T) {
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", t.TempDir())
+	t.Cleanup(func() { os.Setenv("PATH", oldPath) })
+
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	out := filepath.Join(dir, "nix-config")
+	writeScan(t, scanPath, model.ScanReport{SchemaVersion: model.SchemaVersion})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"generate", "--scan", scanPath, "--out", out, "--format-nix"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "flake.nix")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "warning: --format-nix requested") {
+		t.Fatalf("stdout missing formatter warning: %s", stdout.String())
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -465,14 +466,16 @@ const generateHelp = `linux-nixer generate
 Render a conservative NixOS + Home Manager flake from reviewed scan JSON.
 
 Usage:
-  linux-nixer generate --scan reviewed.json --out ./nix-config
+  linux-nixer generate --scan reviewed.json --out ./nix-config [--format-nix]
 
 Examples:
   linux-nixer generate --scan reviewed.json --out nix-config
+  linux-nixer generate --scan reviewed.json --out nix-config --format-nix
 
 Flags:
-  --scan PATH    Read reviewed scan JSON.
-  --out DIR      Write generated flake project to DIR.
+  --scan PATH     Read reviewed scan JSON.
+  --out DIR       Write generated flake project to DIR.
+  --format-nix    Format generated .nix files with nixfmt or alejandra when available.
 `
 
 const doctorHelp = `linux-nixer doctor
@@ -1306,6 +1309,7 @@ func runGenerate(args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input reviewed scan JSON")
 	out := fs.String("out", "", "output flake directory")
+	formatNix := fs.Bool("format-nix", false, "format generated .nix files with nixfmt or alejandra when available")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1320,7 +1324,52 @@ func runGenerate(args []string, stdout io.Writer) error {
 	if !result.OK {
 		return fmt.Errorf("generate requires valid reviewed scan JSON: validation failed with %d errors", len(result.Errors))
 	}
-	return render.Project(*out, report)
+	if err := render.Project(*out, report); err != nil {
+		return err
+	}
+	if *formatNix {
+		formatted, err := formatGeneratedNix(*out)
+		if err != nil {
+			return err
+		}
+		if formatted == "" {
+			fmt.Fprintln(stdout, "warning: --format-nix requested but neither nixfmt nor alejandra was found; generated files were left unformatted")
+		} else {
+			fmt.Fprintf(stdout, "formatted generated Nix with %s\n", formatted)
+		}
+	}
+	return nil
+}
+
+func formatGeneratedNix(root string) (string, error) {
+	formatter, err := exec.LookPath("nixfmt")
+	if err != nil {
+		formatter, err = exec.LookPath("alejandra")
+		if err != nil {
+			return "", nil
+		}
+	}
+	var files []string
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".nix" {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	if len(files) == 0 {
+		return filepath.Base(formatter), nil
+	}
+	cmd := exec.Command(formatter, files...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%s failed: %v: %s", filepath.Base(formatter), err, strings.TrimSpace(string(out)))
+	}
+	return filepath.Base(formatter), nil
 }
 
 func runDoctor(ctx context.Context, args []string, stdout io.Writer) error {
