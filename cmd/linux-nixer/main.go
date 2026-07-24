@@ -1839,6 +1839,16 @@ func scannerOptionsFromFlags(fs *flag.FlagSet, p policy.Policy, root string, use
 	if err != nil {
 		return scanner.Options{}, err
 	}
+	if opts.BaselineID != "" {
+		opts.Baseline = model.BaselineInfo{Requested: opts.BaselineID, Path: resolvedBaseline, Source: "unresolved"}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return scanner.Options{}, err
+		}
+		if resolution := baseline.Resolve(opts.BaselineID, cwd); resolution.OK {
+			opts.Baseline.Source = resolution.Source
+		}
+	}
 	opts.BaselineID = resolvedBaseline
 	return opts, nil
 }

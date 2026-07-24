@@ -373,7 +373,7 @@ func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
 	writeMode(t, root, "/usr/local/bin/new", []byte("#!/bin/sh\necho new\n"), 0o755)
 	baseline := filepath.Join(root, "baseline.json")
 	sum := sha256Hex(t, filepath.Join(root, "usr/local/bin/same"))
-	if err := os.WriteFile(baseline, []byte(`{"files":[{"path":"/usr/local/bin/same","type":"script","mode":"-rwxr-xr-x","size":20,"sha256":"`+sum+`"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(baseline, []byte(`{"source":"local-rootfs:/fixture","files":[{"path":"/usr/local/bin/same","type":"script","mode":"-rwxr-xr-x","size":20,"sha256":"`+sum+`"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,6 +395,9 @@ func TestFilesystemDiffUsesBaselineManifest(t *testing.T) {
 	}
 	if !foundNew {
 		t.Fatalf("new file missing: %+v", report.FilesystemDiff)
+	}
+	if report.Baseline == nil || report.Baseline.Status != "loaded" || report.Baseline.Path != baseline || report.Baseline.ManifestSource != "local-rootfs:/fixture" {
+		t.Fatalf("baseline provenance missing loaded status: %+v", report.Baseline)
 	}
 }
 

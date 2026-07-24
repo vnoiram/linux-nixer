@@ -26,6 +26,7 @@ type ScanReport struct {
 	StatefulData   []FileFinding `json:"statefulData,omitempty"`
 	Items          []Item        `json:"items,omitempty"`
 	Warnings       []Warning     `json:"warnings,omitempty"`
+	Baseline       *BaselineInfo `json:"baseline,omitempty"`
 }
 
 type Host struct {
@@ -151,4 +152,13 @@ type Item struct {
 type Warning struct {
 	Source  string `json:"source"`
 	Message string `json:"message"`
+}
+
+type BaselineInfo struct {
+	Requested      string `json:"requested,omitempty"`
+	Path           string `json:"path,omitempty"`
+	Source         string `json:"source,omitempty"`
+	ManifestSource string `json:"manifestSource,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Message        string `json:"message,omitempty"`
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,6 +19,19 @@ type FilesystemDiffScanner struct{}
 func (FilesystemDiffScanner) Name() string { return "filesystem-diff" }
 
 func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
+	if opts.BaselineID != "" && report.Baseline == nil {
+		info := opts.Baseline
+		if info.Requested == "" {
+			info.Requested = opts.BaselineID
+		}
+		if info.Path == "" {
+			info.Path = opts.BaselineID
+		}
+		if info.Source == "" {
+			info.Source = "direct-path"
+		}
+		report.Baseline = &info
+	}
 	baselineEntries, baselineLoaded := loadBaselineEntries(opts.BaselineID, report)
 	roots := []string{"/etc", "/usr/local", "/opt", "/srv", "/home"}
 	if opts.Deep {
@@ -70,12 +84,16 @@ type baselineFile struct {
 }
 
 type baselineJSON struct {
-	Files []baselineFile `json:"files"`
+	Source string         `json:"source,omitempty"`
+	Files  []baselineFile `json:"files"`
 }
 
 func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baselineFile, bool) {
 	if id == "" {
 		return nil, false
+	}
+	if report.Baseline == nil {
+		report.Baseline = &model.BaselineInfo{Requested: id, Path: id, Source: "direct-path"}
 	}
 	f, err := os.Open(id)
 	if err != nil {
@@ -83,6 +101,8 @@ func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baseli
 		if strings.Contains(id, ":") {
 			message = "baseline id could not be resolved; treating scan as classification-only: " + id
 		}
+		report.Baseline.Status = "missing"
+		report.Baseline.Message = message
 		report.Warnings = append(report.Warnings, model.Warning{
 			Source:  "filesystem-diff",
 			Message: message,
@@ -92,6 +112,8 @@ func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baseli
 	defer f.Close()
 	var parsed baselineJSON
 	if err := json.NewDecoder(f).Decode(&parsed); err != nil {
+		report.Baseline.Status = "error"
+		report.Baseline.Message = "failed to parse baseline manifest: " + err.Error()
 		report.Warnings = append(report.Warnings, model.Warning{Source: "filesystem-diff", Message: "failed to parse baseline manifest: " + err.Error()})
 		return nil, false
 	}
@@ -99,6 +121,9 @@ func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baseli
 	for _, file := range parsed.Files {
 		entries[file.Path] = file
 	}
+	report.Baseline.ManifestSource = parsed.Source
+	report.Baseline.Status = "loaded"
+	report.Baseline.Message = fmt.Sprintf("loaded %d baseline file entries", len(entries))
 	return entries, true
 }
 

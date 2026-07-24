@@ -46,6 +46,7 @@ func TestProjectRendersFlakeAndReport(t *testing.T) {
 		"# Report index",
 		"[migration-dashboard.md](migration-dashboard.md)",
 		"[migration-checklist.md](migration-checklist.md)",
+		"[baseline-provenance.md](baseline-provenance.md)",
 		"[package-sources.md](package-sources.md)",
 		"- packages: 1",
 	} {
@@ -98,6 +99,40 @@ func TestProjectUsesPrimaryUserAndSafeHostAttr(t *testing.T) {
 	}
 	if !strings.Contains(string(home), `home.homeDirectory = "/home/alice";`) {
 		t.Fatalf("home missing primary home: %s", home)
+	}
+}
+
+func TestProjectRendersBaselineProvenanceReport(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Baseline: &model.BaselineInfo{
+			Requested:      "ubuntu:24.04",
+			Path:           "baselines/ubuntu-24.04.json",
+			Source:         "project-baselines",
+			ManifestSource: "local-rootfs:/fixture",
+			Status:         "loaded",
+			Message:        "loaded 42 baseline file entries",
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(out, "reports/baseline-provenance.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# Baseline provenance",
+		"- requested: `ubuntu:24.04`",
+		"- source: `project-baselines`",
+		"- manifest source: `local-rootfs:/fixture`",
+		"- status: `loaded`",
+		"loaded 42 baseline file entries",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("baseline provenance report missing %q:\n%s", want, got)
+		}
 	}
 }
 

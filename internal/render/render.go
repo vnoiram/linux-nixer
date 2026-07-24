@@ -49,6 +49,7 @@ func Project(out string, report model.ScanReport) error {
 		"reports/migration-dashboard.md":        renderMigrationDashboard(report),
 		"reports/unmapped-packages.md":          renderUnmappedPackagesReport(report),
 		"reports/service-render-eligibility.md": renderServiceRenderEligibilityReport(report),
+		"reports/baseline-provenance.md":        renderBaselineProvenanceReport(report),
 		"reports/system-config.md":              renderSystemConfigReport(report),
 		"reports/devops-config.md":              renderDevOpsConfigReport(report),
 		"reports/backup-sync.md":                renderBackupSyncReport(report),
@@ -467,6 +468,7 @@ func renderReportIndex(report model.ScanReport) string {
 		{file: "migration-checklist.md", description: "Manual tasks to complete before switching systems."},
 		{file: "unmapped-packages.md", description: "Package findings without a known Nix package mapping, grouped by manager."},
 		{file: "service-render-eligibility.md", description: "Service, timer, and cron render decisions with structural safety reasons."},
+		{file: "baseline-provenance.md", description: "Baseline manifest source, resolution status, and repeatability notes."},
 		{file: "package-sources.md", description: "Package managers, mapped packages, and package source context."},
 		{file: "filesystem.md", description: "Filesystem differences, secret-risk paths, and stateful data notes."},
 		{file: "users.md", description: "Detected users, homes, shells, and group-sensitive accounts."},
@@ -497,6 +499,36 @@ func renderReportIndex(report model.ScanReport) string {
 	for _, link := range links {
 		fmt.Fprintf(&b, "- [%s](%s): %s\n", link.file, link.file, link.description)
 	}
+	return b.String()
+}
+
+func renderBaselineProvenanceReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Baseline provenance\n\n")
+	if report.Baseline == nil || report.Baseline.Requested == "" {
+		b.WriteString("No baseline manifest was used for this scan. Filesystem findings are classification-only and are not filtered against a distro/rootfs baseline.\n")
+		return b.String()
+	}
+	info := report.Baseline
+	fmt.Fprintf(&b, "- requested: `%s`\n", info.Requested)
+	if info.Path != "" {
+		fmt.Fprintf(&b, "- resolved path: `%s`\n", info.Path)
+	}
+	if info.Source != "" {
+		fmt.Fprintf(&b, "- source: `%s`\n", info.Source)
+	}
+	if info.ManifestSource != "" {
+		fmt.Fprintf(&b, "- manifest source: `%s`\n", info.ManifestSource)
+	}
+	if info.Status != "" {
+		fmt.Fprintf(&b, "- status: `%s`\n", info.Status)
+	}
+	if info.Message != "" {
+		fmt.Fprintf(&b, "- message: %s\n", info.Message)
+	}
+	b.WriteString("\n## Notes\n\n")
+	b.WriteString("- Baseline manifests are review inputs; generated Nix does not trust them automatically.\n")
+	b.WriteString("- Repeat scans should use the same baseline request and resolved manifest path when comparing filesystem drift.\n")
 	return b.String()
 }
 

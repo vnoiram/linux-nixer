@@ -11,9 +11,11 @@ import (
 )
 
 type Options struct {
-	Root       string
-	UseSudo    bool
-	Deep       bool
+	Root     string
+	UseSudo  bool
+	Deep     bool
+	Baseline model.BaselineInfo
+	// BaselineID is kept for callers that build scanner.Options directly.
 	BaselineID string
 	Includes   []string
 	Excludes   []string
