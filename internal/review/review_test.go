@@ -235,6 +235,31 @@ func TestInteractiveBatchAppliesToCurrentSectionRemainder(t *testing.T) {
 	}
 }
 
+func TestInteractiveBatchConfirmCannotConfirmProtectedFindings(t *testing.T) {
+	report := model.ScanReport{
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true},
+			{Path: "/home/alice/.aws/credentials", Category: "secret", SecretRisk: true},
+		},
+	}
+	in := strings.NewReader("bc\n")
+	var out bytes.Buffer
+
+	got := Interactive(in, &out, report, Options{})
+
+	for _, finding := range got.FilesystemDiff {
+		if finding.Decision == model.DecisionConfirmed {
+			t.Fatalf("protected finding was confirmed by batch choice: %+v", got.FilesystemDiff)
+		}
+		if finding.Decision != model.DecisionMigrationNote {
+			t.Fatalf("protected finding decision=%q, want migration-note in %+v", finding.Decision, got.FilesystemDiff)
+		}
+	}
+	if strings.Contains(out.String(), "bc=") {
+		t.Fatalf("prompt should not advertise an unsupported batch confirm choice:\n%s", out.String())
+	}
+}
+
 func TestInteractivePendingOnlySkipsAlreadyDecidedFindings(t *testing.T) {
 	report := model.ScanReport{
 		Packages: []model.Package{

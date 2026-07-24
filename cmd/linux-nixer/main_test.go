@@ -134,6 +134,76 @@ func TestRunReviewInteractiveFilter(t *testing.T) {
 	}
 }
 
+func TestRunReviewInteractiveServiceFilter(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service"},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--interactive", "--filter", "services"}, strings.NewReader("t\n"), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	if got.Packages[0].Decision != model.DecisionCandidate {
+		t.Fatalf("package should not be prompted by services filter: %+v", got.Packages[0])
+	}
+	if got.Services[0].Decision != model.DecisionTODO {
+		t.Fatalf("service decision=%q, want todo", got.Services[0].Decision)
+	}
+	if strings.Contains(stdout.String(), "apt curl") || !strings.Contains(stdout.String(), "app.service") {
+		t.Fatalf("unexpected services filter output:\n%s", stdout.String())
+	}
+}
+
+func TestRunReviewInteractiveBatchChoicesThroughCLI(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl"},
+			{Manager: "apt", Name: "git"},
+			{Manager: "apt", Name: "vim"},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service", Path: "/etc/systemd/system/app.service"},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--interactive"}, strings.NewReader("bx\nm\n"), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got model.ScanReport
+	readScan(t, outPath, &got)
+	for _, pkg := range got.Packages {
+		if pkg.Decision != model.DecisionExcluded {
+			t.Fatalf("package batch decision=%q, want excluded in %+v", pkg.Decision, got.Packages)
+		}
+	}
+	if got.Services[0].Decision != model.DecisionMigrationNote {
+		t.Fatalf("service decision=%q, want migration-note", got.Services[0].Decision)
+	}
+	if strings.Count(stdout.String(), "[packages") != 1 || !strings.Contains(stdout.String(), "bx=batch-exclude") {
+		t.Fatalf("batch output unexpected:\n%s", stdout.String())
+	}
+}
+
 func TestRunVersionWritesBuildVersion(t *testing.T) {
 	oldVersion := version
 	version = "v9.8.7"
@@ -224,8 +294,12 @@ func TestRunMigrationGuide(t *testing.T) {
 				"linux-nixer migration guide",
 				"linux-nixer capture --out linux-nixer-output",
 				"linux-nixer review --scan scan.json --out reviewed.json",
+				"linux-nixer review --scan scan.json --out reviewed-services.json --interactive --filter services",
+				"linux-nixer rescan --out linux-nixer-rescan --import-decisions decisions.json",
 				"linux-nixer validate --scan reviewed.json --strict",
 				"Generated Nix only uses confirmed findings",
+				"Interactive review supports quick filters and batch choices",
+				"capture writes session.json",
 			} {
 				if !strings.Contains(stdout.String(), want) {
 					t.Fatalf("guide missing %q:\n%s", want, stdout.String())
@@ -1942,6 +2016,7 @@ Version: 1.0
 		filepath.Join(out, "scan.json"),
 		filepath.Join(out, "reviewed.json"),
 		filepath.Join(out, "summary.md"),
+		filepath.Join(out, "session.json"),
 		filepath.Join(out, "nix-config", "flake.nix"),
 		filepath.Join(out, "nix-config", "reports", "migration-checklist.md"),
 	} {
@@ -1974,6 +2049,23 @@ Version: 1.0
 	}
 	if !strings.Contains(string(summary), "Pending findings:") {
 		t.Fatalf("summary missing pending count:\n%s", string(summary))
+	}
+	var session captureSessionMetadata
+	sessionBytes, err := os.ReadFile(filepath.Join(out, "session.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(sessionBytes, &session); err != nil {
+		t.Fatalf("invalid session metadata JSON: %v\n%s", err, sessionBytes)
+	}
+	if session.SchemaVersion != "linux-nixer.capture-session.v1" || session.Scan.Root != root || session.Scan.PluginTimeout == "" {
+		t.Fatalf("session metadata missing scan context: %+v", session)
+	}
+	if !containsString(session.Artifacts, "scan.json") || !containsString(session.Artifacts, "reviewed.json") || !containsString(session.Artifacts, "nix-config/") {
+		t.Fatalf("session metadata missing artifacts: %+v", session.Artifacts)
+	}
+	if session.Review.AutoSafe != true || session.Review.FailOnPending {
+		t.Fatalf("session metadata missing review defaults: %+v", session.Review)
 	}
 
 	stdout.Reset()

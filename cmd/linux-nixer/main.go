@@ -312,6 +312,7 @@ Review-first path:
   linux-nixer scan --out scan.json
   linux-nixer policy init --out linux-nixer-policy.json
   linux-nixer review --scan scan.json --out reviewed.json --policy linux-nixer-policy.json --interactive
+  linux-nixer review --scan scan.json --out reviewed-services.json --interactive --filter services
   linux-nixer validate --scan reviewed.json --strict
   linux-nixer summary --scan reviewed.json
   linux-nixer generate --scan reviewed.json --out nix-config
@@ -320,11 +321,14 @@ Review-first path:
 Repeatable sessions:
   linux-nixer review --scan scan.json --out reviewed.json --export-decisions decisions.json
   linux-nixer capture --out linux-nixer-output --import-decisions decisions.json --export-decisions decisions.json
+  linux-nixer rescan --out linux-nixer-rescan --import-decisions decisions.json
   linux-nixer summary --scan linux-nixer-output/reviewed.json --compare-decisions decisions.json
 
 Notes:
   Generated Nix only uses confirmed findings.
   Secret-risk and stateful findings stay as manual migration notes.
+  Interactive review supports quick filters and batch choices: n skips a section; bt/bx/bk/bm mark the rest of the current section as todo/excluded/candidate/migration-note.
+  capture writes session.json so repeated runs can audit scan flags, review defaults, and artifacts.
   Use "linux-nixer help <command>" for the exact flags supported by each command.
 `
 
@@ -346,6 +350,7 @@ Artifacts:
   DIR/scan.json
   DIR/reviewed.json
   DIR/summary.md
+  DIR/session.json
   DIR/nix-config/
 
 Flags:
@@ -386,6 +391,7 @@ Artifacts:
   DIR/scan.json
   DIR/reviewed.json
   DIR/summary.md
+  DIR/progress-timeline.md
 
 Flags:
   --out DIR                 Write rescan artifacts under DIR.
