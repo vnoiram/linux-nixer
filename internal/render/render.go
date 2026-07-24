@@ -33,31 +33,32 @@ func Project(out string, report model.ScanReport) error {
 	hostAttr := sanitizeNixAttr(host)
 	user := primaryUser(report)
 	files := map[string]string{
-		"flake.nix":                         renderTemplate(flakeTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
-		"hosts/generated/configuration.nix": renderTemplate(hostTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
-		"users/home.nix":                    renderTemplate(homeTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
-		"modules/containers.nix":            renderTemplate(containersTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
-		"modules/services.nix":              renderServicesModule(report),
-		"modules/filesystem-findings.nix":   renderFilesystemModule(report),
-		"reports/package-sources.md":        renderPackageSourcesReport(report),
-		"reports/filesystem.md":             renderFilesystemReport(report),
-		"reports/users.md":                  renderUsersReport(report),
-		"reports/containers.md":             renderContainersReport(report),
-		"reports/git-sources.md":            renderGitSourcesReport(report),
-		"reports/languages.md":              renderLanguagesReport(report),
-		"reports/index.md":                  renderReportIndex(report),
-		"reports/migration-dashboard.md":    renderMigrationDashboard(report),
-		"reports/unmapped-packages.md":      renderUnmappedPackagesReport(report),
-		"reports/system-config.md":          renderSystemConfigReport(report),
-		"reports/devops-config.md":          renderDevOpsConfigReport(report),
-		"reports/backup-sync.md":            renderBackupSyncReport(report),
-		"reports/dev-projects.md":           renderDevProjectsReport(report),
-		"reports/user-config.md":            renderUserConfigReport(report),
-		"reports/desktop.md":                renderDesktopReport(report),
-		"reports/hardware.md":               renderHardwareReport(report),
-		"reports/migration-report.md":       renderReport(report),
-		"reports/migration-checklist.md":    renderMigrationChecklist(report),
-		"reports/migration-annotations.nix": renderMigrationAnnotations(report),
+		"flake.nix":                             renderTemplate(flakeTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
+		"hosts/generated/configuration.nix":     renderTemplate(hostTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
+		"users/home.nix":                        renderTemplate(homeTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
+		"modules/containers.nix":                renderTemplate(containersTemplate, data{Host: host, HostAttr: hostAttr, User: user, Report: report}),
+		"modules/services.nix":                  renderServicesModule(report),
+		"modules/filesystem-findings.nix":       renderFilesystemModule(report),
+		"reports/package-sources.md":            renderPackageSourcesReport(report),
+		"reports/filesystem.md":                 renderFilesystemReport(report),
+		"reports/users.md":                      renderUsersReport(report),
+		"reports/containers.md":                 renderContainersReport(report),
+		"reports/git-sources.md":                renderGitSourcesReport(report),
+		"reports/languages.md":                  renderLanguagesReport(report),
+		"reports/index.md":                      renderReportIndex(report),
+		"reports/migration-dashboard.md":        renderMigrationDashboard(report),
+		"reports/unmapped-packages.md":          renderUnmappedPackagesReport(report),
+		"reports/service-render-eligibility.md": renderServiceRenderEligibilityReport(report),
+		"reports/system-config.md":              renderSystemConfigReport(report),
+		"reports/devops-config.md":              renderDevOpsConfigReport(report),
+		"reports/backup-sync.md":                renderBackupSyncReport(report),
+		"reports/dev-projects.md":               renderDevProjectsReport(report),
+		"reports/user-config.md":                renderUserConfigReport(report),
+		"reports/desktop.md":                    renderDesktopReport(report),
+		"reports/hardware.md":                   renderHardwareReport(report),
+		"reports/migration-report.md":           renderReport(report),
+		"reports/migration-checklist.md":        renderMigrationChecklist(report),
+		"reports/migration-annotations.nix":     renderMigrationAnnotations(report),
 	}
 	for rel, content := range files {
 		if err := os.WriteFile(filepath.Join(out, rel), []byte(content), 0o644); err != nil {
@@ -465,6 +466,7 @@ func renderReportIndex(report model.ScanReport) string {
 		{file: "migration-dashboard.md", description: "High-level counts, risks, generated Nix impact, and next actions."},
 		{file: "migration-checklist.md", description: "Manual tasks to complete before switching systems."},
 		{file: "unmapped-packages.md", description: "Package findings without a known Nix package mapping, grouped by manager."},
+		{file: "service-render-eligibility.md", description: "Service, timer, and cron render decisions with structural safety reasons."},
 		{file: "package-sources.md", description: "Package managers, mapped packages, and package source context."},
 		{file: "filesystem.md", description: "Filesystem differences, secret-risk paths, and stateful data notes."},
 		{file: "users.md", description: "Detected users, homes, shells, and group-sensitive accounts."},
@@ -637,6 +639,66 @@ func unmappedPackagesByManager(report model.ScanReport) map[string][]model.Packa
 
 func unmappedPackageReportable(pkg model.Package) bool {
 	return len(pkg.NixNames) == 0 && pkg.Decision != model.DecisionExcluded && pkg.Decision != model.DecisionMigrationNote
+}
+
+func renderServiceRenderEligibilityReport(report model.ScanReport) string {
+	var b strings.Builder
+	b.WriteString("# Service render eligibility\n\n")
+	b.WriteString("This report mirrors render-time gates for systemd services, systemd timers, and cron jobs.\n\n")
+	if len(report.Services) == 0 {
+		b.WriteString("No services were found.\n")
+		return b.String()
+	}
+	for _, service := range report.Services {
+		option, note := serviceRenderEligibility(service)
+		status := "not rendered"
+		if option != "" {
+			status = "rendered"
+		}
+		fmt.Fprintf(&b, "- `%s:%s` [%s] %s", service.Manager, service.Name, printableDecision(service.Decision), status)
+		if option != "" {
+			fmt.Fprintf(&b, " as `%s`", option)
+		}
+		if note != "" {
+			fmt.Fprintf(&b, ": %s", note)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func serviceRenderEligibility(service model.Service) (string, string) {
+	if service.Decision != model.DecisionConfirmed {
+		return "", decisionNote(service.Decision)
+	}
+	switch service.Manager {
+	case "systemd":
+		if strings.HasSuffix(service.Name, ".timer") {
+			if renderSystemdTimerOption(service) != "" {
+				return "systemd.timers." + timerNameAttr(service.Name), "timer schedule is safely convertible"
+			}
+			notes := serviceGenerationNotes(service)
+			if len(notes) == 0 {
+				notes = append(notes, "timer did not satisfy render gate")
+			}
+			return "", strings.Join(notes, "; ")
+		}
+		if renderSystemdServiceOption(service) != "" {
+			return "systemd.services." + serviceNameAttr(service.Name), "service has safe ExecStart and no environment files"
+		}
+		notes := serviceGenerationNotes(service)
+		if len(notes) == 0 {
+			notes = append(notes, "service did not satisfy render gate")
+		}
+		return "", strings.Join(notes, "; ")
+	case "cron":
+		if renderableCronJob(service) {
+			return "services.cron.systemCronJobs", "cron job has schedule, user, and safe command"
+		}
+		return "", cronJobGenerationNote(service)
+	default:
+		return "", "unsupported service manager for rendering"
+	}
 }
 
 func writeGeneratedNixSummary(b *strings.Builder, report model.ScanReport) {

@@ -85,6 +85,7 @@ var expectedProjectFiles = []string{
 	"reports/index.md",
 	"reports/migration-dashboard.md",
 	"reports/unmapped-packages.md",
+	"reports/service-render-eligibility.md",
 	"reports/dev-projects.md",
 	"reports/user-config.md",
 	"reports/desktop.md",

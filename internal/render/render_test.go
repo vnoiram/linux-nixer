@@ -562,6 +562,37 @@ func TestProjectRendersUnmappedPackageReport(t *testing.T) {
 	}
 }
 
+func TestProjectRendersServiceRenderEligibilityReport(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		Services: []model.Service{
+			{Manager: "systemd", Name: "ok.service", ExecStart: "/usr/bin/ok", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "missing.service", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "secret.service", ExecStart: "/usr/bin/app --token=secret", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "env.service", ExecStart: "/usr/bin/app", EnvironmentFiles: []string{"/etc/default/app"}, Decision: model.DecisionConfirmed},
+			{Manager: "cron", Name: "job", User: "root", ExecStart: "/usr/bin/job", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "candidate.service", ExecStart: "/usr/bin/app", Decision: model.DecisionCandidate},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	text := readFile(t, out, "reports/service-render-eligibility.md")
+	for _, want := range []string{
+		"# Service render eligibility",
+		"`systemd:ok.service` [confirmed] rendered as `systemd.services.ok`",
+		"`systemd:missing.service` [confirmed] not rendered: missing.service missing exec start and was not generated",
+		"`systemd:secret.service` [confirmed] not rendered: secret.service ExecStart contains secret-like text and was not generated",
+		"`systemd:env.service` [confirmed] not rendered: env.service environment files require manual migration: /etc/default/app",
+		"`cron:job` [confirmed] not rendered: job missing schedule and was not generated",
+		"`systemd:candidate.service` [candidate] not rendered: still a candidate finding; pending review",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("service eligibility report missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestProjectRendersOnlyConfirmedPackagesIntoNixSettings(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{
