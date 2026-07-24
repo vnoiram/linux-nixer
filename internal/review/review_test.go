@@ -114,6 +114,29 @@ func TestExplainFormatsDecisionReasons(t *testing.T) {
 	}
 }
 
+func TestFormatDecisionsMarkdownGroupsExportedDecisions(t *testing.T) {
+	got := FormatDecisionsMarkdown(DecisionSet{
+		SchemaVersion: DecisionsSchemaVersion,
+		Entries: []DecisionEntry{
+			{Domain: "service", Key: "systemd:sshd.service", Decision: model.DecisionConfirmed},
+			{Domain: "package", Key: "apt:curl", Decision: model.DecisionExcluded},
+		},
+	})
+
+	for _, want := range []string{
+		"# Review decisions",
+		"- Exported decisions: 2",
+		"## confirmed (1)",
+		"`service:systemd:sshd.service`",
+		"## excluded (1)",
+		"`package:apt:curl`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("decisions report missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestInteractiveAppliesChoices(t *testing.T) {
 	report := model.ScanReport{
 		Packages: []model.Package{

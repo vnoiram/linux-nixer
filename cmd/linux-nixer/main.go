@@ -362,7 +362,7 @@ const reviewHelp = `linux-nixer review
 Apply repeatable review decisions or run an interactive review over scan JSON.
 
 Usage:
-  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH] [--explain-policy PATH]
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH] [--export-decisions-report PATH] [--explain-policy PATH]
 
 Examples:
   linux-nixer review --scan scan.json --out reviewed.json --auto-safe
@@ -387,6 +387,7 @@ Flags:
   --exclude-path PATH          Exclude findings with a path prefix. Repeatable.
   --import-decisions PATH      Seed decisions from a previously exported decisions JSON before policy rules run.
   --export-decisions PATH      Write the final decisions to a portable decisions JSON.
+  --export-decisions-report PATH  Write a markdown companion report for exported decisions.
   --explain-policy PATH        Write a markdown report explaining each final review decision.
 
 Policy:
@@ -968,6 +969,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	pendingOnly := fs.Bool("pending-only", false, "in interactive mode, only prompt for findings still needing a decision")
 	importDecisions := fs.String("import-decisions", "", "seed decisions from a previously exported decisions JSON")
 	exportDecisions := fs.String("export-decisions", "", "write final decisions to a portable decisions JSON")
+	exportDecisionsReport := fs.String("export-decisions-report", "", "write a markdown companion report for exported decisions")
 	explainPolicy := fs.String("explain-policy", "", "write a markdown explanation of final review decisions")
 	var confirmKinds multiFlag
 	var excludeKinds multiFlag
@@ -1010,11 +1012,20 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	} else {
 		report = review.Apply(report, opts)
 	}
-	if *exportDecisions != "" {
-		if err := writeJSON(*exportDecisions, review.ExportDecisions(report)); err != nil {
-			return err
+	if *exportDecisions != "" || *exportDecisionsReport != "" {
+		set := review.ExportDecisions(report)
+		if *exportDecisions != "" {
+			if err := writeJSON(*exportDecisions, set); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "wrote decisions: %s\n", *exportDecisions)
 		}
-		fmt.Fprintf(stdout, "wrote decisions: %s\n", *exportDecisions)
+		if *exportDecisionsReport != "" {
+			if err := writeText(*exportDecisionsReport, review.FormatDecisionsMarkdown(set)); err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "wrote decisions report: %s\n", *exportDecisionsReport)
+		}
 	}
 	if *explainPolicy != "" {
 		text := review.FormatExplainMarkdown(review.Explain(report, review.ExplainOptions{ReviewOptions: opts, Imported: imported}))

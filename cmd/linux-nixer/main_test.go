@@ -76,6 +76,36 @@ func TestRunReviewWritesPolicyExplanation(t *testing.T) {
 	}
 }
 
+func TestRunReviewWritesDecisionsReport(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	reportPath := filepath.Join(dir, "decisions.md")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--auto-safe", "--export-decisions-report", reportPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "`package:apt:curl`") || !strings.Contains(string(got), "## confirmed (1)") {
+		t.Fatalf("unexpected decisions report:\n%s", got)
+	}
+	if !strings.Contains(stdout.String(), "wrote decisions report") {
+		t.Fatalf("stdout missing report path: %s", stdout.String())
+	}
+}
+
 func TestRunVersionWritesBuildVersion(t *testing.T) {
 	oldVersion := version
 	version = "v9.8.7"
