@@ -2159,6 +2159,48 @@ func TestRunSummaryWritesJSON(t *testing.T) {
 	}
 }
 
+func TestRunSummaryWritesCompanionReports(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	dashboardPath := filepath.Join(dir, "migration-dashboard.md")
+	unmappedPath := filepath.Join(dir, "unmapped-packages.md")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+			{Manager: "apt", Name: "unknown-tool", Version: "1.0", Source: "apt-mark:manual", Decision: model.DecisionCandidate},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"summary", "--scan", scanPath, "--dashboard-out", dashboardPath, "--unmapped-out", unmappedPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "# Review summary") {
+		t.Fatalf("summary stdout missing normal markdown:\n%s", stdout.String())
+	}
+	dashboard, err := os.ReadFile(dashboardPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Migration dashboard", "- total findings: 2", "- unmapped packages: 1"} {
+		if !strings.Contains(string(dashboard), want) {
+			t.Fatalf("dashboard missing %q:\n%s", want, dashboard)
+		}
+	}
+	unmapped, err := os.ReadFile(unmappedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Unmapped packages", "Total unmapped packages: 1", "`unknown-tool` version `1.0` source `apt-mark:manual` [candidate]"} {
+		if !strings.Contains(string(unmapped), want) {
+			t.Fatalf("unmapped report missing %q:\n%s", want, unmapped)
+		}
+	}
+}
+
 func TestRunSummaryFailOnPending(t *testing.T) {
 	dir := t.TempDir()
 	scanPath := filepath.Join(dir, "reviewed.json")

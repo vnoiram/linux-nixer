@@ -641,7 +641,9 @@ func limitNotes(notes []string, limit int) []string {
 
 func redactSecretLikeText(text string) string {
 	var out []string
-	for _, field := range strings.Fields(text) {
+	fields := strings.Fields(text)
+	for i := 0; i < len(fields); i++ {
+		field := fields[i]
 		lower := strings.ToLower(field)
 		switch {
 		case strings.Contains(lower, "password="),
@@ -658,11 +660,23 @@ func redactSecretLikeText(text string) string {
 			}
 		case containsURLCredentials(field):
 			out = append(out, redactURLCredentials(field))
+		case splitSecretFlag(lower) && i+1 < len(fields):
+			out = append(out, field, "<redacted>")
+			i++
 		default:
 			out = append(out, field)
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+func splitSecretFlag(field string) bool {
+	switch field {
+	case "--password", "-password", "--passwd", "-passwd", "--token", "-token", "--secret", "-secret", "--api-key", "-api-key", "--api_key", "-api_key", "--apikey", "-apikey", "--access-key", "-access-key", "--access_key", "-access_key":
+		return true
+	default:
+		return false
+	}
 }
 
 // containsURLCredentials reports whether field looks like a "scheme://user:pass@host"

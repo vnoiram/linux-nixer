@@ -617,6 +617,8 @@ func TestRedactSecretLikeTextCatchesURLCredentials(t *testing.T) {
 	}{
 		{"basic auth url", "curl https://user:secretpass@example.com/hook", "curl https://<redacted>@example.com/hook"},
 		{"key=value still redacted", "app --token=raw-secret", "app --token=<redacted>"},
+		{"split token flag redacted", "app --token raw-secret --verbose", "app --token <redacted> --verbose"},
+		{"split api key flag redacted", "app --api-key raw-secret", "app --api-key <redacted>"},
 		{"no credentials, untouched", "app --verbose https://example.com/path", "app --verbose https://example.com/path"},
 	}
 	for _, tc := range cases {

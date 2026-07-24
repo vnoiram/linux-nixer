@@ -324,3 +324,30 @@ func TestPackageEcosystemScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 		}
 	}
 }
+
+func TestHostScannerDoesNotFollowEscapingSymlinks(t *testing.T) {
+	root := t.TempDir()
+	outsideOSRelease := filepath.Join(t.TempDir(), "os-release")
+	if err := os.WriteFile(outsideOSRelease, []byte("ID=outside\nVERSION_ID=\"999\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outsideHostname := filepath.Join(t.TempDir(), "hostname")
+	if err := os.WriteFile(outsideHostname, []byte("outside-host\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSymlink(t, root, "/etc/os-release", outsideOSRelease)
+	writeSymlink(t, root, "/etc/hostname", outsideHostname)
+
+	report := &model.ScanReport{}
+	if err := (HostScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Host.Distro != "" || report.Host.Release != "" || report.Host.Hostname != "" {
+		t.Fatalf("host scanner followed escaping symlink metadata: %+v", report.Host)
+	}
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning.Message, "outside") || strings.Contains(warning.Message, "999") {
+			t.Fatalf("host scanner warning leaked outside metadata: %+v", warning)
+		}
+	}
+}

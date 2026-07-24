@@ -137,7 +137,7 @@ Usage:
   linux-nixer capture --out DIR [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
   linux-nixer rescan --out DIR --import-decisions decisions.json [--preset NAME | --policy policy.json] [--root /] [--compare-decisions decisions.json]
   linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
-  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
+  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending] [--dashboard-out PATH] [--unmapped-out PATH]
   linux-nixer validate --scan reviewed.json [--json] [--strict]
   linux-nixer generate --scan reviewed.json --out ./nix-config [--module-layout split|single]
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
@@ -447,7 +447,7 @@ const summaryHelp = `linux-nixer summary
 Summarize reviewed scan decisions, review focus, and next actions for humans or automation.
 
 Usage:
-  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending] [--compare-decisions PATH] [--timeline-out PATH]
+  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending] [--compare-decisions PATH] [--timeline-out PATH] [--dashboard-out PATH] [--unmapped-out PATH]
 
 Examples:
   linux-nixer summary --scan reviewed.json
@@ -456,6 +456,7 @@ Examples:
   linux-nixer review --scan scan-a.json --out reviewed-a.json --export-decisions decisions-a.json
   linux-nixer summary --scan reviewed-b.json --compare-decisions decisions-a.json
   linux-nixer summary --scan reviewed-b.json --compare-decisions decisions-a.json --timeline-out progress-timeline.md
+  linux-nixer summary --scan reviewed.json --dashboard-out migration-dashboard.md --unmapped-out unmapped-packages.md
 
 Flags:
   --scan PATH                 Read reviewed scan JSON.
@@ -463,6 +464,8 @@ Flags:
   --fail-on-pending           Return an error if candidate or todo findings remain.
   --compare-decisions PATH    Compare against a previously exported decisions JSON (see review --export-decisions) and report what's newly decided, changed, regressed to pending, or no longer present — migration progress across repeated scans of the same host.
   --timeline-out PATH         Write compare-decisions progress as a standalone markdown timeline.
+  --dashboard-out PATH        Write the migration dashboard markdown report.
+  --unmapped-out PATH         Write the unmapped package markdown report.
 `
 
 const validateHelp = `linux-nixer validate
@@ -1188,6 +1191,8 @@ func runSummary(args []string, stdout io.Writer) error {
 	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain")
 	compareDecisions := fs.String("compare-decisions", "", "compare against a previously exported decisions JSON to report migration progress")
 	timelineOut := fs.String("timeline-out", "", "write compare-decisions progress as a standalone markdown timeline")
+	dashboardOut := fs.String("dashboard-out", "", "write migration dashboard markdown report")
+	unmappedOut := fs.String("unmapped-out", "", "write unmapped package markdown report")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1202,6 +1207,16 @@ func runSummary(args []string, stdout io.Writer) error {
 		return err
 	}
 	summary := review.Summarize(report)
+	if *dashboardOut != "" {
+		if err := writeText(*dashboardOut, render.FormatMigrationDashboardMarkdown(report)); err != nil {
+			return err
+		}
+	}
+	if *unmappedOut != "" {
+		if err := writeText(*unmappedOut, render.FormatUnmappedPackagesMarkdown(report)); err != nil {
+			return err
+		}
+	}
 	var progress *review.Progress
 	if *compareDecisions != "" {
 		previous, err := loadDecisionSet(*compareDecisions)
