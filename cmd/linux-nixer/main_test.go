@@ -1254,6 +1254,43 @@ func TestRunSummaryComparesDecisionsAcrossScans(t *testing.T) {
 	}
 }
 
+func TestRunRescanImportsDecisionsAndWritesProgressSummary(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	writeFile(t, root, "/var/lib/dpkg/status", `Package: unknown-tool
+Status: install ok installed
+Version: 1.0
+`)
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	if err := os.WriteFile(decisionsPath, []byte(`{"schemaVersion":"linux-nixer.decisions.v1","entries":[{"domain":"package","key":"apt:unknown-tool","decision":"excluded"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "rescan")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"rescan", "--root", root, "--out", outDir, "--import-decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"scan.json", "reviewed.json", "summary.md"} {
+		if _, err := os.Stat(filepath.Join(outDir, rel)); err != nil {
+			t.Fatalf("rescan did not write %s: %v\nstdout:\n%s", rel, err, stdout.String())
+		}
+	}
+	var reviewed model.ScanReport
+	readScan(t, filepath.Join(outDir, "reviewed.json"), &reviewed)
+	if len(reviewed.Packages) == 0 || reviewed.Packages[0].Name != "unknown-tool" || reviewed.Packages[0].Decision != model.DecisionExcluded {
+		t.Fatalf("imported decision was not applied: %+v", reviewed.Packages)
+	}
+	summary, err := os.ReadFile(filepath.Join(outDir, "summary.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(summary), "## Migration progress since last snapshot") || !strings.Contains(string(summary), "previously decided: 1") {
+		t.Fatalf("rescan summary missing progress:\n%s", summary)
+	}
+}
+
 func TestRunCaptureWritesWorkflowArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root")

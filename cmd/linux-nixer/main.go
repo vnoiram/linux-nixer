@@ -75,6 +75,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runScan(ctx, args[1:], stdout)
 	case "capture":
 		return runCapture(ctx, args[1:], stdout)
+	case "rescan":
+		return runRescan(ctx, args[1:], stdout)
 	case "review":
 		return runReview(args[1:], stdin, stdout)
 	case "summary":
@@ -117,6 +119,7 @@ func usage(w io.Writer) {
 Usage:
   linux-nixer scan --out scan.json [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH]
   linux-nixer capture --out DIR [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--fail-on-pending]
+  linux-nixer rescan --out DIR --import-decisions decisions.json [--preset NAME | --policy policy.json] [--root /] [--compare-decisions decisions.json]
   linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
   linux-nixer validate --scan reviewed.json [--json] [--strict]
@@ -145,6 +148,8 @@ func commandHelp(w io.Writer, topic []string) error {
 		fmt.Fprint(w, scanHelp)
 	case "capture":
 		fmt.Fprint(w, captureHelp)
+	case "rescan":
+		fmt.Fprint(w, rescanHelp)
 	case "review":
 		fmt.Fprint(w, reviewHelp)
 	case "summary":
@@ -310,6 +315,37 @@ Policy:
 
 Repeatable sessions:
   --export-decisions writes a host-independent record of every non-default decision, keyed by finding identity (e.g. "apt:curl", "systemd:app.service") rather than scan position. --import-decisions seeds a later scan (a re-scan of the same host, or a teammate's scan of a similar one) with those decisions before policy rules run, so previously reviewed findings don't need to be re-decided.
+`
+
+const rescanHelp = `linux-nixer rescan
+Run scan, imported-decision review, and summary/progress output for a repeated migration session.
+
+Usage:
+  linux-nixer rescan --out DIR --import-decisions decisions.json [--preset NAME | --policy policy.json] [--root /] [--sudo] [--deep] [--baseline ubuntu:24.04] [--include PATH] [--exclude PATH] [--plugin PATH] [--plugin-timeout DURATION] [--compare-decisions PATH]
+
+Examples:
+  linux-nixer rescan --out linux-nixer-rescan --import-decisions decisions.json
+  linux-nixer rescan --root /mnt/ubuntu --out linux-nixer-rescan --import-decisions decisions.json --compare-decisions decisions.json
+
+Artifacts:
+  DIR/scan.json
+  DIR/reviewed.json
+  DIR/summary.md
+
+Flags:
+  --out DIR                 Write rescan artifacts under DIR.
+  --import-decisions PATH   Seed decisions from a previously exported decisions JSON before review.
+  --compare-decisions PATH  Compare reviewed output against a previous decisions JSON. Defaults to --import-decisions when omitted.
+  --preset NAME             Use a built-in policy preset directly: default, workstation, server, developer-machine, or minimal-audit. Mutually exclusive with --policy.
+  --policy PATH             Load repeatable scan and review policy from PATH. Mutually exclusive with --preset.
+  --root PATH               Scan PATH as the root filesystem. Defaults to /.
+  --sudo                    Allow read-only sudo fallback for selected host files.
+  --deep                    Scan broader filesystem paths.
+  --baseline ID             Compare filesystem findings against a baseline id or JSON path.
+  --include PATH            Add a path to filesystem-diff scanning. Repeatable.
+  --exclude PATH            Exclude a path prefix from scanning. Repeatable.
+  --plugin PATH             Run an external scanner plugin executable. Repeatable.
+  --plugin-timeout DURATION Timeout for each plugin scanner invocation. Defaults to 30s.
 `
 
 const reviewHelp = `linux-nixer review
@@ -771,6 +807,90 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote session metadata: %s\n", sessionPath)
+	return nil
+}
+
+func runRescan(ctx context.Context, args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, rescanHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("rescan", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	out := fs.String("out", "", "output directory")
+	policyPath := fs.String("policy", "", "policy JSON path")
+	preset := fs.String("preset", "", "built-in policy preset: default, workstation, server, developer-machine, or minimal-audit")
+	root := fs.String("root", "/", "root filesystem to scan")
+	useSudo := fs.Bool("sudo", false, "allow read-only sudo fallback for selected host files")
+	deep := fs.Bool("deep", false, "scan broader filesystem paths")
+	baselineID := fs.String("baseline", "", "baseline id such as ubuntu:24.04")
+	importDecisions := fs.String("import-decisions", "", "seed decisions from a previously exported decisions JSON")
+	compareDecisions := fs.String("compare-decisions", "", "compare against a previously exported decisions JSON")
+	pluginTimeout := fs.Duration("plugin-timeout", 30*time.Second, "timeout for each plugin scanner invocation")
+	var includes multiFlag
+	var excludes multiFlag
+	var plugins multiFlag
+	fs.Var(&includes, "include", "additional path to scan")
+	fs.Var(&excludes, "exclude", "path prefix to exclude")
+	fs.Var(&plugins, "plugin", "path to an external scanner plugin executable. Repeatable.")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *out == "" {
+		return errors.New("rescan requires --out; try `linux-nixer rescan --out linux-nixer-rescan --import-decisions decisions.json`")
+	}
+	if *importDecisions == "" {
+		return errors.New("rescan requires --import-decisions; export decisions with `linux-nixer review --export-decisions decisions.json` first")
+	}
+	p, err := loadPolicyFromFlags(*policyPath, *preset)
+	if err != nil {
+		return err
+	}
+	scanOpts, err := scannerOptionsFromFlags(fs, p, *root, *useSudo, *deep, *baselineID, includes, excludes)
+	if err != nil {
+		return err
+	}
+	pluginPaths := policy.Merge(plugins, p.Plugins)
+	reg := scanner.DefaultRegistry(pluginScanners(pluginPaths, *pluginTimeout)...)
+	report, err := reg.Scan(ctx, scanOpts)
+	if err != nil {
+		return err
+	}
+	addPluginTrustWarning(report, pluginPaths)
+
+	scanPath := filepath.Join(*out, "scan.json")
+	reviewedPath := filepath.Join(*out, "reviewed.json")
+	summaryPath := filepath.Join(*out, "summary.md")
+	if err := writeJSON(scanPath, report); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote scan: %s\n", scanPath)
+
+	imported, err := loadDecisionSet(*importDecisions)
+	if err != nil {
+		return err
+	}
+	reviewed := review.Apply(review.ApplyDecisions(*report, imported), p.ReviewOptions(review.Options{AutoSafe: true}))
+	if err := writeJSON(reviewedPath, reviewed); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote reviewed scan: %s\n", reviewedPath)
+
+	comparePath := *compareDecisions
+	if comparePath == "" {
+		comparePath = *importDecisions
+	}
+	previous, err := loadDecisionSet(comparePath)
+	if err != nil {
+		return err
+	}
+	summary := review.Summarize(reviewed)
+	progress := review.ComputeProgress(reviewed, previous)
+	summaryText := review.FormatSummaryMarkdown(summary) + "\n" + review.FormatProgressMarkdown(progress)
+	if err := writeText(summaryPath, summaryText); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote summary: %s\n", summaryPath)
 	return nil
 }
 
