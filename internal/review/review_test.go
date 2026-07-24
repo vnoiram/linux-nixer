@@ -91,6 +91,29 @@ func TestApplyExcludesPathPrefixAndKeepsSecretsAsMigrationNotes(t *testing.T) {
 	}
 }
 
+func TestExplainFormatsDecisionReasons(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}, Decision: model.DecisionConfirmed},
+		},
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true, Decision: model.DecisionMigrationNote},
+		},
+	}
+
+	got := FormatExplainMarkdown(Explain(report, ExplainOptions{ReviewOptions: Options{AutoSafe: true}}))
+
+	for _, want := range []string{
+		"# Policy explanation",
+		"`apt:curl`: confirmed - confirmed by auto-safe package mapping",
+		"`/home/alice/.ssh/id_ed25519`: migration-note - protected secret-like finding forced to migration-note",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("explanation missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestInteractiveAppliesChoices(t *testing.T) {
 	report := model.ScanReport{
 		Packages: []model.Package{

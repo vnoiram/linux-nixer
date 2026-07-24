@@ -46,6 +46,36 @@ func TestRunReviewInteractiveWritesReviewedJSON(t *testing.T) {
 	}
 }
 
+func TestRunReviewWritesPolicyExplanation(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	explainPath := filepath.Join(dir, "explain.md")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
+		},
+	}
+	writeScan(t, scanPath, report)
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--auto-safe", "--explain-policy", explainPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(explainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "`apt:curl`: confirmed - confirmed by auto-safe package mapping") {
+		t.Fatalf("unexpected explanation:\n%s", got)
+	}
+	if !strings.Contains(stdout.String(), "wrote policy explanation") {
+		t.Fatalf("stdout missing explanation path: %s", stdout.String())
+	}
+}
+
 func TestRunVersionWritesBuildVersion(t *testing.T) {
 	oldVersion := version
 	version = "v9.8.7"

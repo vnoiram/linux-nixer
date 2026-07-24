@@ -362,7 +362,7 @@ const reviewHelp = `linux-nixer review
 Apply repeatable review decisions or run an interactive review over scan JSON.
 
 Usage:
-  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH]
+  linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--pending-only] [--confirm-kind KIND] [--exclude-kind KIND] [--todo-kind KIND] [--migration-note-kind KIND] [--confirm-manager MANAGER] [--exclude-path PATH] [--import-decisions PATH] [--export-decisions PATH] [--explain-policy PATH]
 
 Examples:
   linux-nixer review --scan scan.json --out reviewed.json --auto-safe
@@ -387,6 +387,7 @@ Flags:
   --exclude-path PATH          Exclude findings with a path prefix. Repeatable.
   --import-decisions PATH      Seed decisions from a previously exported decisions JSON before policy rules run.
   --export-decisions PATH      Write the final decisions to a portable decisions JSON.
+  --explain-policy PATH        Write a markdown report explaining each final review decision.
 
 Policy:
   Policy decisions are applied first. Explicit CLI --auto-safe overrides policy autoSafe; CLI list flags are merged with policy lists.
@@ -965,6 +966,7 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	pendingOnly := fs.Bool("pending-only", false, "in interactive mode, only prompt for findings still needing a decision")
 	importDecisions := fs.String("import-decisions", "", "seed decisions from a previously exported decisions JSON")
 	exportDecisions := fs.String("export-decisions", "", "write final decisions to a portable decisions JSON")
+	explainPolicy := fs.String("explain-policy", "", "write a markdown explanation of final review decisions")
 	var confirmKinds multiFlag
 	var excludeKinds multiFlag
 	var todoKinds multiFlag
@@ -987,11 +989,13 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 	if err := readJSON(*scanPath, &report); err != nil {
 		return err
 	}
+	var imported review.DecisionSet
 	if *importDecisions != "" {
 		set, err := loadDecisionSet(*importDecisions)
 		if err != nil {
 			return err
 		}
+		imported = set
 		report = review.ApplyDecisions(report, set)
 	}
 	p, err := policy.Load(*policyPath)
@@ -1009,6 +1013,13 @@ func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(stdout, "wrote decisions: %s\n", *exportDecisions)
+	}
+	if *explainPolicy != "" {
+		text := review.FormatExplainMarkdown(review.Explain(report, review.ExplainOptions{ReviewOptions: opts, Imported: imported}))
+		if err := writeText(*explainPolicy, text); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote policy explanation: %s\n", *explainPolicy)
 	}
 	return writeJSON(*out, &report)
 }
