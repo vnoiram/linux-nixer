@@ -2208,6 +2208,7 @@ func renderHardwareReport(report model.ScanReport) string {
 		{"Bluetooth", func(item model.Item) bool { return item.Details["category"] == "bluetooth" }},
 		{"Scanners", func(item model.Item) bool { return item.Details["category"] == "scanner" }},
 		{"Audio", func(item model.Item) bool { return item.Details["category"] == "audio" }},
+		{"GPU and graphics", func(item model.Item) bool { return item.Details["category"] == "gpu-driver" }},
 		{"Security devices", func(item model.Item) bool { return item.Details["category"] == "security-device" }},
 		{"Power and firmware", func(item model.Item) bool { return item.Details["category"] == "power-firmware" }},
 		{"Input devices", func(item model.Item) bool { return item.Details["category"] == "input-device" }},

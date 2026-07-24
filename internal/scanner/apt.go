@@ -41,6 +41,7 @@ func (AptScanner) Scan(ctx context.Context, opts Options, report *model.ScanRepo
 				Source:   source,
 				NixNames: mapping.Candidates("apt", name),
 				Decision: model.DecisionCandidate,
+				Details:  aptPackageDetails(source),
 			})
 		}
 		name, version, installed = "", "", false
@@ -205,6 +206,17 @@ func manualPackageSource(root string) string {
 		return "apt-mark:manual"
 	}
 	return "dpkg:manual-or-unknown"
+}
+
+func aptPackageDetails(source string) map[string]string {
+	details := map[string]string{"source-kind": "dpkg"}
+	switch source {
+	case "apt-mark:manual", "dpkg:manual-or-unknown":
+		details["install-reason"] = "manual-or-unknown"
+	case "dpkg:auto-installed":
+		details["install-reason"] = "auto-installed"
+	}
+	return details
 }
 
 func aptSourceHint(root, path string) string {

@@ -23,6 +23,7 @@ func (PackageEcosystemScanner) Scan(ctx context.Context, opts Options, report *m
 	scanFlatpak(ctx, opts, report)
 	scanAppImages(opts, report)
 	scanHomebrewLinux(opts, report)
+	scanManualBinaries(opts, report)
 	return nil
 }
 
@@ -60,6 +61,52 @@ func scanSnap(ctx context.Context, opts Options, report *model.ScanReport) {
 		name := strings.TrimSuffix(filepath.Base(path), ".snap")
 		report.Packages = append(report.Packages, model.Package{Manager: "snap", Name: name, Source: displayPath(opts.Root, path), Decision: model.DecisionCandidate, Details: snapPathDetails(opts.Root, path)})
 	}
+}
+
+func scanManualBinaries(opts Options, report *model.ScanReport) {
+	for _, path := range glob(opts.Root,
+		"/usr/local/bin/*",
+		"/opt/*/bin/*",
+		"/home/*/.local/bin/*",
+	) {
+		if !isRegularExecutable(opts.Root, path) || strings.HasSuffix(path, ".AppImage") {
+			continue
+		}
+		display := displayPath(opts.Root, path)
+		if packageSourceSeen(report, display) {
+			continue
+		}
+		name := filepath.Base(path)
+		report.Packages = append(report.Packages, model.Package{
+			Manager:  "manual",
+			Name:     name,
+			Source:   display,
+			Decision: model.DecisionMigrationNote,
+			Details:  manualBinaryDetails(display),
+		})
+	}
+}
+
+func packageSourceSeen(report *model.ScanReport, source string) bool {
+	for _, pkg := range report.Packages {
+		if pkg.Source == source {
+			return true
+		}
+	}
+	return false
+}
+
+func manualBinaryDetails(path string) map[string]string {
+	details := map[string]string{"source-kind": "manual-binary", "executable": "present"}
+	switch {
+	case strings.HasPrefix(path, "/usr/local/bin/"):
+		details["location"] = "usr-local-bin"
+	case strings.Contains(path, "/.local/bin/"):
+		details["location"] = "user-local-bin"
+	case strings.HasPrefix(path, "/opt/"):
+		details["location"] = "opt-bin"
+	}
+	return details
 }
 
 func scanFlatpak(ctx context.Context, opts Options, report *model.ScanReport) {
@@ -112,7 +159,7 @@ func scanHomebrewLinux(opts Options, report *model.ScanReport) {
 }
 
 func snapListDetails(fields []string) map[string]string {
-	details := map[string]string{}
+	details := map[string]string{"source-kind": "snap"}
 	if len(fields) > 2 {
 		details["revision"] = fields[2]
 	}
@@ -141,7 +188,7 @@ func snapPathDetails(root, path string) map[string]string {
 }
 
 func flatpakCommandDetails(fields []string) map[string]string {
-	details := map[string]string{}
+	details := map[string]string{"source-kind": "flatpak"}
 	if len(fields) > 2 && strings.TrimSpace(fields[2]) != "" {
 		details["origin"] = strings.TrimSpace(fields[2])
 	}
@@ -149,7 +196,7 @@ func flatpakCommandDetails(fields []string) map[string]string {
 }
 
 func flatpakPathDetails(root, path string) map[string]string {
-	details := map[string]string{}
+	details := map[string]string{"source-kind": "flatpak"}
 	display := displayPath(root, path)
 	if strings.HasPrefix(display, "/var/lib/flatpak/") {
 		details["scope"] = "system"
@@ -210,7 +257,7 @@ func flatpakRuntimeName(value string) string {
 }
 
 func appImageDetails(root, path string) map[string]string {
-	details := map[string]string{}
+	details := map[string]string{"source-kind": "appimage"}
 	display := displayPath(root, path)
 	switch {
 	case strings.Contains(display, "/Applications/"):
@@ -267,7 +314,7 @@ func appImageDesktopEntryExists(root, path string) bool {
 }
 
 func homebrewDetails(root, path string) map[string]string {
-	details := map[string]string{}
+	details := map[string]string{"source-kind": "homebrew"}
 	display := displayPath(root, path)
 	if before, _, ok := strings.Cut(display, "/Cellar/"); ok {
 		details["prefix"] = strings.TrimSuffix(before, "/Cellar")

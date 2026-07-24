@@ -21,6 +21,7 @@ func (LanguageScanner) Scan(ctx context.Context, opts Options, report *model.Sca
 	scanVenvs(opts, report)
 	scanCondaEnvs(opts, report)
 	scanVersionManagers(opts, report)
+	scanDeveloperToolchains(opts, report)
 	scanInstalledBins(opts, report)
 	scanLanguageProjectHints(opts, report)
 	return nil
@@ -151,8 +152,35 @@ func scanVersionManagers(opts Options, report *model.ScanReport) {
 		"/home/*/**/.node-version",
 		"/home/*/**/.python-version",
 		"/home/*/**/.ruby-version",
+		"/home/*/**/.java-version",
+		"/home/*/**/rust-toolchain",
+		"/home/*/**/rust-toolchain.toml",
 	) {
 		addVersionTool(report, filepath.Base(marker), displayPath(opts.Root, marker))
+	}
+}
+
+func scanDeveloperToolchains(opts Options, report *model.ScanReport) {
+	groups := []struct {
+		tool     string
+		patterns []string
+	}{
+		{"java", []string{"/usr/lib/jvm/*", "/home/*/.sdkman/candidates/java/*"}},
+		{"android-sdk", []string{"/opt/android-sdk", "/home/*/Android/Sdk", "/home/*/.android/avd"}},
+		{"gradle", []string{"/home/*/.gradle/init.gradle", "/home/*/.gradle/init.gradle.kts", "/home/*/.gradle/caches/modules-2"}},
+		{"maven", []string{"/home/*/.m2/settings.xml", "/home/*/.m2/repository"}},
+		{"rust", []string{"/home/*/.rustup/settings.toml", "/home/*/.rustup/toolchains/*"}},
+		{"go", []string{"/home/*/go/pkg/mod", "/home/*/.config/go/env"}},
+		{"ruby", []string{"/home/*/.bundle/config", "/home/*/.gemrc"}},
+		{"php", []string{"/home/*/.composer/composer.json", "/home/*/.config/composer/composer.json"}},
+		{"dotnet", []string{"/home/*/.dotnet", "/usr/share/dotnet"}},
+	}
+	for _, group := range groups {
+		for _, pattern := range group.patterns {
+			for _, path := range glob(opts.Root, pattern) {
+				addLanguageToolchainItem(opts, report, path, group.tool)
+			}
+		}
 	}
 }
 
@@ -198,6 +226,16 @@ func scanLanguageProjectHints(opts Options, report *model.ScanReport) {
 		"/home/*/**/go.sum",
 		"/home/*/**/Gemfile",
 		"/home/*/**/Gemfile.lock",
+		"/home/*/**/pom.xml",
+		"/home/*/**/build.gradle",
+		"/home/*/**/build.gradle.kts",
+		"/home/*/**/settings.gradle",
+		"/home/*/**/settings.gradle.kts",
+		"/home/*/**/gradlew",
+		"/home/*/**/composer.json",
+		"/home/*/**/composer.lock",
+		"/home/*/**/.csproj",
+		"/home/*/**/global.json",
 		"/srv/**/package.json",
 		"/srv/**/pyproject.toml",
 		"/srv/**/requirements.txt",
@@ -205,9 +243,51 @@ func scanLanguageProjectHints(opts Options, report *model.ScanReport) {
 		"/srv/**/Cargo.toml",
 		"/srv/**/go.mod",
 		"/srv/**/Gemfile",
+		"/srv/**/pom.xml",
+		"/srv/**/build.gradle",
+		"/srv/**/composer.json",
+		"/srv/**/.csproj",
 	}
 	for _, path := range recursiveGlob(opts.Root, patterns...) {
 		addLanguageProjectItem(opts, report, path, languageProjectReason(filepath.Base(path)))
+	}
+}
+
+func addLanguageToolchainItem(opts Options, report *model.ScanReport, path, tool string) {
+	if _, ok := safeStat(opts.Root, path); !ok {
+		return
+	}
+	display := displayPath(opts.Root, path)
+	for _, item := range report.Items {
+		if item.Kind == "language-project" && item.Path == display {
+			return
+		}
+	}
+	report.Items = append(report.Items, model.Item{
+		Kind:     "language-project",
+		Name:     tool,
+		Path:     display,
+		Decision: model.DecisionMigrationNote,
+		Reason:   "developer toolchain marker",
+		Details: map[string]string{
+			"tool":   tool,
+			"marker": languageToolchainMarker(display),
+		},
+	})
+}
+
+func languageToolchainMarker(path string) string {
+	switch {
+	case strings.Contains(path, "/caches/") || strings.Contains(path, "/repository") || strings.Contains(path, "/pkg/mod"):
+		return "cache"
+	case strings.Contains(path, "/toolchains/") || strings.Contains(path, "/candidates/"):
+		return "installed-toolchain"
+	case strings.Contains(path, "/avd"):
+		return "emulator-state"
+	case strings.HasSuffix(path, ".xml") || strings.HasSuffix(path, ".toml") || strings.HasSuffix(path, ".json") || strings.HasSuffix(path, ".gradle") || strings.HasSuffix(path, ".kts"):
+		return "config"
+	default:
+		return "directory"
 	}
 }
 
@@ -244,7 +324,16 @@ func languageProjectReason(name string) string {
 		return "go module file"
 	case "Gemfile", "Gemfile.lock":
 		return "ruby dependency file"
+	case "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradlew":
+		return "java or gradle dependency file"
+	case "composer.json", "composer.lock":
+		return "php dependency file"
+	case "global.json":
+		return "dotnet SDK configuration file"
 	default:
+		if strings.HasSuffix(name, ".csproj") {
+			return "dotnet project file"
+		}
 		if strings.HasPrefix(name, "requirements-") && strings.HasSuffix(name, ".txt") {
 			return "python dependency or virtual environment file"
 		}

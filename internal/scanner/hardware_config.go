@@ -67,6 +67,21 @@ func findHardwareConfigFiles(root string) []string {
 		"/etc/opensc.conf",
 		"/etc/fwupd/*.conf",
 		"/etc/fwupd/*/*.conf",
+		"/etc/modprobe.d/nvidia*.conf",
+		"/etc/modprobe.d/amdgpu*.conf",
+		"/etc/modprobe.d/i915*.conf",
+		"/etc/X11/xorg.conf.d/*nvidia*.conf",
+		"/etc/X11/xorg.conf.d/*amdgpu*.conf",
+		"/etc/X11/xorg.conf.d/*intel*.conf",
+		"/etc/vulkan/icd.d/*.json",
+		"/etc/vulkan/implicit_layer.d/*.json",
+		"/etc/OpenCL/vendors/*.icd",
+		"/etc/ld.so.conf.d/*cuda*.conf",
+		"/etc/ld.so.conf.d/*rocm*.conf",
+		"/usr/local/cuda/version.txt",
+		"/opt/rocm/.info/version",
+		"/var/lib/dkms/nvidia",
+		"/var/lib/dkms/amdgpu",
 		"/etc/tlp.conf",
 		"/etc/tlp.d/*.conf",
 		"/etc/UPower/UPower.conf",
@@ -130,6 +145,8 @@ func hardwareName(path string) string {
 		return securityDeviceTool(path)
 	case "power-firmware":
 		return powerFirmwareTool(path)
+	case "gpu-driver":
+		return gpuDriverTool(path)
 	case "input-device":
 		return inputDeviceTool(path)
 	default:
@@ -151,6 +168,8 @@ func hardwareReason(path string) string {
 		return "security device or biometric configuration"
 	case "power-firmware":
 		return "power management or firmware configuration"
+	case "gpu-driver":
+		return "gpu driver, compute, or graphics stack marker"
 	case "input-device":
 		return "input device remapping or peripheral configuration"
 	default:
@@ -173,6 +192,15 @@ func hardwareCategory(path string) string {
 		return "security-device"
 	case strings.Contains(lower, "fwupd") || strings.Contains(lower, "tlp") || strings.Contains(lower, "upower"):
 		return "power-firmware"
+	case strings.Contains(lower, "nvidia") ||
+		strings.Contains(lower, "amdgpu") ||
+		strings.Contains(lower, "i915") ||
+		strings.Contains(lower, "intel") && strings.Contains(lower, "/x11/") ||
+		strings.Contains(lower, "vulkan") ||
+		strings.Contains(lower, "opencl") ||
+		strings.Contains(lower, "cuda") ||
+		strings.Contains(lower, "rocm"):
+		return "gpu-driver"
 	case strings.Contains(lower, "keyd") || strings.Contains(lower, "kanata") || strings.Contains(lower, "input-remapper") || strings.Contains(lower, "solaar") || strings.Contains(lower, "xremap"):
 		return "input-device"
 	default:
@@ -198,9 +226,81 @@ func hardwareDetails(path, content string) map[string]string {
 	case "power-firmware":
 		details["tool"] = powerFirmwareTool(path)
 		mergeDetails(details, genericHardwareConfigDetails(content))
+	case "gpu-driver":
+		details["tool"] = gpuDriverTool(path)
+		details["vendor"] = gpuVendor(path, content)
+		mergeDetails(details, gpuDriverDetails(path, content))
 	case "input-device":
 		details["tool"] = inputDeviceTool(path)
 		mergeDetails(details, genericHardwareConfigDetails(content))
+	}
+	return emptyNil(details)
+}
+
+func gpuDriverTool(path string) string {
+	lower := strings.ToLower(path)
+	switch {
+	case strings.Contains(lower, "cuda"):
+		return "cuda"
+	case strings.Contains(lower, "rocm"):
+		return "rocm"
+	case strings.Contains(lower, "vulkan"):
+		return "vulkan"
+	case strings.Contains(lower, "opencl"):
+		return "opencl"
+	case strings.Contains(lower, "dkms"):
+		return "dkms"
+	case strings.Contains(lower, "xorg"):
+		return "xorg"
+	case strings.Contains(lower, "modprobe"):
+		return "modprobe"
+	default:
+		return "gpu"
+	}
+}
+
+func gpuVendor(path, content string) string {
+	lower := strings.ToLower(path + "\n" + content)
+	switch {
+	case strings.Contains(lower, "nvidia") || strings.Contains(lower, "cuda"):
+		return "nvidia"
+	case strings.Contains(lower, "amd") || strings.Contains(lower, "rocm"):
+		return "amd"
+	case strings.Contains(lower, "intel") || strings.Contains(lower, "i915"):
+		return "intel"
+	default:
+		return "unknown"
+	}
+}
+
+func gpuDriverDetails(path, content string) map[string]string {
+	details := map[string]string{}
+	lower := strings.ToLower(path)
+	switch {
+	case strings.HasSuffix(lower, ".json"):
+		details["marker"] = "json"
+	case strings.HasSuffix(lower, ".icd"):
+		details["marker"] = "icd"
+	case strings.Contains(lower, "/dkms/"):
+		details["marker"] = "dkms"
+	case strings.Contains(lower, "version"):
+		details["marker"] = "version"
+	default:
+		details["marker"] = "config"
+	}
+	for _, line := range linesWithoutComments(content) {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(strings.ToLower(trimmed), "modulepath"):
+			details["modulepath"] = "present"
+		case strings.Contains(strings.ToLower(trimmed), "driver") && (strings.Contains(strings.ToLower(trimmed), "nvidia") || strings.Contains(strings.ToLower(trimmed), "amdgpu") || strings.Contains(strings.ToLower(trimmed), "intel")):
+			details["driver"] = "present"
+		case strings.Contains(strings.ToLower(trimmed), "version") && !isSecretConfigKey(trimmed):
+			details["version"] = "present"
+		}
 	}
 	return emptyNil(details)
 }

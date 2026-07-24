@@ -32,7 +32,12 @@ func scanDesktopEnvironment(opts Options, report *model.ScanReport) {
 }
 
 func scanDesktopAssets(opts Options, report *model.ScanReport) {
-	for _, path := range glob(opts.Root, "/usr/share/fonts/*", "/home/*/.local/share/fonts/*") {
+	for _, path := range glob(opts.Root,
+		"/usr/share/fonts/*",
+		"/usr/local/share/fonts/*",
+		"/home/*/.local/share/fonts/*",
+		"/home/*/.fonts/*",
+	) {
 		if info, ok := safeStat(opts.Root, path); ok && !info.IsDir() {
 			report.Desktop.Fonts = append(report.Desktop.Fonts, displayPath(opts.Root, path))
 		}
@@ -73,11 +78,18 @@ func scanDesktopConfigs(opts Options, report *model.ScanReport) {
 		"/home/*/.config/kitty/kitty.conf",
 		"/home/*/.config/wezterm/wezterm.lua",
 		"/home/*/.config/ghostty/config",
+		"/home/*/.config/fontconfig/fonts.conf",
+		"/home/*/.config/fontconfig/conf.d/*.conf",
 		"/home/*/.config/Code/User/settings.json",
 		"/home/*/.config/Code/User/keybindings.json",
+		"/home/*/.config/VSCodium/User/settings.json",
+		"/home/*/.config/VSCodium/User/keybindings.json",
 		"/home/*/.config/nvim/init.lua",
 		"/home/*/.config/nvim/init.vim",
 		"/home/*/.vimrc",
+		"/home/*/.emacs",
+		"/home/*/.emacs.d/init.el",
+		"/home/*/.config/emacs/init.el",
 	}
 	for _, path := range glob(opts.Root, patterns...) {
 		if info, ok := safeStat(opts.Root, path); !ok || info.IsDir() {
@@ -123,8 +135,15 @@ func scanGUIProfiles(opts Options, report *model.ScanReport) {
 		"/home/*/.config/VSCodium/User/snippets",
 		"/home/*/.vscode/extensions/*",
 		"/home/*/.vscode-oss/extensions/*",
+		"/home/*/.vscode-server/extensions/*",
+		"/home/*/.vscode-oss-server/extensions/*",
 		"/home/*/.config/JetBrains/*",
 		"/home/*/.local/share/JetBrains/*",
+		"/home/*/.local/share/JetBrains/Toolbox",
+		"/home/*/.config/JetBrains/Toolbox",
+		"/home/*/.config/nvim",
+		"/home/*/.emacs.d",
+		"/home/*/.config/emacs",
 	) {
 		addDesktopItem(opts, report, path, "editor-profile", model.DecisionCandidate, "editor settings, extensions, or IDE profile")
 	}

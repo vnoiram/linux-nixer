@@ -19,6 +19,7 @@ func (SystemConfigScanner) Name() string { return "system-config" }
 func (SystemConfigScanner) Scan(ctx context.Context, opts Options, report *model.ScanReport) error {
 	scanSystemConfigFiles(ctx, opts, report)
 	scanSystemConfigGlobs(opts, report)
+	scanExistingNixEnvironment(opts, report)
 	scanSystemServices(opts, report)
 	return nil
 }
@@ -32,7 +33,10 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/default/useradd",
 		"/etc/adduser.conf",
 		"/etc/locale.conf",
+		"/etc/locale.gen",
 		"/etc/timezone",
+		"/etc/default/keyboard",
+		"/etc/vconsole.conf",
 		"/etc/ssh/sshd_config",
 		"/etc/ssh/ssh_config",
 		"/etc/sysctl.conf",
@@ -41,8 +45,12 @@ func scanSystemConfigFiles(ctx context.Context, opts Options, report *model.Scan
 		"/etc/default/ufw",
 		"/etc/netplan",
 		"/etc/NetworkManager/NetworkManager.conf",
+		"/etc/systemd/network",
+		"/etc/systemd/networkd.conf",
 		"/etc/resolv.conf",
 		"/etc/systemd/resolved.conf",
+		"/etc/firewalld/firewalld.conf",
+		"/etc/iptables",
 		"/etc/fail2ban/jail.local",
 		"/etc/audit/auditd.conf",
 		"/var/lib/tailscale",
@@ -80,6 +88,7 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 		"/etc/audit/rules.d/*.rules",
 		"/etc/apparmor.d/*",
 		"/etc/apparmor.d/local/*",
+		"/etc/X11/xorg.conf.d/*keyboard*.conf",
 		"/etc/ssh/ssh_config.d/*.conf",
 		"/etc/wireguard/*.conf",
 		"/etc/openvpn/*.conf",
@@ -87,6 +96,15 @@ func scanSystemConfigGlobs(opts Options, report *model.ScanReport) {
 		"/home/*/.config/wireguard/*.conf",
 		"/etc/netplan/*.yaml",
 		"/etc/NetworkManager/system-connections/*",
+		"/etc/systemd/network/*.network",
+		"/etc/systemd/network/*.netdev",
+		"/etc/systemd/network/*.link",
+		"/etc/firewalld/zones/*.xml",
+		"/etc/firewalld/services/*.xml",
+		"/etc/iptables/rules.v4",
+		"/etc/iptables/rules.v6",
+		"/etc/sysconfig/iptables",
+		"/etc/sysconfig/ip6tables",
 		"/etc/nginx/sites-enabled/*",
 		"/etc/apache2/sites-enabled/*",
 	} {
@@ -144,8 +162,14 @@ func systemConfigDetails(path, content string) map[string]string {
 		return networkManagerConnectionDetails(content)
 	case strings.HasSuffix(path, "/etc/NetworkManager/NetworkManager.conf"):
 		return keyValueDetails(content, []string{"plugins", "dns", "managed", "rc-manager"})
+	case strings.Contains(path, "/etc/systemd/network/") || strings.HasSuffix(path, "/etc/systemd/networkd.conf"):
+		return systemdNetworkDetails(path, content)
 	case strings.HasSuffix(path, "/etc/ufw/ufw.conf") || strings.HasSuffix(path, "/etc/default/ufw"):
 		return keyValueDetails(content, []string{"ENABLED", "IPV6", "DEFAULT_INPUT_POLICY", "DEFAULT_OUTPUT_POLICY", "DEFAULT_FORWARD_POLICY"})
+	case strings.Contains(path, "/etc/firewalld/"):
+		return firewalldDetails(path, content)
+	case strings.Contains(path, "/etc/iptables/") || strings.Contains(path, "/etc/sysconfig/iptables") || strings.Contains(path, "/etc/sysconfig/ip6tables"):
+		return iptablesDetails(content)
 	case strings.HasSuffix(path, "/etc/nftables.conf"):
 		return nftablesDetails(content)
 	case strings.HasSuffix(path, "/etc/ssh/sshd_config"):
@@ -160,6 +184,14 @@ func systemConfigDetails(path, content string) map[string]string {
 		return sudoersDetails(content)
 	case strings.HasSuffix(path, "/etc/login.defs"):
 		return loginDefsDetails(content)
+	case strings.HasSuffix(path, "/etc/locale.conf") || strings.HasSuffix(path, "/etc/vconsole.conf"):
+		return keyValueDetails(content, []string{"LANG", "LC_TIME", "LC_COLLATE", "LC_CTYPE", "KEYMAP", "FONT"})
+	case strings.HasSuffix(path, "/etc/locale.gen"):
+		return localeGenDetails(content)
+	case strings.HasSuffix(path, "/etc/default/keyboard"):
+		return keyValueDetails(content, []string{"XKBMODEL", "XKBLAYOUT", "XKBVARIANT", "XKBOPTIONS", "BACKSPACE"})
+	case strings.Contains(path, "/etc/X11/xorg.conf.d/") && strings.Contains(strings.ToLower(path), "keyboard"):
+		return xorgKeyboardDetails(content)
 	case strings.HasSuffix(path, "/etc/default/useradd") || strings.HasSuffix(path, "/etc/adduser.conf"):
 		return keyValueDetails(content, []string{"GROUP", "HOME", "SHELL", "SKEL", "CREATE_HOME", "DSHELL", "DHOME", "FIRST_UID", "LAST_UID", "FIRST_GID", "LAST_GID", "USERGROUPS"})
 	case strings.Contains(path, "/etc/pam.d/"):
@@ -177,6 +209,97 @@ func systemConfigDetails(path, content string) map[string]string {
 	default:
 		return nil
 	}
+}
+
+func scanExistingNixEnvironment(opts Options, report *model.ScanReport) {
+	seen := map[string]bool{}
+	for _, item := range report.Items {
+		seen[item.Path] = true
+	}
+	for _, pattern := range []string{
+		"/etc/nixos",
+		"/etc/nixos/configuration.nix",
+		"/etc/nixos/hardware-configuration.nix",
+		"/etc/nixos/flake.nix",
+		"/etc/nix/nix.conf",
+		"/nix/var/nix/profiles/system",
+		"/nix/var/nix/profiles/per-user/*/profile",
+		"/home/*/.nix-profile",
+		"/home/*/.config/nix/nix.conf",
+		"/home/*/.config/home-manager/home.nix",
+		"/home/*/.config/home-manager/flake.nix",
+	} {
+		for _, path := range glob(opts.Root, pattern) {
+			display := displayPath(opts.Root, path)
+			if seen[display] {
+				continue
+			}
+			info, ok := safeStat(opts.Root, path)
+			if !ok {
+				continue
+			}
+			seen[display] = true
+			content := ""
+			if !info.IsDir() {
+				content = readLocalFile(opts.Root, path)
+			}
+			report.Items = append(report.Items, model.Item{
+				Kind:     "os-config",
+				Name:     nixEnvironmentName(display),
+				Path:     display,
+				Decision: model.DecisionMigrationNote,
+				Reason:   "existing nix/nixos environment",
+				Details:  nixEnvironmentDetails(display, content, info.IsDir()),
+			})
+		}
+	}
+}
+
+func nixEnvironmentName(path string) string {
+	switch {
+	case strings.Contains(path, "/home/") && strings.Contains(path, "/home-manager/"):
+		return "home-manager"
+	case strings.Contains(path, "/home/") && strings.Contains(path, ".nix-profile"):
+		return "user-nix-profile"
+	case strings.Contains(path, "/nix/var/nix/profiles/per-user/"):
+		return "per-user-nix-profile"
+	case strings.Contains(path, "/nix/var/nix/profiles/system"):
+		return "nixos-system-profile"
+	case strings.HasPrefix(path, "/etc/nixos"):
+		return "nixos-config"
+	case strings.HasSuffix(path, "/nix.conf"):
+		return "nix-config"
+	default:
+		return "nix-environment"
+	}
+}
+
+func nixEnvironmentDetails(path, content string, isDir bool) map[string]string {
+	details := map[string]string{}
+	switch {
+	case isDir:
+		details["marker"] = "directory"
+	case strings.HasSuffix(path, "flake.nix"):
+		details["flake"] = "present"
+	case strings.HasSuffix(path, ".nix"):
+		details["nix-file"] = "present"
+	}
+	switch {
+	case strings.Contains(path, "/home/") && strings.Contains(path, "/home-manager/"):
+		details["scope"] = "home-manager"
+	case strings.Contains(path, "/home/"):
+		details["scope"] = "user"
+	case strings.HasPrefix(path, "/etc/nixos"):
+		details["scope"] = "nixos"
+	case strings.HasPrefix(path, "/etc/nix"):
+		details["scope"] = "nix-daemon"
+	case strings.HasPrefix(path, "/nix/var/nix/profiles"):
+		details["scope"] = "profile"
+	}
+	if strings.HasSuffix(path, "/nix.conf") {
+		mergeDetails(details, keyValueDetails(content, []string{"experimental-features", "trusted-users", "substituters", "trusted-public-keys", "sandbox"}))
+	}
+	return emptyNil(details)
 }
 
 func hostsDetails(content string) map[string]string {
@@ -320,6 +443,80 @@ func nftablesDetails(content string) map[string]string {
 		}
 	}
 	return countDetails("tables", tables, "chains", chains, "rules", rules)
+}
+
+func systemdNetworkDetails(path, content string) map[string]string {
+	details := map[string]string{}
+	switch {
+	case strings.HasSuffix(path, ".network"):
+		details["unit-type"] = "network"
+	case strings.HasSuffix(path, ".netdev"):
+		details["unit-type"] = "netdev"
+	case strings.HasSuffix(path, ".link"):
+		details["unit-type"] = "link"
+	case strings.HasSuffix(path, "networkd.conf"):
+		details["unit-type"] = "networkd-conf"
+	}
+	sc := bufio.NewScanner(strings.NewReader(content))
+	for sc.Scan() {
+		line := strings.TrimSpace(stripInlineComment(sc.Text()))
+		if line == "" || strings.HasPrefix(line, "[") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		switch key {
+		case "Name", "Kind", "DHCP", "Address", "Gateway", "DNS", "Domains":
+			if key == "Address" || key == "Gateway" || key == "DNS" || key == "Domains" {
+				details[strings.ToLower(key)] = "present"
+			} else {
+				setDetail(details, key, value)
+			}
+		}
+	}
+	return emptyNil(details)
+}
+
+func firewalldDetails(path, content string) map[string]string {
+	details := map[string]string{"tool": "firewalld"}
+	switch {
+	case strings.Contains(path, "/zones/"):
+		details["file-type"] = "zone"
+	case strings.Contains(path, "/services/"):
+		details["file-type"] = "service"
+	default:
+		details["file-type"] = "config"
+	}
+	setBackupPositiveDetail(details, "services", strings.Count(content, "<service "))
+	setBackupPositiveDetail(details, "ports", strings.Count(content, "<port "))
+	setBackupPositiveDetail(details, "rules", strings.Count(content, "<rule "))
+	mergeDetails(details, keyValueDetails(content, []string{"DefaultZone", "CleanupOnExit", "FirewallBackend"}))
+	return emptyNil(details)
+}
+
+func iptablesDetails(content string) map[string]string {
+	tables, chains, rules := 0, 0, 0
+	for _, line := range linesWithoutComments(content) {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(trimmed, "*"):
+			tables++
+		case strings.HasPrefix(trimmed, ":"):
+			chains++
+		case strings.HasPrefix(trimmed, "-A ") || strings.HasPrefix(trimmed, "-I "):
+			rules++
+		}
+	}
+	details := countDetails("tables", tables, "chains", chains, "rules", rules)
+	if details == nil {
+		details = map[string]string{}
+	}
+	details["tool"] = "iptables"
+	return emptyNil(details)
 }
 
 func sshdDetails(content string) map[string]string {
@@ -491,6 +688,47 @@ func loginDefsDetails(content string) map[string]string {
 		key := fields[0]
 		if allowed[key] && !isSecretConfigKey(key) {
 			setDetail(details, key, strings.Join(fields[1:], " "))
+		}
+	}
+	return emptyNil(details)
+}
+
+func localeGenDetails(content string) map[string]string {
+	enabled := 0
+	names := map[string]bool{}
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) > 0 {
+			enabled++
+			names[fields[0]] = true
+		}
+	}
+	details := countDetails("enabled-locales", enabled)
+	if details == nil {
+		details = map[string]string{}
+	}
+	if len(names) > 0 {
+		details["locales"] = limitedJoinedKeys(names, 6)
+	}
+	return emptyNil(details)
+}
+
+func xorgKeyboardDetails(content string) map[string]string {
+	details := map[string]string{}
+	for _, line := range linesWithoutComments(content) {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 3 || !strings.EqualFold(fields[0], "Option") {
+			continue
+		}
+		key := strings.Trim(fields[1], `"`)
+		value := strings.Trim(fields[2], `"`)
+		switch key {
+		case "XkbLayout", "XkbVariant", "XkbOptions", "XkbModel":
+			setDetail(details, key, value)
 		}
 	}
 	return emptyNil(details)
@@ -760,7 +998,7 @@ func emptyNil(details map[string]string) map[string]string {
 }
 
 func scanSystemServices(opts Options, report *model.ScanReport) {
-	for _, path := range glob(opts.Root, "/etc/systemd/system/*.service", "/etc/systemd/system/*.timer", "/home/*/.config/systemd/user/*.service") {
+	for _, path := range glob(opts.Root, "/etc/systemd/system/*.service", "/etc/systemd/system/*.timer", "/home/*/.config/systemd/user/*.service", "/home/*/.config/systemd/user/*.timer") {
 		service := model.Service{
 			Manager:  "systemd",
 			Name:     filepath.Base(path),
@@ -904,6 +1142,7 @@ func systemConfigReason(path string) string {
 	switch {
 	case strings.Contains(path, "/netplan") ||
 		strings.Contains(path, "/NetworkManager/") ||
+		strings.Contains(path, "/systemd/network") ||
 		strings.HasSuffix(path, "/resolv.conf") ||
 		strings.Contains(path, "resolved.conf") ||
 		strings.Contains(path, "/wireguard/") ||
@@ -912,6 +1151,8 @@ func systemConfigReason(path string) string {
 		strings.Contains(path, "zerotier"):
 		return "network configuration"
 	case strings.Contains(path, "nftables") ||
+		strings.Contains(path, "firewalld") ||
+		strings.Contains(path, "iptables") ||
 		strings.Contains(path, "/ufw/") ||
 		strings.Contains(path, "/default/ufw"):
 		return "firewall configuration"
@@ -941,7 +1182,7 @@ func systemConfigReason(path string) string {
 		return "ssh client configuration"
 	case strings.Contains(path, "fstab"):
 		return "filesystem mount configuration"
-	case strings.Contains(path, "locale") || strings.Contains(path, "timezone"):
+	case strings.Contains(path, "locale") || strings.Contains(path, "timezone") || strings.Contains(path, "keyboard") || strings.Contains(path, "vconsole"):
 		return "localization configuration"
 	default:
 		return "system configuration"

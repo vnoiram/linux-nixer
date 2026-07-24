@@ -42,7 +42,12 @@ func statefulTargets() []statefulTarget {
 		{reason: "influxdb data directory", patterns: []string{"/var/lib/influxdb", "/var/lib/influxdb2"}},
 		{reason: "container runtime state", patterns: []string{"/var/lib/docker", "/var/lib/containers"}},
 		{reason: "etcd cluster data", patterns: []string{"/var/lib/etcd"}},
-		{reason: "libvirt virtual machine images", patterns: []string{"/var/lib/libvirt/images"}},
+		{reason: "libvirt virtual machine images", patterns: []string{"/var/lib/libvirt/images", "/var/lib/libvirt/qemu"}},
+		{reason: "qemu virtual machine images", patterns: []string{"/var/lib/qemu", "/home/*/.local/share/qemu"}},
+		{reason: "VirtualBox virtual machine storage", patterns: []string{"/home/*/VirtualBox VMs", "/root/VirtualBox VMs"}},
+		{reason: "VMware virtual machine storage", patterns: []string{"/home/*/vmware", "/var/lib/vmware"}},
+		{reason: "LXD container and VM storage", patterns: []string{"/var/lib/lxd", "/var/snap/lxd/common/lxd"}},
+		{reason: "multipass virtual machine storage", patterns: []string{"/var/snap/multipass/common/data/multipassd", "/var/lib/multipassd"}},
 		{reason: "application data directory under /srv", patterns: []string{"/srv/*/data", "/srv/*/storage", "/srv/*/uploads"}},
 	}
 }

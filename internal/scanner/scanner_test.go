@@ -77,6 +77,9 @@ Auto-Installed: 1
 	if packages["libauto"].Source != "dpkg:auto-installed" {
 		t.Fatalf("libauto source=%q, want auto-installed in %+v", packages["libauto"].Source, report.Packages)
 	}
+	if packages["curl"].Details["source-kind"] != "dpkg" || packages["curl"].Details["install-reason"] != "manual-or-unknown" || packages["libauto"].Details["install-reason"] != "auto-installed" {
+		t.Fatalf("apt source ownership details missing: curl=%+v libauto=%+v", packages["curl"], packages["libauto"])
+	}
 	if len(packages["shellcheck"].NixNames) != 1 || packages["shellcheck"].NixNames[0] != "shellcheck" {
 		t.Fatalf("shellcheck nixNames=%v, want [shellcheck] in %+v", packages["shellcheck"].NixNames, report.Packages)
 	}
@@ -312,6 +315,10 @@ func TestStatefulDataScannerFindsCommonRuntimeState(t *testing.T) {
 	write(t, root, "/var/lib/grafana/grafana.db", "grafana")
 	write(t, root, "/var/lib/docker/volumes/pgdata/_data/.keep", "")
 	write(t, root, "/var/lib/libvirt/images/vm.qcow2", "vm")
+	write(t, root, "/var/lib/qemu/images/vm.qcow2", "vm")
+	write(t, root, "/home/alice/VirtualBox VMs/demo/demo.vdi", "vm")
+	write(t, root, "/var/lib/lxd/storage-pools/default/containers/c1/rootfs/.keep", "")
+	write(t, root, "/var/snap/multipass/common/data/multipassd/vault/instances/demo/disk.img", "vm")
 	write(t, root, "/srv/app/uploads/avatar.png", "image")
 
 	report := &model.ScanReport{}
@@ -330,6 +337,10 @@ func TestStatefulDataScannerFindsCommonRuntimeState(t *testing.T) {
 		"/var/lib/grafana",
 		"/var/lib/docker",
 		"/var/lib/libvirt/images",
+		"/var/lib/qemu",
+		"/home/alice/VirtualBox VMs",
+		"/var/lib/lxd",
+		"/var/snap/multipass/common/data/multipassd",
 		"/srv/app/uploads",
 	} {
 		finding := findings[path]
@@ -818,6 +829,11 @@ func TestHardwareConfigScannerFindsPeripheralConfigsSafely(t *testing.T) {
 	write(t, root, "/etc/u2f_mappings", "alice:secret-u2f-mapping\n")
 	write(t, root, "/etc/pcsc/reader.conf", "FRIENDLYNAME reader\n")
 	write(t, root, "/etc/fwupd/daemon.conf", "[fwupd]\nDisabledDevices=secret-device\n")
+	write(t, root, "/etc/modprobe.d/nvidia-local.conf", "options nvidia NVreg_PreserveVideoMemoryAllocations=1\n")
+	write(t, root, "/etc/vulkan/icd.d/nvidia_icd.json", `{"ICD":{"library_path":"libGLX_nvidia.so.0","api_version":"1.3.0"}}`)
+	write(t, root, "/etc/OpenCL/vendors/amdocl64.icd", "libamdocl64.so\n")
+	write(t, root, "/usr/local/cuda/version.txt", "CUDA Version 12.4.0\n")
+	write(t, root, "/opt/rocm/.info/version", "6.1.0\n")
 	write(t, root, "/etc/tlp.conf", "TLP_ENABLE=1\n")
 	write(t, root, "/etc/keyd/default.conf", "[ids]\n*\n[main]\ncapslock = esc\n")
 	write(t, root, "/home/alice/.config/xremap/config.yml", "modmap:\n  - name: demo\n")
@@ -844,6 +860,11 @@ func TestHardwareConfigScannerFindsPeripheralConfigsSafely(t *testing.T) {
 		"/etc/sane.d/dll.conf",
 		"/etc/pipewire/pipewire.conf",
 		"/etc/u2f_mappings",
+		"/etc/modprobe.d/nvidia-local.conf",
+		"/etc/vulkan/icd.d/nvidia_icd.json",
+		"/etc/OpenCL/vendors/amdocl64.icd",
+		"/usr/local/cuda/version.txt",
+		"/opt/rocm/.info/version",
 		"/etc/tlp.conf",
 		"/etc/keyd/default.conf",
 	} {
@@ -862,6 +883,18 @@ func TestHardwareConfigScannerFindsPeripheralConfigsSafely(t *testing.T) {
 	}
 	if items["/etc/u2f_mappings"].Details["mappings"] != "1" || items["/etc/u2f_mappings"].Details["manual-enrollment"] != "recommended" {
 		t.Fatalf("unexpected u2f details: %+v", items["/etc/u2f_mappings"])
+	}
+	if items["/etc/modprobe.d/nvidia-local.conf"].Details["category"] != "gpu-driver" || items["/etc/modprobe.d/nvidia-local.conf"].Details["vendor"] != "nvidia" || items["/etc/modprobe.d/nvidia-local.conf"].Details["tool"] != "modprobe" {
+		t.Fatalf("unexpected nvidia details: %+v", items["/etc/modprobe.d/nvidia-local.conf"])
+	}
+	if items["/etc/vulkan/icd.d/nvidia_icd.json"].Details["tool"] != "vulkan" || items["/etc/vulkan/icd.d/nvidia_icd.json"].Details["marker"] != "json" {
+		t.Fatalf("unexpected vulkan details: %+v", items["/etc/vulkan/icd.d/nvidia_icd.json"])
+	}
+	if items["/etc/OpenCL/vendors/amdocl64.icd"].Details["tool"] != "opencl" || items["/etc/OpenCL/vendors/amdocl64.icd"].Details["vendor"] != "amd" {
+		t.Fatalf("unexpected opencl details: %+v", items["/etc/OpenCL/vendors/amdocl64.icd"])
+	}
+	if items["/usr/local/cuda/version.txt"].Details["tool"] != "cuda" || items["/opt/rocm/.info/version"].Details["tool"] != "rocm" {
+		t.Fatalf("unexpected compute stack details: cuda=%+v rocm=%+v", items["/usr/local/cuda/version.txt"], items["/opt/rocm/.info/version"])
 	}
 	for _, item := range report.Items {
 		for _, value := range item.Details {
@@ -1030,7 +1063,11 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/default/useradd", "SHELL=/bin/bash\nCREATE_HOME=yes\n")
 	write(t, root, "/etc/adduser.conf", "DSHELL=/bin/zsh\nFIRST_UID=1000\nLAST_UID=29999\n")
 	write(t, root, "/etc/locale.conf", "LANG=en_US.UTF-8\n")
+	write(t, root, "/etc/locale.gen", "en_US.UTF-8 UTF-8\n#ja_JP.UTF-8 UTF-8\n")
 	write(t, root, "/etc/timezone", "UTC\n")
+	write(t, root, "/etc/default/keyboard", "XKBLAYOUT=\"us\"\nXKBOPTIONS=\"ctrl:nocaps\"\n")
+	write(t, root, "/etc/vconsole.conf", "KEYMAP=us\nFONT=eurlatgr\n")
+	write(t, root, "/etc/X11/xorg.conf.d/00-keyboard.conf", "Section \"InputClass\"\nOption \"XkbLayout\" \"us\"\nOption \"XkbOptions\" \"ctrl:nocaps\"\nEndSection\n")
 	write(t, root, "/etc/ssh/sshd_config", "Port 2222\nPermitRootLogin no\nPasswordAuthentication no\n")
 	write(t, root, "/etc/ssh/ssh_config", "Host *\n  ForwardAgent no\n  ProxyJump bastion\n")
 	write(t, root, "/etc/sysctl.conf", "vm.swappiness=10\n")
@@ -1040,8 +1077,12 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/netplan/01-net.yaml", "network:\n  renderer: NetworkManager\n  ethernets:\n    enp1s0:\n      dhcp4: true\n      nameservers:\n        addresses: [1.1.1.1]\n")
 	write(t, root, "/etc/NetworkManager/NetworkManager.conf", "[main]\n")
 	write(t, root, "/etc/NetworkManager/system-connections/home.nmconnection", "[connection]\nid=home\ntype=wifi\ninterface-name=wlp1s0\nautoconnect=true\n[wifi-security]\npsk=secret\n")
+	write(t, root, "/etc/systemd/network/10-static.network", "[Match]\nName=enp2s0\n[Network]\nAddress=192.0.2.10/24\nGateway=192.0.2.1\nDNS=9.9.9.9\n")
 	write(t, root, "/etc/resolv.conf", "nameserver 1.1.1.1\nsearch lan example.test\n")
 	write(t, root, "/etc/systemd/resolved.conf", "[Resolve]\nDNS=9.9.9.9\nDomains=~corp.example\n")
+	write(t, root, "/etc/nixos/configuration.nix", "{ config, pkgs, ... }: {}\n")
+	write(t, root, "/etc/nix/nix.conf", "experimental-features = nix-command flakes\ntrusted-users = root alice\n")
+	write(t, root, "/home/alice/.config/home-manager/home.nix", "{ pkgs, ... }: {}\n")
 	write(t, root, "/etc/sysctl.d/99-local.conf", "fs.inotify.max_user_watches=1\n")
 	write(t, root, "/etc/modprobe.d/local.conf", "options test value=1\n")
 	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
@@ -1055,6 +1096,9 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/audit/rules.d/hardening.rules", "-w /etc/passwd -p wa -k identity\n-a always,exit -F arch=b64 -S execve -k exec\n")
 	write(t, root, "/etc/apparmor.d/usr.bin.demo", "#include <tunables/global>\nprofile demo /usr/bin/demo {\n  capability net_bind_service,\n}\n")
 	write(t, root, "/etc/apparmor.d/local/usr.bin.demo", "capability dac_override,\n")
+	write(t, root, "/etc/firewalld/firewalld.conf", "DefaultZone=public\nFirewallBackend=nftables\n")
+	write(t, root, "/etc/firewalld/zones/public.xml", "<zone><service name=\"ssh\"/><port port=\"8443\" protocol=\"tcp\"/><rule family=\"ipv4\"/></zone>\n")
+	write(t, root, "/etc/iptables/rules.v4", "*filter\n:INPUT DROP [0:0]\n-A INPUT -p tcp --dport 22 -j ACCEPT\nCOMMIT\n")
 	write(t, root, "/etc/wireguard/wg0.conf", "[Interface]\nPrivateKey = raw-private\nDNS = 1.1.1.1\n[Peer]\nPublicKey = peer\nPresharedKey = raw-psk\nEndpoint = vpn.example:51820\nAllowedIPs = 10.0.0.0/24, ::/0\n")
 	write(t, root, "/etc/openvpn/client.conf", "client\nremote vpn.example 1194\nredirect-gateway def1\nauth-user-pass /etc/openvpn/secret\n")
 	write(t, root, "/etc/logrotate.d/app", "/var/log/app/*.log {}\n")
@@ -1072,6 +1116,7 @@ WantedBy=multi-user.target
 `)
 	write(t, root, "/etc/systemd/system/custom.timer", "[Unit]\nDescription=Custom timer\n[Timer]\nOnCalendar=daily\n")
 	write(t, root, "/home/alice/.config/systemd/user/user.service", "[Unit]\nDescription=User app\n[Service]\nExecStart=/home/alice/bin/app\n")
+	write(t, root, "/home/alice/.config/systemd/user/backup.timer", "[Unit]\nDescription=User backup timer\n[Timer]\nOnCalendar=hourly\n")
 	write(t, root, "/etc/cron.d/job", "15 2 * * * root /usr/local/bin/job\n")
 	write(t, root, "/var/spool/cron/crontabs/alice", "*/5 * * * * /home/alice/bin/task\n")
 	write(t, root, "/etc/cron.d/reboot-job", "@reboot root /usr/local/bin/on-boot\n")
@@ -1094,7 +1139,11 @@ WantedBy=multi-user.target
 		"/etc/default/useradd":                                     "auth and security configuration",
 		"/etc/adduser.conf":                                        "auth and security configuration",
 		"/etc/locale.conf":                                         "localization configuration",
+		"/etc/locale.gen":                                          "localization configuration",
 		"/etc/timezone":                                            "localization configuration",
+		"/etc/default/keyboard":                                    "localization configuration",
+		"/etc/vconsole.conf":                                       "localization configuration",
+		"/etc/X11/xorg.conf.d/00-keyboard.conf":                    "localization configuration",
 		"/etc/ssh/sshd_config":                                     "ssh daemon configuration",
 		"/etc/ssh/ssh_config":                                      "ssh client configuration",
 		"/etc/sysctl.conf":                                         "kernel or device tuning",
@@ -1103,8 +1152,12 @@ WantedBy=multi-user.target
 		"/etc/default/ufw":                                         "firewall configuration",
 		"/etc/netplan":                                             "network configuration",
 		"/etc/NetworkManager/NetworkManager.conf":                  "network configuration",
+		"/etc/systemd/network/10-static.network":                   "network configuration",
 		"/etc/resolv.conf":                                         "network configuration",
 		"/etc/systemd/resolved.conf":                               "network configuration",
+		"/etc/nixos/configuration.nix":                             "existing nix/nixos environment",
+		"/etc/nix/nix.conf":                                        "existing nix/nixos environment",
+		"/home/alice/.config/home-manager/home.nix":                "existing nix/nixos environment",
 		"/etc/sysctl.d/99-local.conf":                              "kernel or device tuning",
 		"/etc/modprobe.d/local.conf":                               "kernel or device tuning",
 		"/etc/udev/rules.d/99-device.rules":                        "kernel or device tuning",
@@ -1118,6 +1171,9 @@ WantedBy=multi-user.target
 		"/etc/audit/rules.d/hardening.rules":                       "auth and security configuration",
 		"/etc/apparmor.d/usr.bin.demo":                             "auth and security configuration",
 		"/etc/apparmor.d/local/usr.bin.demo":                       "auth and security configuration",
+		"/etc/firewalld/firewalld.conf":                            "firewall configuration",
+		"/etc/firewalld/zones/public.xml":                          "firewall configuration",
+		"/etc/iptables/rules.v4":                                   "firewall configuration",
 		"/etc/wireguard/wg0.conf":                                  "network configuration",
 		"/etc/openvpn/client.conf":                                 "network configuration",
 		"/etc/logrotate.d/app":                                     "log rotation configuration",
@@ -1159,11 +1215,26 @@ WantedBy=multi-user.target
 	if nm.Details["id"] != "home" || nm.Details["type"] != "wifi" || nm.Details["interface-name"] != "wlp1s0" || nm.Details["psk"] != "" {
 		t.Fatalf("network manager details unsafe or missing: %+v", nm)
 	}
+	if seen["/etc/systemd/network/10-static.network"].Details["Name"] != "enp2s0" || seen["/etc/systemd/network/10-static.network"].Details["address"] != "present" || seen["/etc/systemd/network/10-static.network"].Details["dns"] != "present" {
+		t.Fatalf("systemd-networkd details missing: %+v", seen["/etc/systemd/network/10-static.network"])
+	}
+	if seen["/etc/nix/nix.conf"].Details["experimental-features"] != "nix-command flakes" || seen["/etc/nix/nix.conf"].Details["scope"] != "nix-daemon" {
+		t.Fatalf("nix environment details missing: %+v", seen["/etc/nix/nix.conf"])
+	}
+	if seen["/home/alice/.config/home-manager/home.nix"].Decision != model.DecisionMigrationNote || seen["/home/alice/.config/home-manager/home.nix"].Details["scope"] != "home-manager" {
+		t.Fatalf("home-manager marker missing: %+v", seen["/home/alice/.config/home-manager/home.nix"])
+	}
 	if seen["/etc/ufw/ufw.conf"].Details["ENABLED"] != "yes" || seen["/etc/default/ufw"].Details["DEFAULT_INPUT_POLICY"] != "DROP" {
 		t.Fatalf("ufw details missing: %+v %+v", seen["/etc/ufw/ufw.conf"], seen["/etc/default/ufw"])
 	}
 	if seen["/etc/nftables.conf"].Details["tables"] != "1" || seen["/etc/nftables.conf"].Details["chains"] != "1" || seen["/etc/nftables.conf"].Details["rules"] != "1" {
 		t.Fatalf("nftables details missing: %+v", seen["/etc/nftables.conf"])
+	}
+	if seen["/etc/firewalld/zones/public.xml"].Details["services"] != "1" || seen["/etc/firewalld/zones/public.xml"].Details["ports"] != "1" || seen["/etc/firewalld/zones/public.xml"].Details["rules"] != "1" {
+		t.Fatalf("firewalld details missing: %+v", seen["/etc/firewalld/zones/public.xml"])
+	}
+	if seen["/etc/iptables/rules.v4"].Details["tables"] != "1" || seen["/etc/iptables/rules.v4"].Details["chains"] != "1" || seen["/etc/iptables/rules.v4"].Details["rules"] != "1" {
+		t.Fatalf("iptables details missing: %+v", seen["/etc/iptables/rules.v4"])
 	}
 	if seen["/etc/sudoers"].Details["user-rules"] != "1" || seen["/etc/sudoers"].Details["group-rules"] != "1" || seen["/etc/sudoers"].Details["nopasswd-rules"] != "1" || seen["/etc/sudoers"].Details["includes"] != "1" {
 		t.Fatalf("sudoers details missing: %+v", seen["/etc/sudoers"])
@@ -1173,6 +1244,9 @@ WantedBy=multi-user.target
 	}
 	if seen["/etc/default/useradd"].Details["SHELL"] != "/bin/bash" || seen["/etc/adduser.conf"].Details["DSHELL"] != "/bin/zsh" {
 		t.Fatalf("useradd/adduser details missing: %+v %+v", seen["/etc/default/useradd"], seen["/etc/adduser.conf"])
+	}
+	if seen["/etc/locale.conf"].Details["LANG"] != "en_US.UTF-8" || seen["/etc/locale.gen"].Details["enabled-locales"] != "1" || seen["/etc/default/keyboard"].Details["XKBLAYOUT"] != "us" || seen["/etc/vconsole.conf"].Details["KEYMAP"] != "us" || seen["/etc/X11/xorg.conf.d/00-keyboard.conf"].Details["XkbLayout"] != "us" {
+		t.Fatalf("locale/keyboard details missing: locale=%+v gen=%+v keyboard=%+v vconsole=%+v x11=%+v", seen["/etc/locale.conf"], seen["/etc/locale.gen"], seen["/etc/default/keyboard"], seen["/etc/vconsole.conf"], seen["/etc/X11/xorg.conf.d/00-keyboard.conf"])
 	}
 	if seen["/etc/pam.d/sshd"].Details["rules"] != "3" || !strings.Contains(seen["/etc/pam.d/sshd"].Details["important-modules"], "pam_faillock.so") || strings.Contains(seen["/etc/pam.d/sshd"].Details["modules"], "hidden") {
 		t.Fatalf("pam details unsafe or missing: %+v", seen["/etc/pam.d/sshd"])
@@ -1200,6 +1274,7 @@ WantedBy=multi-user.target
 		"/etc/systemd/system/custom.service":            "systemd",
 		"/etc/systemd/system/custom.timer":              "systemd",
 		"/home/alice/.config/systemd/user/user.service": "systemd",
+		"/home/alice/.config/systemd/user/backup.timer": "systemd",
 		"/etc/cron.d/job":                               "cron",
 		"/var/spool/cron/crontabs/alice":                "cron",
 	} {
@@ -1219,6 +1294,9 @@ WantedBy=multi-user.target
 	}
 	if services["/home/alice/.config/systemd/user/user.service"].Description != "User app" || services["/home/alice/.config/systemd/user/user.service"].ExecStart != "/home/alice/bin/app" {
 		t.Fatalf("user systemd details missing: %+v", services["/home/alice/.config/systemd/user/user.service"])
+	}
+	if services["/home/alice/.config/systemd/user/backup.timer"].Schedule != "OnCalendar=hourly" {
+		t.Fatalf("user systemd timer details missing: %+v", services["/home/alice/.config/systemd/user/backup.timer"])
 	}
 	if services["/etc/cron.d/job"].Schedule != "15 2 * * *" || services["/etc/cron.d/job"].User != "root" || services["/etc/cron.d/job"].ExecStart != "/usr/local/bin/job" {
 		t.Fatalf("cron.d details missing: %+v", services["/etc/cron.d/job"])
@@ -1328,6 +1406,7 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "/usr/share/gnome/.keep", "")
 	write(t, root, "/home/alice/.local/share/fonts/demo.ttf", "font")
+	write(t, root, "/home/alice/.fonts/legacy.otf", "font")
 	write(t, root, "/home/alice/.themes/demo/index.theme", "[Theme]\n")
 	write(t, root, "/home/alice/.config/autostart/tool.desktop", "[Desktop Entry]\n")
 	write(t, root, "/home/alice/.config/kdeglobals", "[KDE]\n")
@@ -1338,12 +1417,17 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 	write(t, root, "/home/alice/.config/ibus/bus", "")
 	write(t, root, "/home/alice/.config/alacritty/alacritty.toml", "[window]\n")
 	write(t, root, "/home/alice/.config/kitty/kitty.conf", "font_size 12\n")
+	write(t, root, "/home/alice/.config/fontconfig/fonts.conf", "<fontconfig />\n")
 	write(t, root, "/home/alice/.config/Code/User/settings.json", "{}")
 	write(t, root, "/home/alice/.config/Code/User/snippets/go.json", "{}")
+	write(t, root, "/home/alice/.config/VSCodium/User/settings.json", "{}")
 	write(t, root, "/home/alice/.vscode/extensions/publisher.tool-1.0.0/.keep", "")
+	write(t, root, "/home/alice/.vscode-server/extensions/server.tool-1.0.0/.keep", "")
 	write(t, root, "/home/alice/.config/JetBrains/IdeaIC2026.1/options/editor.xml", "<application />")
+	write(t, root, "/home/alice/.local/share/JetBrains/Toolbox/apps/IDEA/.keep", "")
 	write(t, root, "/home/alice/.config/nvim/init.lua", "vim.opt.number = true\n")
 	write(t, root, "/home/alice/.vimrc", "set number\n")
+	write(t, root, "/home/alice/.emacs.d/init.el", "(setq user-mail-address \"secret@example.test\")\n")
 	write(t, root, "/home/alice/.mozilla/firefox/profiles.ini", "[Profile0]\n")
 	write(t, root, "/home/alice/.mozilla/firefox/alice.default-release/cookies.sqlite", "raw-cookie-secret")
 	write(t, root, "/home/alice/.mozilla/firefox/alice.default-release/extensions/addon@example.xpi", "xpi")
@@ -1357,7 +1441,7 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 	if report.Desktop.Environment != "gnome" {
 		t.Fatalf("environment=%q, want gnome", report.Desktop.Environment)
 	}
-	if len(report.Desktop.Fonts) != 1 || report.Desktop.Fonts[0] != "/home/alice/.local/share/fonts/demo.ttf" {
+	if len(report.Desktop.Fonts) != 2 || !contains(report.Desktop.Fonts, "/home/alice/.local/share/fonts/demo.ttf") || !contains(report.Desktop.Fonts, "/home/alice/.fonts/legacy.otf") {
 		t.Fatalf("unexpected fonts: %+v", report.Desktop.Fonts)
 	}
 	if len(report.Desktop.Themes) != 1 || report.Desktop.Themes[0] != "/home/alice/.themes/demo" {
@@ -1384,9 +1468,12 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 		"/home/alice/.config/ibus/bus",
 		"/home/alice/.config/alacritty/alacritty.toml",
 		"/home/alice/.config/kitty/kitty.conf",
+		"/home/alice/.config/fontconfig/fonts.conf",
 		"/home/alice/.config/Code/User/settings.json",
+		"/home/alice/.config/VSCodium/User/settings.json",
 		"/home/alice/.config/nvim/init.lua",
 		"/home/alice/.vimrc",
+		"/home/alice/.emacs.d/init.el",
 	} {
 		if !seen[want] {
 			t.Fatalf("missing desktop config %q in %+v", want, report.Items)
@@ -1417,7 +1504,11 @@ func TestDesktopScannerFindsMarkersAssetsAndConfigs(t *testing.T) {
 		"/home/alice/.config/Code/User/settings.json",
 		"/home/alice/.config/Code/User/snippets",
 		"/home/alice/.vscode/extensions/publisher.tool-1.0.0",
+		"/home/alice/.vscode-server/extensions/server.tool-1.0.0",
 		"/home/alice/.config/JetBrains/IdeaIC2026.1",
+		"/home/alice/.local/share/JetBrains/Toolbox",
+		"/home/alice/.config/nvim",
+		"/home/alice/.emacs.d",
 	} {
 		if items[path].Kind != "editor-profile" || items[path].Decision != model.DecisionCandidate {
 			t.Fatalf("editor profile %s missing candidate in %+v", path, report.Items)
@@ -1603,6 +1694,9 @@ func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 	writeMode(t, root, "/home/alice/Applications/Tool-1.2.3.AppImage", []byte("appimage"), 0o755)
 	write(t, root, "/home/alice/Applications/Tool-1.2.3.desktop", "[Desktop Entry]\nExec=/home/alice/Applications/Tool-1.2.3.AppImage --token secret-value\n")
 	write(t, root, "/home/linuxbrew/.linuxbrew/Cellar/hello/1.0/INSTALL_RECEIPT.json", `{"source":{"tap":"homebrew/core"},"runtime_dependencies":[{},{}],"installed_on_request":true}`)
+	writeMode(t, root, "/usr/local/bin/local-tool", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/opt/vendor/bin/vendor-tool", []byte("#!/bin/sh\n"), 0o755)
+	writeMode(t, root, "/home/alice/.local/bin/user-tool", []byte("#!/bin/sh\n"), 0o755)
 
 	report := &model.ScanReport{}
 	if err := (PackageEcosystemScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -1615,7 +1709,7 @@ func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 			t.Fatalf("appimage should not get nix mapping: %+v", pkg)
 		}
 	}
-	for _, want := range []string{"snap:hello", "flatpak:org.example.App", "appimage:Tool-1.2.3", "homebrew:hello"} {
+	for _, want := range []string{"snap:hello", "flatpak:org.example.App", "appimage:Tool-1.2.3", "homebrew:hello", "manual:local-tool", "manual:vendor-tool", "manual:user-tool"} {
 		if _, ok := seen[want]; !ok {
 			t.Fatalf("missing %s in %+v", want, report.Packages)
 		}
@@ -1624,16 +1718,19 @@ func TestPackageEcosystemScannerFindsFlatpakAppImageAndHomebrew(t *testing.T) {
 		t.Fatalf("snap details missing: %+v", seen["snap:hello"])
 	}
 	flatpak := seen["flatpak:org.example.App"]
-	if flatpak.Details["scope"] != "system" || flatpak.Details["current"] != "present" || flatpak.Details["runtime"] != "org.gnome.Platform" || flatpak.Details["sdk"] != "present" || flatpak.Details["command"] != "present" {
+	if flatpak.Details["source-kind"] != "flatpak" || flatpak.Details["scope"] != "system" || flatpak.Details["current"] != "present" || flatpak.Details["runtime"] != "org.gnome.Platform" || flatpak.Details["sdk"] != "present" || flatpak.Details["command"] != "present" {
 		t.Fatalf("flatpak details missing: %+v", flatpak)
 	}
 	appimage := seen["appimage:Tool-1.2.3"]
-	if appimage.Details["location"] != "user-applications" || appimage.Details["executable"] != "present" || appimage.Details["filename-version"] != "1.2.3" || appimage.Details["desktop-entry"] != "present" {
+	if appimage.Details["source-kind"] != "appimage" || appimage.Details["location"] != "user-applications" || appimage.Details["executable"] != "present" || appimage.Details["filename-version"] != "1.2.3" || appimage.Details["desktop-entry"] != "present" {
 		t.Fatalf("appimage details missing: %+v", appimage)
 	}
 	brew := seen["homebrew:hello"]
-	if brew.Details["prefix"] != "/home/linuxbrew/.linuxbrew" || brew.Details["version-count"] != "1" || brew.Details["current-version"] != "1.0" || brew.Details["tap"] != "present" || brew.Details["dependency-count"] != "2" || brew.Details["installed-on-request"] != "true" {
+	if brew.Details["source-kind"] != "homebrew" || brew.Details["prefix"] != "/home/linuxbrew/.linuxbrew" || brew.Details["version-count"] != "1" || brew.Details["current-version"] != "1.0" || brew.Details["tap"] != "present" || brew.Details["dependency-count"] != "2" || brew.Details["installed-on-request"] != "true" {
 		t.Fatalf("homebrew details missing: %+v", brew)
+	}
+	if seen["manual:local-tool"].Decision != model.DecisionMigrationNote || seen["manual:local-tool"].Details["location"] != "usr-local-bin" || seen["manual:vendor-tool"].Details["location"] != "opt-bin" || seen["manual:user-tool"].Details["location"] != "user-local-bin" {
+		t.Fatalf("manual binary ownership details missing: local=%+v vendor=%+v user=%+v", seen["manual:local-tool"], seen["manual:vendor-tool"], seen["manual:user-tool"])
 	}
 	for _, pkg := range report.Packages {
 		for _, value := range pkg.Details {
@@ -1690,14 +1787,26 @@ func TestLanguageScannerFindsLanguageEcosystemHints(t *testing.T) {
 	write(t, root, "/home/alice/project/uv.lock", "version = 1\n")
 	write(t, root, "/home/alice/project/environment.yml", "name: demo\n")
 	write(t, root, "/home/alice/project/Cargo.toml", "[package]\n")
+	write(t, root, "/home/alice/project/rust-toolchain.toml", "[toolchain]\nchannel = 'stable'\n")
 	write(t, root, "/home/alice/project/go.mod", "module example.com/demo\n")
 	write(t, root, "/home/alice/project/Gemfile", "source 'https://rubygems.org'\n")
+	write(t, root, "/home/alice/project/pom.xml", "<project />\n")
+	write(t, root, "/home/alice/project/build.gradle", "plugins {}\n")
+	write(t, root, "/home/alice/project/composer.json", `{"require":{}}`)
+	write(t, root, "/home/alice/project/app.csproj", "<Project />\n")
+	write(t, root, "/home/alice/project/global.json", `{"sdk":{"version":"8.0.100"}}`)
 	write(t, root, "/srv/app/Gemfile", "source 'https://rubygems.org'\n")
 	write(t, root, "/home/alice/miniconda3/envs/data/conda-meta/history", "")
 	write(t, root, "/home/alice/.condarc", "channels:\n")
 	write(t, root, "/home/alice/.tool-versions", "nodejs 22\n")
 	write(t, root, "/home/alice/project/.node-version", "22\n")
+	write(t, root, "/home/alice/project/.java-version", "21\n")
 	write(t, root, "/home/alice/.local/share/mise/config.toml", "")
+	write(t, root, "/usr/lib/jvm/java-21-openjdk/release", "JAVA_VERSION=\"21\"\n")
+	write(t, root, "/home/alice/Android/Sdk/platforms/android-35/.keep", "")
+	write(t, root, "/home/alice/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/.keep", "")
+	write(t, root, "/home/alice/.m2/settings.xml", "<settings><password>secret</password></settings>\n")
+	write(t, root, "/home/alice/.dotnet/sdk/8.0.100/.keep", "")
 
 	report := &model.ScanReport{}
 	if err := (LanguageScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
@@ -1713,7 +1822,7 @@ func TestLanguageScannerFindsLanguageEcosystemHints(t *testing.T) {
 	for _, vm := range report.Languages.VMs {
 		vms[vm.Name+"@"+vm.Path] = true
 	}
-	for _, want := range []string{"mise@/home/alice/.local/share/mise", ".tool-versions@/home/alice/.tool-versions", ".node-version@/home/alice/project/.node-version"} {
+	for _, want := range []string{"mise@/home/alice/.local/share/mise", ".tool-versions@/home/alice/.tool-versions", ".node-version@/home/alice/project/.node-version", ".java-version@/home/alice/project/.java-version", "rust-toolchain.toml@/home/alice/project/rust-toolchain.toml"} {
 		if !vms[want] {
 			t.Fatalf("missing version manager marker %s in %+v", want, report.Languages.VMs)
 		}
@@ -1736,11 +1845,35 @@ func TestLanguageScannerFindsLanguageEcosystemHints(t *testing.T) {
 		"/home/alice/project/Cargo.toml",
 		"/home/alice/project/go.mod",
 		"/home/alice/project/Gemfile",
+		"/home/alice/project/pom.xml",
+		"/home/alice/project/build.gradle",
+		"/home/alice/project/composer.json",
+		"/home/alice/project/app.csproj",
+		"/home/alice/project/global.json",
 		"/srv/app/Gemfile",
 		"/home/alice/.condarc",
 	} {
 		if items[path].Decision != model.DecisionCandidate {
 			t.Fatalf("missing language project item %s in %+v", path, report.Items)
+		}
+	}
+	for path, tool := range map[string]string{
+		"/usr/lib/jvm/java-21-openjdk":                                   "java",
+		"/home/alice/Android/Sdk":                                        "android-sdk",
+		"/home/alice/.rustup/toolchains/stable-x86_64-unknown-linux-gnu": "rust",
+		"/home/alice/.m2/settings.xml":                                   "maven",
+		"/home/alice/.dotnet":                                            "dotnet",
+	} {
+		item := items[path]
+		if item.Decision != model.DecisionMigrationNote || item.Details["tool"] != tool {
+			t.Fatalf("developer toolchain marker %s missing tool %s in %+v", path, tool, report.Items)
+		}
+	}
+	for _, item := range report.Items {
+		for _, value := range item.Details {
+			if strings.Contains(value, "secret") {
+				t.Fatalf("language scanner leaked secret-like toolchain content: %+v", item)
+			}
 		}
 	}
 }
