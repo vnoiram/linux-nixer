@@ -302,6 +302,63 @@ func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
 	}
 }
 
+func TestRunAddsNixDiagnosticsToFlakeCheckFailure(t *testing.T) {
+	project := writeGeneratedProject(t, "demo")
+	result := Run(context.Background(), Options{
+		Project: project,
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			return []byte("error: syntax error, unexpected ';' at /tmp/configuration.nix:10:3"), errors.New("failed")
+		},
+	})
+
+	assertCheck(t, result, "nix flake check", false)
+	check := findCheck(t, result, "nix flake check")
+	for _, want := range []string{"diagnostic: Nix syntax error", "Raw output:", "unexpected ';'"} {
+		if !strings.Contains(check.Message, want) {
+			t.Fatalf("flake diagnostic missing %q: %+v", want, check)
+		}
+	}
+}
+
+func TestRunAddsNixDiagnosticsToVMBuildFailure(t *testing.T) {
+	project := writeGeneratedProject(t, "demo")
+	result := Run(context.Background(), Options{
+		Project: project,
+		VM:      true,
+		Host:    "demo",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) > 0 && args[0] == "build" {
+				return []byte("error: The option `services.demo.enable' does not exist"), errors.New("failed")
+			}
+			return []byte("ok"), nil
+		},
+	})
+
+	assertCheck(t, result, "vm build:demo", false)
+	check := findCheck(t, result, "vm build:demo")
+	for _, want := range []string{"diagnostic: unknown NixOS option", "Raw output:", "services.demo.enable"} {
+		if !strings.Contains(check.Message, want) {
+			t.Fatalf("vm build diagnostic missing %q: %+v", want, check)
+		}
+	}
+}
+
+func TestDiagnoseNixOutputRecognizesCommonFailures(t *testing.T) {
+	cases := []struct {
+		output string
+		want   string
+	}{
+		{"error: attribute 'foo' missing", "missing Nix attribute"},
+		{"warning: Git tree is dirty\nerror: cannot fetch input", "flake input or lock issue"},
+		{"error: while evaluating the attribute 'config'", "Nix evaluation failed"},
+	}
+	for _, tc := range cases {
+		if got := diagnoseNixOutput(tc.output); !strings.Contains(got, tc.want) {
+			t.Fatalf("diagnoseNixOutput(%q)=%q, want %q", tc.output, got, tc.want)
+		}
+	}
+}
+
 func writeGeneratedProject(t *testing.T, host string) string {
 	t.Helper()
 	project := t.TempDir()

@@ -1043,3 +1043,77 @@ func TestRedactSecretLikeTextCatchesURLCredentials(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectNeverRendersProtectedFindingsIntoNix(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", Type: "file", SecretRisk: true, Decision: model.DecisionConfirmed},
+		},
+		StatefulData: []model.FileFinding{
+			{Path: "/var/lib/postgresql", Category: "stateful-data", Type: "directory", Decision: model.DecisionConfirmed},
+		},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{
+		"hosts/generated/configuration.nix",
+		"modules/filesystem-findings.nix",
+		"modules/services.nix",
+		"modules/containers.nix",
+		"users/home.nix",
+	} {
+		got := readFile(t, out, rel)
+		for _, notWant := range []string{"/home/alice/.ssh/id_ed25519", "/var/lib/postgresql"} {
+			if strings.Contains(got, notWant) {
+				t.Fatalf("%s rendered protected path %q:\n%s", rel, notWant, got)
+			}
+		}
+	}
+}
+
+func TestProjectRedactsSecretMatrixAcrossReports(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{{
+			Manager:  "npm",
+			Name:     "private-tool",
+			Decision: model.DecisionCandidate,
+			Details:  map[string]string{"registry": "https://user:raw-url-secret@example.test/pkg", "token": "NPM_TOKEN=raw-env-secret"},
+		}},
+		Services: []model.Service{{
+			Manager:   "systemd",
+			Name:      "secret.service",
+			ExecStart: "/opt/app --token=raw-service-secret",
+			Decision:  model.DecisionCandidate,
+		}},
+		Items: []model.Item{{
+			Kind:     "devops-config",
+			Path:     "/home/alice/.aws/config",
+			Reason:   "cloud config",
+			Decision: model.DecisionMigrationNote,
+			Details:  map[string]string{"endpoint": "https://user:raw-cloud-secret@example.test", "api-token": "token=raw-plugin-secret"},
+		}},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{
+		"reports/package-sources.md",
+		"reports/system-config.md",
+		"reports/devops-config.md",
+		"reports/migration-checklist.md",
+		"reports/migration-report.md",
+		"reports/migration-annotations.nix",
+	} {
+		got := readFile(t, out, rel)
+		for _, secret := range []string{"raw-url-secret", "raw-env-secret", "raw-service-secret", "raw-cloud-secret", "raw-plugin-secret"} {
+			if strings.Contains(got, secret) {
+				t.Fatalf("%s leaked %q:\n%s", rel, secret, got)
+			}
+		}
+	}
+}

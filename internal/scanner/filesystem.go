@@ -51,8 +51,12 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 			if shouldExclude(disp, opts.Excludes) || isVirtualOrNoisy(disp) {
 				return nil
 			}
-			info, err := d.Info()
-			if err != nil || !info.Mode().IsRegular() {
+			info, _, ok := safeStatResolved(opts.Root, path)
+			if !ok {
+				addUnsafePathWarning(report, "filesystem-diff", opts.Root, path)
+				return nil
+			}
+			if !info.Mode().IsRegular() {
 				return nil
 			}
 			finding := classifyFile(opts.Root, path, disp, info)

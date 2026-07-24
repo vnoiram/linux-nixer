@@ -104,8 +104,12 @@ func scanSecretContentHints(opts Options, report *model.ScanReport) {
 			if !opts.Deep && isNestedEnvFile(disp) {
 				return nil
 			}
-			info, err := d.Info()
-			if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
+			info, _, ok := safeStatResolved(opts.Root, path)
+			if !ok {
+				addUnsafePathWarning(report, "secrets", opts.Root, path)
+				return nil
+			}
+			if !info.Mode().IsRegular() || info.Size() > 1024*1024 {
 				return nil
 			}
 			if looksSecret(disp, safeReadHead(opts.Root, path, 4096)) {
@@ -155,6 +159,9 @@ func addSecretFinding(opts Options, report *model.ScanReport, path, reason strin
 	}
 	info, resolved, ok := safeStatResolved(opts.Root, path)
 	if !ok || !info.Mode().IsRegular() {
+		if !ok {
+			addUnsafePathWarning(report, "secrets", opts.Root, path)
+		}
 		return
 	}
 	finding := model.FileFinding{

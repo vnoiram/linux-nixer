@@ -622,6 +622,34 @@ func TestRunValidateFailsInvalidScanAndStrictUnknownField(t *testing.T) {
 	if !strings.Contains(stdout.String(), "unknown field") {
 		t.Fatalf("strict validate output missing unknown field:\n%s", stdout.String())
 	}
+
+	nestedStrictPath := filepath.Join(dir, "strict-nested.json")
+	if err := os.WriteFile(nestedStrictPath, []byte(`{"schemaVersion":"linux-nixer.scan.v1","packages":[{"manager":"apt","name":"curl","decision":"confirmed","unexpected":true}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	err = run(context.Background(), []string{"validate", "--scan", nestedStrictPath, "--strict", "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected strict nested unknown field to fail")
+	}
+	if !strings.Contains(stdout.String(), "unknown field") || !strings.Contains(stdout.String(), "unexpected") {
+		t.Fatalf("strict nested validate output missing unknown field:\n%s", stdout.String())
+	}
+
+	malformedPath := filepath.Join(dir, "malformed.json")
+	if err := os.WriteFile(malformedPath, []byte(`{"schemaVersion":"linux-nixer.scan.v1","packages":[{"decision":"maybe"}],"items":[{"kind":"custom-finding"}],"filesystemDiff":[{"path":"/home/alice/.ssh/id_ed25519","secretRisk":true,"decision":"confirmed"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	err = run(context.Background(), []string{"validate", "--scan", malformedPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected malformed fixture to fail")
+	}
+	for _, want := range []string{"package manager is required", "package name is required", "unknown decision", "item path or name is required", "secret-risk finding cannot be confirmed"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("malformed validate output missing %q:\n%s", want, stdout.String())
+		}
+	}
 }
 
 func TestRunValidateChecksDecisionsAgainstPolicy(t *testing.T) {

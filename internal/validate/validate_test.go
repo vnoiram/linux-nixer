@@ -56,3 +56,59 @@ func TestScanReportRejectsInvalidSchemaDecisionAndProtectedConfirmation(t *testi
 		}
 	}
 }
+
+func TestScanReportRejectsMalformedFixtureCorpus(t *testing.T) {
+	cases := []struct {
+		name   string
+		report model.ScanReport
+		wants  []string
+	}{
+		{
+			name: "missing package ids",
+			report: model.ScanReport{
+				SchemaVersion: model.SchemaVersion,
+				Packages:      []model.Package{{Decision: model.DecisionCandidate}},
+			},
+			wants: []string{"package manager is required", "package name is required"},
+		},
+		{
+			name: "missing service ids",
+			report: model.ScanReport{
+				SchemaVersion: model.SchemaVersion,
+				Services:      []model.Service{{Decision: model.DecisionCandidate}},
+			},
+			wants: []string{"service manager is required", "service name is required"},
+		},
+		{
+			name: "missing item identity",
+			report: model.ScanReport{
+				SchemaVersion: model.SchemaVersion,
+				Items:         []model.Item{{Kind: "custom-finding", Decision: model.DecisionCandidate}},
+			},
+			wants: []string{"item path or name is required"},
+		},
+		{
+			name: "protected confirmed",
+			report: model.ScanReport{
+				SchemaVersion:  model.SchemaVersion,
+				FilesystemDiff: []model.FileFinding{{Path: "/home/alice/.ssh/id_ed25519", SecretRisk: true, Decision: model.DecisionConfirmed}},
+				StatefulData:   []model.FileFinding{{Path: "/var/lib/postgresql", Decision: model.DecisionConfirmed}},
+			},
+			wants: []string{"secret-risk finding cannot be confirmed", "stateful data cannot be confirmed"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := ScanReport(tc.report)
+			if result.OK {
+				t.Fatalf("malformed fixture passed: %+v", result)
+			}
+			text := FormatText(result)
+			for _, want := range tc.wants {
+				if !strings.Contains(text, want) {
+					t.Fatalf("validation output missing %q:\n%s", want, text)
+				}
+			}
+		})
+	}
+}

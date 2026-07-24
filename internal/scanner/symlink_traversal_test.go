@@ -21,6 +21,16 @@ func writeOutsideSecret(t *testing.T) string {
 	return path
 }
 
+func countWarnings(warnings []model.Warning, source, text string) int {
+	count := 0
+	for _, warning := range warnings {
+		if warning.Source == source && strings.Contains(warning.Message, text) {
+			count++
+		}
+	}
+	return count
+}
+
 func TestDevOpsConfigScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := writeOutsideSecret(t)
@@ -58,6 +68,38 @@ func TestSecretScannerDoesNotFollowEscapingSymlink(t *testing.T) {
 	for _, finding := range report.FilesystemDiff {
 		if finding.Path == "/home/alice/.ssh/id_ed25519" {
 			t.Fatalf("secret scanner followed a symlink outside root: %+v", finding)
+		}
+	}
+	if countWarnings(report.Warnings, "secrets", "skipped unsafe path outside scan root: /home/alice/.ssh/id_ed25519") != 1 {
+		t.Fatalf("expected unsafe path warning, got: %+v", report.Warnings)
+	}
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning.Message, outside) || strings.Contains(warning.Message, "OUTSIDE-ROOT-SECRET-VALUE") {
+			t.Fatalf("unsafe path warning leaked outside target or content: %+v", warning)
+		}
+	}
+}
+
+func TestFilesystemDiffScannerWarnsForEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := writeOutsideSecret(t)
+	writeSymlink(t, root, "/usr/local/bin/escape-tool", outside)
+
+	report := &model.ScanReport{}
+	if err := (FilesystemDiffScanner{}).Scan(context.Background(), Options{Root: root}, report); err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range report.FilesystemDiff {
+		if finding.Path == "/usr/local/bin/escape-tool" {
+			t.Fatalf("filesystem scanner followed a symlink outside root: %+v", finding)
+		}
+	}
+	if countWarnings(report.Warnings, "filesystem-diff", "skipped unsafe path outside scan root: /usr/local/bin/escape-tool") != 1 {
+		t.Fatalf("expected unsafe path warning, got: %+v", report.Warnings)
+	}
+	for _, warning := range report.Warnings {
+		if strings.Contains(warning.Message, outside) || strings.Contains(warning.Message, "OUTSIDE-ROOT-SECRET-VALUE") {
+			t.Fatalf("unsafe path warning leaked outside target or content: %+v", warning)
 		}
 	}
 }

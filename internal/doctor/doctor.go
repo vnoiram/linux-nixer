@@ -200,7 +200,7 @@ func Run(ctx context.Context, opts Options) Result {
 		}
 	}
 	if out, err := runner(ctx, "nix", "flake", "check", opts.Project); err != nil {
-		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: string(out)})
+		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: diagnosticMessage(string(out))})
 		result.OK = false
 	} else {
 		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: true})
@@ -231,7 +231,7 @@ func Run(ctx context.Context, opts Options) Result {
 		} else {
 			attr := opts.Project + "#nixosConfigurations." + host + ".config.system.build.vm"
 			if out, err := runner(ctx, "nix", "build", attr); err != nil {
-				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: false, Message: string(out)})
+				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: false, Message: diagnosticMessage(string(out))})
 				result.OK = false
 			} else {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: true})
@@ -266,6 +266,31 @@ func Run(ctx context.Context, opts Options) Result {
 		}
 	}
 	return result
+}
+
+func diagnosticMessage(output string) string {
+	if hint := diagnoseNixOutput(output); hint != "" {
+		return hint + "\n\nRaw output:\n" + output
+	}
+	return output
+}
+
+func diagnoseNixOutput(output string) string {
+	lower := strings.ToLower(output)
+	switch {
+	case strings.Contains(lower, "syntax error"):
+		return "diagnostic: Nix syntax error; inspect the generated .nix file and the line/column in the raw output."
+	case strings.Contains(lower, "attribute") && strings.Contains(lower, "missing"):
+		return "diagnostic: missing Nix attribute; check package names, host attribute names, or referenced flake outputs."
+	case strings.Contains(lower, "unknown option") || strings.Contains(lower, "the option") && strings.Contains(lower, "does not exist"):
+		return "diagnostic: unknown NixOS option; check whether the generated option exists for the selected nixpkgs release."
+	case strings.Contains(lower, "dirty") || strings.Contains(lower, "flake.lock") || strings.Contains(lower, "cannot fetch"):
+		return "diagnostic: flake input or lock issue; check flake.lock, network access, and dirty working tree warnings."
+	case strings.Contains(lower, "while evaluating") || strings.Contains(lower, "evaluation error"):
+		return "diagnostic: Nix evaluation failed; use the raw output to find the option or expression that triggered evaluation."
+	default:
+		return ""
+	}
 }
 
 func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {

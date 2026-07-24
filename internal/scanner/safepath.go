@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/vnoiram/linux-nixer/internal/model"
 )
 
 // safeRealPath resolves path through any symlinks and confirms the fully
@@ -49,6 +51,22 @@ func safeRealPath(root, path string) (string, bool) {
 		return "", false
 	}
 	return resolved, true
+}
+
+func addUnsafePathWarning(report *model.ScanReport, source, root, path string) {
+	if report == nil {
+		return
+	}
+	display := displayPath(root, path)
+	for _, warning := range report.Warnings {
+		if warning.Source == source && warning.Message == "skipped unsafe path outside scan root: "+display {
+			return
+		}
+	}
+	report.Warnings = append(report.Warnings, model.Warning{
+		Source:  source,
+		Message: "skipped unsafe path outside scan root: " + display,
+	})
 }
 
 // safeStat is a symlink-bounded replacement for os.Stat on a path derived
