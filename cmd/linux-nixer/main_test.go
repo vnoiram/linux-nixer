@@ -1410,7 +1410,8 @@ func TestRunSummaryComparesDecisionsAcrossScans(t *testing.T) {
 	}
 
 	stdout.Reset()
-	err := run(context.Background(), []string{"summary", "--scan", reviewedBPath, "--compare-decisions", decisionsPath}, strings.NewReader(""), &stdout, &stdout)
+	timelinePath := filepath.Join(dir, "progress-timeline.md")
+	err := run(context.Background(), []string{"summary", "--scan", reviewedBPath, "--compare-decisions", decisionsPath, "--timeline-out", timelinePath}, strings.NewReader(""), &stdout, &stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1426,6 +1427,15 @@ func TestRunSummaryComparesDecisionsAcrossScans(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("summary output missing %q:\n%s", want, out)
+		}
+	}
+	timeline, err := os.ReadFile(timelinePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Progress timeline", "git-source `/home/alice/app` became confirmed", "service `systemd:app.service` changed from confirmed to excluded"} {
+		if !strings.Contains(string(timeline), want) {
+			t.Fatalf("timeline output missing %q:\n%s", want, timeline)
 		}
 	}
 
@@ -1470,7 +1480,7 @@ Version: 1.0
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{"scan.json", "reviewed.json", "summary.md"} {
+	for _, rel := range []string{"scan.json", "reviewed.json", "summary.md", "progress-timeline.md"} {
 		if _, err := os.Stat(filepath.Join(outDir, rel)); err != nil {
 			t.Fatalf("rescan did not write %s: %v\nstdout:\n%s", rel, err, stdout.String())
 		}
@@ -1486,6 +1496,13 @@ Version: 1.0
 	}
 	if !strings.Contains(string(summary), "## Migration progress since last snapshot") || !strings.Contains(string(summary), "previously decided: 1") {
 		t.Fatalf("rescan summary missing progress:\n%s", summary)
+	}
+	timeline, err := os.ReadFile(filepath.Join(outDir, "progress-timeline.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(timeline), "# Progress timeline") || !strings.Contains(stdout.String(), "wrote progress timeline") {
+		t.Fatalf("rescan timeline missing:\nstdout=%s\ntimeline=%s", stdout.String(), timeline)
 	}
 }
 

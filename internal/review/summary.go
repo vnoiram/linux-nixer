@@ -180,6 +180,30 @@ func FormatProgressMarkdown(p Progress) string {
 	return b.String()
 }
 
+func FormatProgressTimelineMarkdown(p Progress) string {
+	var b strings.Builder
+	b.WriteString("# Progress timeline\n\n")
+	fmt.Fprintf(&b, "- previously decided: %d\n", p.PreviousDecided)
+	fmt.Fprintf(&b, "- currently decided: %d\n", p.CurrentDecided)
+	fmt.Fprintf(&b, "- still pending: %d\n\n", p.StillPending)
+	writeProgressSection(&b, "1. Newly decided", p.NewlyDecided, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` became %s\n", e.Domain, e.Key, e.CurrentDecision)
+	})
+	writeProgressSection(&b, "2. Changed decisions", p.Changed, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` changed from %s to %s\n", e.Domain, e.Key, e.PreviousDecision, e.CurrentDecision)
+	})
+	writeProgressSection(&b, "3. Regressed to pending", p.Regressed, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` was %s and is pending again\n", e.Domain, e.Key, e.PreviousDecision)
+	})
+	writeProgressSection(&b, "4. No longer present", p.Removed, func(e ProgressEntry) string {
+		return fmt.Sprintf("- %s `%s` was %s and disappeared from the current scan\n", e.Domain, e.Key, e.PreviousDecision)
+	})
+	if len(p.NewlyDecided)+len(p.Changed)+len(p.Regressed)+len(p.Removed) == 0 {
+		b.WriteString("No decision changes were detected.\n")
+	}
+	return b.String()
+}
+
 func writeProgressSection(b *strings.Builder, title string, entries []ProgressEntry, line func(ProgressEntry) string) {
 	if len(entries) == 0 {
 		return

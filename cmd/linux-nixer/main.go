@@ -403,7 +403,7 @@ const summaryHelp = `linux-nixer summary
 Summarize reviewed scan decisions, review focus, and next actions for humans or automation.
 
 Usage:
-  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending] [--compare-decisions PATH]
+  linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending] [--compare-decisions PATH] [--timeline-out PATH]
 
 Examples:
   linux-nixer summary --scan reviewed.json
@@ -411,12 +411,14 @@ Examples:
   linux-nixer summary --scan reviewed.json --fail-on-pending
   linux-nixer review --scan scan-a.json --out reviewed-a.json --export-decisions decisions-a.json
   linux-nixer summary --scan reviewed-b.json --compare-decisions decisions-a.json
+  linux-nixer summary --scan reviewed-b.json --compare-decisions decisions-a.json --timeline-out progress-timeline.md
 
 Flags:
   --scan PATH                 Read reviewed scan JSON.
   --json                      Write machine-readable JSON summary.
   --fail-on-pending           Return an error if candidate or todo findings remain.
   --compare-decisions PATH    Compare against a previously exported decisions JSON (see review --export-decisions) and report what's newly decided, changed, regressed to pending, or no longer present — migration progress across repeated scans of the same host.
+  --timeline-out PATH         Write compare-decisions progress as a standalone markdown timeline.
 `
 
 const validateHelp = `linux-nixer validate
@@ -915,6 +917,7 @@ func runRescan(ctx context.Context, args []string, stdout io.Writer) error {
 	scanPath := filepath.Join(*out, "scan.json")
 	reviewedPath := filepath.Join(*out, "reviewed.json")
 	summaryPath := filepath.Join(*out, "summary.md")
+	timelinePath := filepath.Join(*out, "progress-timeline.md")
 	if err := writeJSON(scanPath, report); err != nil {
 		return err
 	}
@@ -945,6 +948,10 @@ func runRescan(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote summary: %s\n", summaryPath)
+	if err := writeText(timelinePath, review.FormatProgressTimelineMarkdown(progress)); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote progress timeline: %s\n", timelinePath)
 	return nil
 }
 
@@ -1058,11 +1065,15 @@ func runSummary(args []string, stdout io.Writer) error {
 	jsonOutput := fs.Bool("json", false, "write machine-readable JSON summary")
 	failOnPending := fs.Bool("fail-on-pending", false, "fail if candidate or todo findings remain")
 	compareDecisions := fs.String("compare-decisions", "", "compare against a previously exported decisions JSON to report migration progress")
+	timelineOut := fs.String("timeline-out", "", "write compare-decisions progress as a standalone markdown timeline")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *scanPath == "" {
 		return errors.New("summary requires --scan; try `linux-nixer summary --scan reviewed.json`")
+	}
+	if *timelineOut != "" && *compareDecisions == "" {
+		return errors.New("summary --timeline-out requires --compare-decisions")
 	}
 	var report model.ScanReport
 	if err := readJSON(*scanPath, &report); err != nil {
@@ -1077,6 +1088,11 @@ func runSummary(args []string, stdout io.Writer) error {
 		}
 		p := review.ComputeProgress(report, previous)
 		progress = &p
+		if *timelineOut != "" {
+			if err := writeText(*timelineOut, review.FormatProgressTimelineMarkdown(p)); err != nil {
+				return err
+			}
+		}
 	}
 	if *jsonOutput {
 		enc := json.NewEncoder(stdout)

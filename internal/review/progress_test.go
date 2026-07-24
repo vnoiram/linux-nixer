@@ -1,6 +1,7 @@
 package review
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/vnoiram/linux-nixer/internal/model"
@@ -106,5 +107,35 @@ func TestComputeProgressDetectsRegression(t *testing.T) {
 	}
 	if len(got.Removed) != 0 {
 		t.Fatalf("removed=%+v, want none (finding is still present, just regressed)", got.Removed)
+	}
+}
+
+func TestFormatProgressTimelineMarkdown(t *testing.T) {
+	got := FormatProgressTimelineMarkdown(Progress{
+		PreviousDecided: 1,
+		CurrentDecided:  2,
+		StillPending:    3,
+		NewlyDecided: []ProgressEntry{{
+			Domain:          "package",
+			Key:             "apt:curl",
+			CurrentDecision: model.DecisionConfirmed,
+		}},
+		Changed: []ProgressEntry{{
+			Domain:           "service",
+			Key:              "systemd:app.service",
+			PreviousDecision: model.DecisionConfirmed,
+			CurrentDecision:  model.DecisionExcluded,
+		}},
+	})
+	for _, want := range []string{
+		"# Progress timeline",
+		"## 1. Newly decided",
+		"package `apt:curl` became confirmed",
+		"## 2. Changed decisions",
+		"service `systemd:app.service` changed from confirmed to excluded",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("timeline missing %q:\n%s", want, got)
+		}
 	}
 }
