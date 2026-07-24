@@ -2752,6 +2752,11 @@ func fileFindingLine(finding model.FileFinding) string {
 	if finding.SecretRisk {
 		b.WriteString(" secret-risk")
 	}
+	if len(finding.BaselineChanges) > 0 {
+		b.WriteString(" baseline `")
+		b.WriteString(strings.Join(finding.BaselineChanges, ","))
+		b.WriteString("`")
+	}
 	if finding.Reason != "" {
 		b.WriteString(": ")
 		b.WriteString(finding.Reason)

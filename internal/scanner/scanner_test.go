@@ -427,8 +427,10 @@ func TestFilesystemDiffDetectsArbitraryBaselineChanges(t *testing.T) {
 	}
 
 	reported := map[string]bool{}
+	changes := map[string][]string{}
 	for _, finding := range report.FilesystemDiff {
 		reported[finding.Path] = true
+		changes[finding.Path] = finding.BaselineChanges
 	}
 
 	if reported["/usr/local/bin/unchanged"] {
@@ -438,6 +440,15 @@ func TestFilesystemDiffDetectsArbitraryBaselineChanges(t *testing.T) {
 		if !reported[path] {
 			t.Fatalf("%s should be reported as changed: %+v", path, report.FilesystemDiff)
 		}
+	}
+	if !slicesContain(changes["/usr/local/bin/new"], "new-file") {
+		t.Fatalf("new file missing baseline change reason: %+v", changes)
+	}
+	if !slicesContain(changes["/usr/local/bin/content-changed"], "hash-changed") {
+		t.Fatalf("content change missing hash reason: %+v", changes)
+	}
+	if !slicesContain(changes["/usr/local/bin/perm-changed"], "mode-changed") {
+		t.Fatalf("permission change missing mode reason: %+v", changes)
 	}
 }
 
@@ -1844,4 +1855,13 @@ func TestRecursiveGlobWalksSharedPrefixOnce(t *testing.T) {
 	if len(visited) != 2 {
 		t.Fatalf("recursiveGlob walked %d times, want 2 (one per unique prefix's base dir), visited: %v", len(visited), visited)
 	}
+}
+
+func slicesContain(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

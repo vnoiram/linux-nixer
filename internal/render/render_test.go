@@ -136,6 +136,30 @@ func TestProjectRendersBaselineProvenanceReport(t *testing.T) {
 	}
 }
 
+func TestProjectRendersFilesystemBaselineChanges(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		FilesystemDiff: []model.FileFinding{{
+			Path:            "/usr/local/bin/tool",
+			Category:        "script",
+			Type:            "script",
+			Decision:        model.DecisionTODO,
+			BaselineChanges: []string{"hash-changed", "mode-changed"},
+		}},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(out, "reports/filesystem.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "baseline `hash-changed,mode-changed`") {
+		t.Fatalf("filesystem report missing baseline changes:\n%s", got)
+	}
+}
+
 func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{

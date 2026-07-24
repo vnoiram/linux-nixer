@@ -59,8 +59,12 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 				return nil
 			}
 			finding := classifyFile(path, disp, info)
-			if baselineLoaded && !changedFromBaseline(finding, baselineEntries[disp]) {
-				return nil
+			if baselineLoaded {
+				changes := baselineChanges(finding, baselineEntries[disp])
+				if len(changes) == 0 {
+					return nil
+				}
+				finding.BaselineChanges = changes
 			}
 			if finding.Category == "stateful-data" {
 				appendStatefulFindingUnique(report, finding)
@@ -128,13 +132,27 @@ func loadBaselineEntries(id string, report *model.ScanReport) (map[string]baseli
 }
 
 func changedFromBaseline(finding model.FileFinding, base baselineFile) bool {
+	return len(baselineChanges(finding, base)) > 0
+}
+
+func baselineChanges(finding model.FileFinding, base baselineFile) []string {
 	if base.Path == "" {
-		return true
+		return []string{"new-file"}
 	}
-	if base.SHA256 != "" && finding.SHA256 != "" {
-		return base.SHA256 != finding.SHA256 || base.Mode != finding.Mode
+	var changes []string
+	if base.Type != "" && finding.Type != "" && base.Type != finding.Type {
+		changes = append(changes, "type-changed")
 	}
-	return base.Size != finding.Size || base.Mode != finding.Mode || base.Type != finding.Type
+	if base.Mode != "" && finding.Mode != "" && base.Mode != finding.Mode {
+		changes = append(changes, "mode-changed")
+	}
+	if base.Size != finding.Size {
+		changes = append(changes, "size-changed")
+	}
+	if base.SHA256 != "" && finding.SHA256 != "" && base.SHA256 != finding.SHA256 {
+		changes = append(changes, "hash-changed")
+	}
+	return changes
 }
 
 func classifyFile(abs, disp string, info os.FileInfo) model.FileFinding {

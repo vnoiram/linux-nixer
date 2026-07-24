@@ -127,16 +127,17 @@ type Service struct {
 }
 
 type FileFinding struct {
-	Path       string   `json:"path"`
-	Type       string   `json:"type"`
-	Mode       string   `json:"mode,omitempty"`
-	Owner      string   `json:"owner,omitempty"`
-	Size       int64    `json:"size,omitempty"`
-	SHA256     string   `json:"sha256,omitempty"`
-	Category   string   `json:"category,omitempty"`
-	Reason     string   `json:"reason,omitempty"`
-	Decision   Decision `json:"decision,omitempty"`
-	SecretRisk bool     `json:"secretRisk,omitempty"`
+	Path            string   `json:"path"`
+	Type            string   `json:"type"`
+	Mode            string   `json:"mode,omitempty"`
+	Owner           string   `json:"owner,omitempty"`
+	Size            int64    `json:"size,omitempty"`
+	SHA256          string   `json:"sha256,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	Reason          string   `json:"reason,omitempty"`
+	Decision        Decision `json:"decision,omitempty"`
+	SecretRisk      bool     `json:"secretRisk,omitempty"`
+	BaselineChanges []string `json:"baselineChanges,omitempty"`
 }
 
 type Item struct {
