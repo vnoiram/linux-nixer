@@ -762,6 +762,16 @@ func serviceRenderEligibility(service model.Service) (string, string) {
 			return "", strings.Join(notes, "; ")
 		}
 		if renderSystemdServiceOption(service) != "" {
+			if isUserSystemdUnit(service) {
+				if renderableHomeSystemdUserService(service) {
+					return "systemd.user.services." + serviceNameAttr(service.Name), "user service has safe ExecStart and no environment files"
+				}
+				notes := serviceGenerationNotes(service)
+				if len(notes) == 0 {
+					notes = append(notes, "user service did not satisfy render gate")
+				}
+				return "", strings.Join(notes, "; ")
+			}
 			return "systemd.services." + serviceNameAttr(service.Name), "service has safe ExecStart and no environment files"
 		}
 		notes := serviceGenerationNotes(service)

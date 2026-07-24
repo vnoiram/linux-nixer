@@ -167,6 +167,20 @@ func TestFormatDecisionsMarkdownGroupsExportedDecisions(t *testing.T) {
 	}
 }
 
+func TestFormatDecisionsMarkdownHandlesEmptyExport(t *testing.T) {
+	got := FormatDecisionsMarkdown(DecisionSet{SchemaVersion: DecisionsSchemaVersion})
+
+	for _, want := range []string{
+		"# Review decisions",
+		"- Exported decisions: 0",
+		"No non-default decisions were exported.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("empty decisions report missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestInteractiveAppliesChoices(t *testing.T) {
 	report := model.ScanReport{
 		Packages: []model.Package{

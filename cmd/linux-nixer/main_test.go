@@ -128,11 +128,14 @@ func TestRunReviewWritesDecisionsReport(t *testing.T) {
 		Packages: []model.Package{
 			{Manager: "apt", Name: "curl", NixNames: []string{"curl"}},
 		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "sshd.service", Path: "/etc/systemd/system/sshd.service"},
+		},
 	}
 	writeScan(t, scanPath, report)
 
 	var stdout bytes.Buffer
-	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--auto-safe", "--export-decisions-report", reportPath}, strings.NewReader(""), &stdout, &stdout)
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--auto-safe", "--confirm-kind", "service", "--export-decisions-report", reportPath}, strings.NewReader(""), &stdout, &stdout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +143,10 @@ func TestRunReviewWritesDecisionsReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "`package:apt:curl`") || !strings.Contains(string(got), "## confirmed (1)") {
-		t.Fatalf("unexpected decisions report:\n%s", got)
+	for _, want := range []string{"- Exported decisions: 2", "## confirmed (2)", "`package:apt:curl`", "`service:systemd:sshd.service`"} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("decisions report missing %q:\n%s", want, got)
+		}
 	}
 	if !strings.Contains(stdout.String(), "wrote decisions report") {
 		t.Fatalf("stdout missing report path: %s", stdout.String())
@@ -668,6 +673,43 @@ func TestRunGenerateFormatNixWarnsWhenFormatterMissing(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "warning: --format-nix requested") {
 		t.Fatalf("stdout missing formatter warning: %s", stdout.String())
+	}
+}
+
+func TestRunGenerateFormatNixUsesAvailableFormatter(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "formatted-files.txt")
+	formatter := filepath.Join(bin, "nixfmt")
+	if err := os.WriteFile(formatter, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$FORMAT_LOG\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("FORMAT_LOG", logPath)
+
+	scanPath := filepath.Join(dir, "reviewed.json")
+	out := filepath.Join(dir, "nix-config")
+	writeScan(t, scanPath, model.ScanReport{SchemaVersion: model.SchemaVersion})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"generate", "--scan", scanPath, "--out", out, "--format-nix"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "formatted generated Nix with nixfmt") {
+		t.Fatalf("stdout missing formatter success:\n%s", stdout.String())
+	}
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"flake.nix", "configuration.nix", "home.nix"} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("formatter did not receive %s:\n%s", want, got)
+		}
 	}
 }
 
@@ -1288,6 +1330,24 @@ func TestRunPolicyExamplesWritesLoadableProfiles(t *testing.T) {
 		}
 		if p.SchemaVersion != policypkg.SchemaVersion {
 			t.Fatalf("example %s schemaVersion=%q", file, p.SchemaVersion)
+		}
+		switch file {
+		case "home-workstation.json":
+			if !containsString(p.ConfirmKinds, "desktop-config") || !containsString(p.ConfirmKinds, "shell-config") {
+				t.Fatalf("workstation example missing expected confirmKinds: %+v", p)
+			}
+		case "server.json":
+			if !containsString(p.ConfirmKinds, "service") || !containsString(p.ExcludeKinds, "desktop-config") {
+				t.Fatalf("server example missing expected review defaults: %+v", p)
+			}
+		case "dev-laptop.json":
+			if !containsString(p.ConfirmKinds, "dev-project") || !containsString(p.ConfirmKinds, "git-source") {
+				t.Fatalf("developer example missing expected confirmKinds: %+v", p)
+			}
+		case "audit-only.json":
+			if p.AutoSafe == nil || *p.AutoSafe {
+				t.Fatalf("audit example should disable autoSafe: %+v", p)
+			}
 		}
 	}
 }

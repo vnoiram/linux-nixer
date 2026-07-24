@@ -746,6 +746,11 @@ func TestProjectRendersServiceRenderEligibilityReport(t *testing.T) {
 			{Manager: "systemd", Name: "secret.service", ExecStart: "/usr/bin/app --token=secret", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "env.service", ExecStart: "/usr/bin/app", EnvironmentFiles: []string{"/etc/default/app"}, Decision: model.DecisionConfirmed},
 			{Manager: "cron", Name: "job", User: "root", ExecStart: "/usr/bin/job", Decision: model.DecisionConfirmed},
+			{Manager: "cron", Name: "scheduled-job", User: "root", ExecStart: "/usr/bin/job", Schedule: "15 2 * * *", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "backup.timer", Schedule: "OnCalendar=daily", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "user-app.service", Path: "/home/alice/.config/systemd/user/user-app.service", ExecStart: "/home/alice/bin/app", Decision: model.DecisionConfirmed},
+			{Manager: "systemd", Name: "user-relative.service", Path: "/home/alice/.config/systemd/user/user-relative.service", ExecStart: "app", Decision: model.DecisionConfirmed},
+			{Manager: "launchd", Name: "mac-job", ExecStart: "/usr/bin/job", Decision: model.DecisionConfirmed},
 			{Manager: "systemd", Name: "candidate.service", ExecStart: "/usr/bin/app", Decision: model.DecisionCandidate},
 		},
 	}
@@ -760,6 +765,11 @@ func TestProjectRendersServiceRenderEligibilityReport(t *testing.T) {
 		"`systemd:secret.service` [confirmed] not rendered: secret.service ExecStart contains secret-like text and was not generated",
 		"`systemd:env.service` [confirmed] not rendered: env.service environment files require manual migration: /etc/default/app",
 		"`cron:job` [confirmed] not rendered: job missing schedule and was not generated",
+		"`cron:scheduled-job` [confirmed] rendered as `services.cron.systemCronJobs`",
+		"`systemd:backup.timer` [confirmed] rendered as `systemd.timers.backup`",
+		"`systemd:user-app.service` [confirmed] rendered as `systemd.user.services.user-app`",
+		"`systemd:user-relative.service` [confirmed] not rendered: user-relative.service ExecStart is not an absolute path and was not generated",
+		"`launchd:mac-job` [confirmed] not rendered: unsupported service manager for rendering",
 		"`systemd:candidate.service` [candidate] not rendered: still a candidate finding; pending review",
 	} {
 		if !strings.Contains(text, want) {
