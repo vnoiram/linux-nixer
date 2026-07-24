@@ -27,4 +27,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file CHANGELOG.md \
-            dist/*.tar.gz dist/checksums.txt
+            dist/*.tar.gz dist/checksums.txt dist/provenance.json
