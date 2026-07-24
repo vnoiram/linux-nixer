@@ -776,17 +776,17 @@ func renderMigrationChecklist(report model.ScanReport) string {
 		"Run `linux-nixer summary --scan reviewed.json --fail-on-pending` when you want to enforce that all candidates and TODOs are reviewed.",
 		"Review generated Nix files and reports before switching the target host.",
 	})
-	writePackageChecklist(&b, report)
-	writeAptSourceChecklist(&b, report)
-	writeLanguageChecklist(&b, report)
-	writeServiceChecklist(&b, report)
-	writeContainerChecklist(&b, report)
-	writeDevOpsChecklist(&b, report)
-	writeGitChecklist(&b, report)
-	writeFilesystemChecklist(&b, report)
 	writeSecretChecklist(&b, report)
 	writeStatefulChecklist(&b, report)
 	writeBackupSyncChecklist(&b, report)
+	writeServiceChecklist(&b, report)
+	writeContainerChecklist(&b, report)
+	writeDevOpsChecklist(&b, report)
+	writeFilesystemChecklist(&b, report)
+	writePackageChecklist(&b, report)
+	writeAptSourceChecklist(&b, report)
+	writeLanguageChecklist(&b, report)
+	writeGitChecklist(&b, report)
 	writeUserDesktopChecklist(&b, report)
 	writeHardwareChecklist(&b, report)
 	return b.String()
@@ -796,15 +796,30 @@ func writeChecklistSection(b *strings.Builder, title string, items []string) {
 	if len(items) == 0 {
 		return
 	}
+	sort.Strings(items)
+	priority := checklistPriority(title)
 	b.WriteString("## ")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 	for _, item := range items {
 		b.WriteString("- [ ] ")
+		b.WriteString(priority)
+		b.WriteString(" ")
 		b.WriteString(item)
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
+}
+
+func checklistPriority(title string) string {
+	switch title {
+	case "Secrets and credentials", "Stateful data", "Backup and sync":
+		return "[P0]"
+	case "Services", "Containers", "DevOps and CI/CD", "Filesystem":
+		return "[P1]"
+	default:
+		return "[P2]"
+	}
 }
 
 func writePackageChecklist(b *strings.Builder, report model.ScanReport) {

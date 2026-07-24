@@ -160,6 +160,44 @@ func TestProjectRendersFilesystemBaselineChanges(t *testing.T) {
 	}
 }
 
+func TestProjectPrioritizesManualChecklistItems(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Services: []model.Service{{
+			Manager:  "systemd",
+			Name:     "app.service",
+			Decision: model.DecisionTODO,
+		}},
+		FilesystemDiff: []model.FileFinding{{
+			Path:       "/home/alice/.ssh/id_ed25519",
+			Category:   "secret",
+			Type:       "file",
+			SecretRisk: true,
+			Decision:   model.DecisionMigrationNote,
+		}},
+		GitSources: []model.GitSource{{
+			Path:     "/home/alice/app",
+			Decision: model.DecisionTODO,
+		}},
+	}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, out, "reports/migration-checklist.md")
+	for _, want := range []string{"- [ ] [P0] Back up and restore secret-risk file", "- [ ] [P1] Translate systemd service", "- [ ] [P2] Decide clone/build strategy"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("checklist missing priority %q:\n%s", want, got)
+		}
+	}
+	p0 := strings.Index(got, "[P0] Back up")
+	p1 := strings.Index(got, "[P1] Translate")
+	p2 := strings.Index(got, "[P2] Decide")
+	if p0 < 0 || p1 < 0 || p2 < 0 || !(p0 < p1 && p1 < p2) {
+		t.Fatalf("checklist priority order unexpected:\n%s", got)
+	}
+}
+
 func TestProjectRendersRicherModulesAndReports(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{
