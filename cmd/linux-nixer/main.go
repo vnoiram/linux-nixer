@@ -26,6 +26,38 @@ var version = "0.1.0-dev"
 var commit = "unknown"
 var date = "unknown"
 
+type captureSessionMetadata struct {
+	SchemaVersion string              `json:"schemaVersion"`
+	Version       string              `json:"version"`
+	Commit        string              `json:"commit"`
+	Built         string              `json:"built"`
+	StartedAt     string              `json:"startedAt"`
+	FinishedAt    string              `json:"finishedAt"`
+	Scan          captureScanMetadata `json:"scan"`
+	Review        captureReviewMeta   `json:"review"`
+	Artifacts     []string            `json:"artifacts"`
+}
+
+type captureScanMetadata struct {
+	Root          string   `json:"root"`
+	Sudo          bool     `json:"sudo"`
+	Deep          bool     `json:"deep"`
+	Baseline      string   `json:"baseline,omitempty"`
+	PolicyPath    string   `json:"policyPath,omitempty"`
+	Preset        string   `json:"preset,omitempty"`
+	IncludePaths  []string `json:"includePaths,omitempty"`
+	ExcludePaths  []string `json:"excludePaths,omitempty"`
+	Plugins       []string `json:"plugins,omitempty"`
+	PluginTimeout string   `json:"pluginTimeout"`
+}
+
+type captureReviewMeta struct {
+	AutoSafe        bool   `json:"autoSafe"`
+	FailOnPending   bool   `json:"failOnPending"`
+	ImportDecisions string `json:"importDecisions,omitempty"`
+	ExportDecisions string `json:"exportDecisions,omitempty"`
+}
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -609,6 +641,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		fmt.Fprint(stdout, captureHelp)
 		return nil
 	}
+	startedAt := time.Now().UTC()
 	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	out := fs.String("out", "", "output directory")
@@ -643,8 +676,9 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	pluginPaths := policy.Merge(plugins, p.Plugins)
 
-	reg := scanner.DefaultRegistry(pluginScanners(policy.Merge(plugins, p.Plugins), *pluginTimeout)...)
+	reg := scanner.DefaultRegistry(pluginScanners(pluginPaths, *pluginTimeout)...)
 	report, err := reg.Scan(ctx, scanOpts)
 	if err != nil {
 		return err
@@ -653,6 +687,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	scanPath := filepath.Join(*out, "scan.json")
 	reviewedPath := filepath.Join(*out, "reviewed.json")
 	summaryPath := filepath.Join(*out, "summary.md")
+	sessionPath := filepath.Join(*out, "session.json")
 	nixConfigPath := filepath.Join(*out, "nix-config")
 
 	if err := writeJSON(scanPath, report); err != nil {
@@ -697,6 +732,43 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "wrote nix config: %s\n", nixConfigPath)
+	session := captureSessionMetadata{
+		SchemaVersion: "linux-nixer.capture-session.v1",
+		Version:       version,
+		Commit:        commit,
+		Built:         date,
+		StartedAt:     startedAt.Format(time.RFC3339),
+		FinishedAt:    time.Now().UTC().Format(time.RFC3339),
+		Scan: captureScanMetadata{
+			Root:          scanOpts.Root,
+			Sudo:          scanOpts.UseSudo,
+			Deep:          scanOpts.Deep,
+			Baseline:      scanOpts.BaselineID,
+			PolicyPath:    *policyPath,
+			Preset:        *preset,
+			IncludePaths:  append([]string{}, scanOpts.Includes...),
+			ExcludePaths:  append([]string{}, scanOpts.Excludes...),
+			Plugins:       append([]string{}, pluginPaths...),
+			PluginTimeout: pluginTimeout.String(),
+		},
+		Review: captureReviewMeta{
+			AutoSafe:        reviewOpts.AutoSafe,
+			FailOnPending:   *failOnPending,
+			ImportDecisions: *importDecisions,
+			ExportDecisions: *exportDecisions,
+		},
+		Artifacts: []string{
+			"scan.json",
+			"reviewed.json",
+			"summary.md",
+			"session.json",
+			"nix-config/",
+		},
+	}
+	if err := writeJSON(sessionPath, session); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote session metadata: %s\n", sessionPath)
 	return nil
 }
 

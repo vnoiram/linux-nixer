@@ -76,6 +76,41 @@ func TestRunVersionFullPrintsMetadata(t *testing.T) {
 	}
 }
 
+func TestRunCaptureWritesSessionMetadata(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	version, commit, date = "v9.8.7", "abc1234", "2026-07-24T00:00:00Z"
+	t.Cleanup(func() { version, commit, date = oldVersion, oldCommit, oldDate })
+
+	dir := t.TempDir()
+	root := filepath.Join(dir, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "capture")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"capture", "--root", root, "--preset", "minimal-audit", "--include", "/opt", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got captureSessionMetadata
+	if err := readJSON(filepath.Join(out, "session.json"), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SchemaVersion != "linux-nixer.capture-session.v1" || got.Version != "v9.8.7" || got.Commit != "abc1234" || got.Built != "2026-07-24T00:00:00Z" {
+		t.Fatalf("unexpected version metadata: %+v", got)
+	}
+	if got.Scan.Root != root || got.Scan.Preset != "minimal-audit" || got.Scan.PluginTimeout != "30s" {
+		t.Fatalf("unexpected scan metadata: %+v", got.Scan)
+	}
+	if !containsString(got.Scan.IncludePaths, "/opt") || !containsString(got.Artifacts, "nix-config/") {
+		t.Fatalf("missing include/artifact metadata: %+v", got)
+	}
+	if got.StartedAt == "" || got.FinishedAt == "" {
+		t.Fatalf("timestamps should be recorded: %+v", got)
+	}
+}
+
 func TestRunHelpIncludesCaptureSummaryAndVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"help"}, strings.NewReader(""), &stdout, &stdout)
@@ -1593,4 +1628,13 @@ func writeFile(t *testing.T, root, path, content string) {
 	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
