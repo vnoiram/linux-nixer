@@ -903,6 +903,9 @@ func TestRunScanInvokesPluginScanner(t *testing.T) {
 	if !found {
 		t.Fatalf("expected plugin-contributed item in scan output: %+v", got.Items)
 	}
+	if countWarnings(got.Warnings, "plugin", "arbitrary executables") != 1 {
+		t.Fatalf("expected one plugin trust warning, got: %+v", got.Warnings)
+	}
 }
 
 func TestRunScanAppliesPolicyPluginPaths(t *testing.T) {
@@ -1637,4 +1640,14 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func countWarnings(warnings []model.Warning, source, text string) int {
+	count := 0
+	for _, warning := range warnings {
+		if warning.Source == source && strings.Contains(warning.Message, text) {
+			count++
+		}
+	}
+	return count
 }

@@ -625,6 +625,7 @@ func runScan(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	addPluginTrustWarning(report, policy.Merge(plugins, p.Plugins))
 	return writeJSON(*out, report)
 }
 
@@ -683,6 +684,7 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	addPluginTrustWarning(report, pluginPaths)
 
 	scanPath := filepath.Join(*out, "scan.json")
 	reviewedPath := filepath.Join(*out, "reviewed.json")
@@ -770,6 +772,16 @@ func runCapture(ctx context.Context, args []string, stdout io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "wrote session metadata: %s\n", sessionPath)
 	return nil
+}
+
+func addPluginTrustWarning(report *model.ScanReport, pluginPaths []string) {
+	if len(pluginPaths) == 0 {
+		return
+	}
+	report.Warnings = append(report.Warnings, model.Warning{
+		Source:  "plugin",
+		Message: "scanner plugins are arbitrary executables provided by the user or policy; review plugin paths and generated findings before trusting rendered Nix output",
+	})
 }
 
 func runReview(args []string, stdin io.Reader, stdout io.Writer) error {
