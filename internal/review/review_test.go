@@ -206,6 +206,35 @@ func TestInteractiveSkipSectionMovesToNextSection(t *testing.T) {
 	}
 }
 
+func TestInteractiveBatchAppliesToCurrentSectionRemainder(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "curl"},
+			{Manager: "apt", Name: "git"},
+			{Manager: "apt", Name: "vim"},
+		},
+		Services: []model.Service{
+			{Manager: "systemd", Name: "app.service"},
+		},
+	}
+	in := strings.NewReader("bt\nc\n")
+	var out bytes.Buffer
+
+	got := Interactive(in, &out, report, Options{})
+
+	for i, pkg := range got.Packages {
+		if pkg.Decision != model.DecisionTODO {
+			t.Fatalf("package %d decision=%q, want todo", i, pkg.Decision)
+		}
+	}
+	if got.Services[0].Decision != model.DecisionConfirmed {
+		t.Fatalf("service decision=%q, want confirmed", got.Services[0].Decision)
+	}
+	if strings.Count(out.String(), "[packages") != 1 || !strings.Contains(out.String(), "bt=batch-todo") {
+		t.Fatalf("batch prompt/output unexpected:\n%s", out.String())
+	}
+}
+
 func TestInteractivePendingOnlySkipsAlreadyDecidedFindings(t *testing.T) {
 	report := model.ScanReport{
 		Packages: []model.Package{

@@ -378,7 +378,7 @@ Flags:
   --out PATH                   Write reviewed scan JSON.
   --policy PATH                Load repeatable review policy from PATH.
   --auto-safe                  Confirm high-confidence safe findings.
-  --interactive                Prompt for each finding with c/k/t/m/x/s/n/q choices, safe context notes, and per-section progress. n skips the rest of the current section.
+  --interactive                Prompt for each finding with c/k/t/m/x/s/n/bt/bx/bk/bm/q choices, safe context notes, and per-section progress. n skips the rest of the current section; bt/bx/bk/bm apply a todo/excluded/candidate/migration-note decision to the rest of the current section.
   --pending-only               In interactive mode, only prompt for findings still at candidate; skip ones already resolved by policy or safety rules.
   --filter NAME                In interactive mode, prompt only matching findings. Repeatable: pending, unmapped, protected, packages, services, filesystem, stateful, items, containers, git-sources.
   --confirm-kind KIND          Mark findings of kind/category as confirmed. Repeatable.

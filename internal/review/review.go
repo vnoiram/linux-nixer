@@ -103,6 +103,7 @@ type interactiveSession struct {
 	skipSection bool
 	pendingOnly bool
 	filters     map[string]bool
+	batch       model.Decision
 }
 
 func (s *interactiveSession) shouldPrompt(section string, decision model.Decision, special ...string) bool {
@@ -141,6 +142,15 @@ func (s *interactiveSession) reviewPackages(section string, pkgs []model.Package
 		}
 		shown++
 		s.reviewDecision(section, shown, total, packageSummary(pkg), packageNotes(pkg), pkg.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if s.batch != "" {
+			for j := i + 1; j < len(pkgs); j++ {
+				if s.shouldPrompt("packages", pkgs[j].Decision, packageFilters(section, pkgs[j])...) {
+					set(j, s.batch)
+				}
+			}
+			s.batch = ""
+			return
+		}
 	}
 }
 
@@ -162,6 +172,15 @@ func (s *interactiveSession) reviewGitSources(items []model.GitSource, set func(
 		}
 		shown++
 		s.reviewDecision("git sources", shown, total, fmt.Sprintf("%s remote=%s commit=%s", item.Path, item.Remote, item.Commit), gitSourceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if s.batch != "" {
+			for j := i + 1; j < len(items); j++ {
+				if s.shouldPrompt("git-sources", items[j].Decision) {
+					set(j, s.batch)
+				}
+			}
+			s.batch = ""
+			return
+		}
 	}
 }
 
@@ -187,6 +206,15 @@ func (s *interactiveSession) reviewContainers(items []model.Container, set func(
 			name = item.Compose
 		}
 		s.reviewDecision("containers", shown, total, fmt.Sprintf("%s %s image=%s", item.Runtime, name, item.Image), containerNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if s.batch != "" {
+			for j := i + 1; j < len(items); j++ {
+				if s.shouldPrompt("containers", items[j].Decision) {
+					set(j, s.batch)
+				}
+			}
+			s.batch = ""
+			return
+		}
 	}
 }
 
@@ -208,6 +236,15 @@ func (s *interactiveSession) reviewServices(items []model.Service, set func(int,
 		}
 		shown++
 		s.reviewDecision("services", shown, total, fmt.Sprintf("%s %s %s", item.Manager, item.Name, item.Path), serviceNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if s.batch != "" {
+			for j := i + 1; j < len(items); j++ {
+				if s.shouldPrompt("services", items[j].Decision) {
+					set(j, s.batch)
+				}
+			}
+			s.batch = ""
+			return
+		}
 	}
 }
 
@@ -231,6 +268,16 @@ func (s *interactiveSession) reviewFiles(section string, items []model.FileFindi
 		}
 		shown++
 		s.reviewDecision(section, shown, total, fmt.Sprintf("%s %s %s", item.Category, item.Path, item.Reason), fileFindingNotes(item, protected), item.Decision, protected, func(decision model.Decision) { set(i, decision) })
+		if s.batch != "" {
+			for j := i + 1; j < len(items); j++ {
+				nextProtected := items[j].SecretRisk || forceMigrationNote
+				if s.shouldPrompt(fileSectionFilter(section), items[j].Decision, protectedFilter(nextProtected)...) {
+					set(j, s.batch)
+				}
+			}
+			s.batch = ""
+			return
+		}
 	}
 }
 
@@ -252,6 +299,15 @@ func (s *interactiveSession) reviewItems(items []model.Item, set func(int, model
 		}
 		shown++
 		s.reviewDecision("config/items", shown, total, fmt.Sprintf("%s %s %s", item.Kind, item.Path, item.Reason), itemNotes(item), item.Decision, false, func(decision model.Decision) { set(i, decision) })
+		if s.batch != "" {
+			for j := i + 1; j < len(items); j++ {
+				if s.shouldPrompt("items", items[j].Decision) {
+					set(j, s.batch)
+				}
+			}
+			s.batch = ""
+			return
+		}
 	}
 }
 
@@ -265,7 +321,7 @@ func (s *interactiveSession) reviewDecision(section string, index, total int, su
 			fmt.Fprintf(s.out, "%s\n", note)
 		}
 	}
-	fmt.Fprint(s.out, "choose c=confirmed k=candidate t=todo m=migration-note x=excluded s=skip n=skip-section q=quit: ")
+	fmt.Fprint(s.out, "choose c=confirmed k=candidate t=todo m=migration-note x=excluded s=skip n=skip-section bt=batch-todo bx=batch-exclude bk=batch-candidate bm=batch-migration-note q=quit: ")
 	if !s.in.Scan() {
 		s.quit = true
 		return
@@ -279,6 +335,11 @@ func (s *interactiveSession) reviewDecision(section string, index, total int, su
 		s.skipSection = true
 		return
 	}
+	if decision, ok := batchChoiceDecision(choice); ok {
+		s.batch = decision
+		set(decision)
+		return
+	}
 	decision, ok := choiceDecision(choice)
 	if !ok || choice == "s" || choice == "" {
 		return
@@ -289,6 +350,21 @@ func (s *interactiveSession) reviewDecision(section string, index, total int, su
 		return
 	}
 	set(decision)
+}
+
+func batchChoiceDecision(choice string) (model.Decision, bool) {
+	switch choice {
+	case "bt":
+		return model.DecisionTODO, true
+	case "bx":
+		return model.DecisionExcluded, true
+	case "bk":
+		return model.DecisionCandidate, true
+	case "bm":
+		return model.DecisionMigrationNote, true
+	default:
+		return "", false
+	}
 }
 
 func choiceDecision(choice string) (model.Decision, bool) {
