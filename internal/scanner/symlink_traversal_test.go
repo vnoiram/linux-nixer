@@ -162,6 +162,7 @@ func TestSystemConfigScannerDoesNotFollowEscapingSymlinkForSystemdOrCron(t *test
 	root := t.TempDir()
 	outside := writeOutsideSecret(t)
 	writeSymlink(t, root, "/etc/systemd/system/evil.service", outside)
+	writeSymlink(t, root, "/home/alice/.config/systemd/user/evil.service", outside)
 	writeSymlink(t, root, "/etc/cron.d/evil", outside)
 
 	report := &model.ScanReport{}
@@ -169,7 +170,7 @@ func TestSystemConfigScannerDoesNotFollowEscapingSymlinkForSystemdOrCron(t *test
 		t.Fatal(err)
 	}
 	for _, service := range report.Services {
-		if service.Path == "/etc/systemd/system/evil.service" || service.Path == "/etc/cron.d/evil" {
+		if service.Path == "/etc/systemd/system/evil.service" || service.Path == "/home/alice/.config/systemd/user/evil.service" || service.Path == "/etc/cron.d/evil" {
 			if service.ExecStart != "" || service.Schedule != "" || service.User != "" {
 				t.Fatalf("systemd/cron scanner followed a symlink outside root: %+v", service)
 			}

@@ -1088,8 +1088,11 @@ func TestSystemConfigScannerFindsOperationalConfigsAndServices(t *testing.T) {
 	write(t, root, "/etc/resolv.conf", "nameserver 1.1.1.1\nsearch lan example.test\n")
 	write(t, root, "/etc/systemd/resolved.conf", "[Resolve]\nDNS=9.9.9.9\nDomains=~corp.example\n")
 	write(t, root, "/etc/nixos/configuration.nix", "{ config, pkgs, ... }: {}\n")
+	write(t, root, "/etc/nixos/flake.nix", "{ inputs, ... }: {}\n")
 	write(t, root, "/etc/nix/nix.conf", "experimental-features = nix-command flakes\ntrusted-users = root alice\n")
+	write(t, root, "/nix/var/nix/profiles/per-user/alice/profile/.keep", "")
 	write(t, root, "/home/alice/.config/home-manager/home.nix", "{ pkgs, ... }: {}\n")
+	write(t, root, "/home/alice/.nix-profile/.keep", "")
 	write(t, root, "/etc/sysctl.d/99-local.conf", "fs.inotify.max_user_watches=1\n")
 	write(t, root, "/etc/modprobe.d/local.conf", "options test value=1\n")
 	write(t, root, "/etc/udev/rules.d/99-device.rules", `SUBSYSTEM=="usb"`)
@@ -1166,8 +1169,11 @@ WantedBy=multi-user.target
 		"/etc/resolv.conf":                                         "network configuration",
 		"/etc/systemd/resolved.conf":                               "network configuration",
 		"/etc/nixos/configuration.nix":                             "existing nix/nixos environment",
+		"/etc/nixos/flake.nix":                                     "existing nix/nixos environment",
 		"/etc/nix/nix.conf":                                        "existing nix/nixos environment",
+		"/nix/var/nix/profiles/per-user/alice/profile":             "existing nix/nixos environment",
 		"/home/alice/.config/home-manager/home.nix":                "existing nix/nixos environment",
+		"/home/alice/.nix-profile":                                 "existing nix/nixos environment",
 		"/etc/sysctl.d/99-local.conf":                              "kernel or device tuning",
 		"/etc/modprobe.d/local.conf":                               "kernel or device tuning",
 		"/etc/udev/rules.d/99-device.rules":                        "kernel or device tuning",
@@ -1233,6 +1239,15 @@ WantedBy=multi-user.target
 	}
 	if seen["/etc/nix/nix.conf"].Details["experimental-features"] != "nix-command flakes" || seen["/etc/nix/nix.conf"].Details["scope"] != "nix-daemon" {
 		t.Fatalf("nix environment details missing: %+v", seen["/etc/nix/nix.conf"])
+	}
+	if seen["/etc/nixos/flake.nix"].Details["flake"] != "present" || seen["/etc/nixos/flake.nix"].Details["scope"] != "nixos" {
+		t.Fatalf("nixos flake marker missing: %+v", seen["/etc/nixos/flake.nix"])
+	}
+	if seen["/nix/var/nix/profiles/per-user/alice/profile"].Details["scope"] != "profile" || seen["/nix/var/nix/profiles/per-user/alice/profile"].Name != "per-user-nix-profile" {
+		t.Fatalf("per-user profile marker missing: %+v", seen["/nix/var/nix/profiles/per-user/alice/profile"])
+	}
+	if seen["/home/alice/.nix-profile"].Details["scope"] != "user" || seen["/home/alice/.nix-profile"].Name != "user-nix-profile" {
+		t.Fatalf("user nix profile marker missing: %+v", seen["/home/alice/.nix-profile"])
 	}
 	if seen["/home/alice/.config/home-manager/home.nix"].Decision != model.DecisionMigrationNote || seen["/home/alice/.config/home-manager/home.nix"].Details["scope"] != "home-manager" {
 		t.Fatalf("home-manager marker missing: %+v", seen["/home/alice/.config/home-manager/home.nix"])

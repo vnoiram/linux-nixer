@@ -277,20 +277,60 @@ func diagnosticMessage(output string) string {
 
 func diagnoseNixOutput(output string) string {
 	lower := strings.ToLower(output)
+	location := nixDiagnosticLocation(output)
+	withLocation := func(message string) string {
+		if location == "" {
+			return message
+		}
+		return message + " Location: " + location + "."
+	}
 	switch {
 	case strings.Contains(lower, "syntax error"):
-		return "diagnostic: Nix syntax error; inspect the generated .nix file and the line/column in the raw output."
+		return withLocation("diagnostic: Nix syntax error; inspect the generated .nix file and the line/column in the raw output.")
 	case strings.Contains(lower, "attribute") && strings.Contains(lower, "missing"):
-		return "diagnostic: missing Nix attribute; check package names, host attribute names, or referenced flake outputs."
+		return withLocation("diagnostic: missing Nix attribute; check package names, host attribute names, or referenced flake outputs.")
+	case strings.Contains(lower, "undefined variable"):
+		return withLocation("diagnostic: undefined Nix variable; check generated references to packages, module arguments, or local bindings.")
 	case strings.Contains(lower, "unknown option") || strings.Contains(lower, "the option") && strings.Contains(lower, "does not exist"):
-		return "diagnostic: unknown NixOS option; check whether the generated option exists for the selected nixpkgs release."
+		return withLocation("diagnostic: unknown NixOS option; check whether the generated option exists for the selected nixpkgs release.")
 	case strings.Contains(lower, "dirty") || strings.Contains(lower, "flake.lock") || strings.Contains(lower, "cannot fetch"):
-		return "diagnostic: flake input or lock issue; check flake.lock, network access, and dirty working tree warnings."
+		return withLocation("diagnostic: flake input or lock issue; check flake.lock, network access, and dirty working tree warnings.")
 	case strings.Contains(lower, "while evaluating") || strings.Contains(lower, "evaluation error"):
-		return "diagnostic: Nix evaluation failed; use the raw output to find the option or expression that triggered evaluation."
+		return withLocation("diagnostic: Nix evaluation failed; use the raw output to find the option or expression that triggered evaluation.")
 	default:
 		return ""
 	}
+}
+
+func nixDiagnosticLocation(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if loc := locationAfter(line, " at "); loc != "" {
+			return loc
+		}
+		if loc := locationAfter(line, " at «"); loc != "" {
+			return strings.TrimSuffix(loc, "»")
+		}
+		if strings.HasPrefix(line, "at ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "at "))
+		}
+	}
+	return ""
+}
+
+func locationAfter(line, marker string) string {
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return ""
+	}
+	loc := strings.TrimSpace(line[idx+len(marker):])
+	if loc == "" || !strings.Contains(loc, ":") {
+		return ""
+	}
+	return loc
 }
 
 func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {

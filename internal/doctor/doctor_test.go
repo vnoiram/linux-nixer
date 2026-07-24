@@ -320,6 +320,40 @@ func TestRunAddsNixDiagnosticsToFlakeCheckFailure(t *testing.T) {
 	}
 }
 
+func TestDiagnoseNixOutputIncludesCategoryAndLocation(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		want   []string
+	}{
+		{
+			name:   "syntax error",
+			output: "error: syntax error, unexpected ';' at /tmp/configuration.nix:10:3",
+			want:   []string{"diagnostic: Nix syntax error", "Location: /tmp/configuration.nix:10:3"},
+		},
+		{
+			name:   "unknown option",
+			output: "error: The option `services.demo.enable' does not exist at /tmp/module.nix:22:5",
+			want:   []string{"diagnostic: unknown NixOS option", "Location: /tmp/module.nix:22:5"},
+		},
+		{
+			name:   "undefined variable",
+			output: "error: undefined variable 'pkgsx' at /tmp/home.nix:7:11",
+			want:   []string{"diagnostic: undefined Nix variable", "Location: /tmp/home.nix:7:11"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := diagnoseNixOutput(tc.output)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("diagnostic missing %q:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestRunAddsNixDiagnosticsToVMBuildFailure(t *testing.T) {
 	project := writeGeneratedProject(t, "demo")
 	result := Run(context.Background(), Options{

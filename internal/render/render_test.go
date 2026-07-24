@@ -188,6 +188,24 @@ func TestProjectRendersBaselineProvenanceReport(t *testing.T) {
 	}
 }
 
+func TestProjectRendersBaselineProvenanceWithoutBaseline(t *testing.T) {
+	out := t.TempDir()
+	report := model.ScanReport{SchemaVersion: model.SchemaVersion}
+	if err := Project(out, report); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, out, "reports/baseline-provenance.md")
+	for _, want := range []string{
+		"# Baseline provenance",
+		"No baseline manifest was used for this scan.",
+		"not filtered against a distro/rootfs baseline",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("baseline provenance empty-state missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestProjectRendersFilesystemBaselineChanges(t *testing.T) {
 	out := t.TempDir()
 	report := model.ScanReport{

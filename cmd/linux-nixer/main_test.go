@@ -843,6 +843,73 @@ func TestRunPluginScaffoldShellCreatesCheckablePlugin(t *testing.T) {
 	}
 }
 
+func TestRunPluginScaffoldPythonAndGoArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	var stdout bytes.Buffer
+
+	pythonOut := filepath.Join(dir, "py-scanner")
+	if err := run(context.Background(), []string{"plugin", "scaffold", "--type", "python", "--out", pythonOut, "--name", "scan.py"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	pythonPlugin := filepath.Join(pythonOut, "scan.py")
+	pythonBody, err := os.ReadFile(pythonPlugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(pythonBody), "sample-python-scanner") || !strings.Contains(string(pythonBody), "linux-nixer.scan.v1") {
+		t.Fatalf("python scaffold body missing plugin protocol markers:\n%s", pythonBody)
+	}
+	if info, err := os.Stat(pythonPlugin); err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("python scaffold should be executable, info=%v err=%v", info, err)
+	}
+
+	stdout.Reset()
+	goOut := filepath.Join(dir, "go-scanner")
+	if err := run(context.Background(), []string{"plugin", "scaffold", "--type", "go", "--out", goOut, "--name", "go-scanner"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"go.mod", "main.go", "go-scanner", "README.md"} {
+		if _, err := os.Stat(filepath.Join(goOut, rel)); err != nil {
+			t.Fatalf("go scaffold missing %s: %v", rel, err)
+		}
+	}
+	mainGo, err := os.ReadFile(filepath.Join(goOut, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainGo), "sample-go-scanner") || !strings.Contains(string(mainGo), "linux-nixer.plugin-capabilities.v1") {
+		t.Fatalf("go scaffold body missing plugin protocol markers:\n%s", mainGo)
+	}
+}
+
+func TestRunPluginScaffoldRefusesOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "existing-scanner")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(out, "existing-scanner")
+	if err := os.WriteFile(existing, []byte("keep me\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "scaffold", "--type", "shell", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected scaffold to refuse overwriting an existing executable")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("unexpected overwrite error: %v", err)
+	}
+	body, readErr := os.ReadFile(existing)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(body) != "keep me\n" {
+		t.Fatalf("existing scaffold file was overwritten:\n%s", body)
+	}
+}
+
 func TestRunPluginScaffoldRejectsInvalidType(t *testing.T) {
 	var stdout bytes.Buffer
 	err := run(context.Background(), []string{"plugin", "scaffold", "--type", "ruby", "--out", t.TempDir()}, strings.NewReader(""), &stdout, &stdout)
