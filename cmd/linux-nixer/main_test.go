@@ -330,6 +330,15 @@ func TestRunCommandHelpTopics(t *testing.T) {
 			},
 		},
 		{
+			name: "baseline catalog-plan help",
+			args: []string{"help", "baseline", "catalog-plan"},
+			wants: []string{
+				"linux-nixer baseline catalog-plan",
+				"--verified-by TEXT",
+				"without editing source files",
+			},
+		},
+		{
 			name: "review help",
 			args: []string{"review", "-h"},
 			wants: []string{
@@ -377,6 +386,24 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer plugin scaffold",
 				"--type NAME",
 				"linux-nixer plugin check",
+			},
+		},
+		{
+			name: "fixture generate help",
+			args: []string{"help", "fixture", "generate"},
+			wants: []string{
+				"linux-nixer fixture generate",
+				"--profile NAME",
+				"deterministic representative rootfs fixture",
+			},
+		},
+		{
+			name: "mapping plan help",
+			args: []string{"help", "mapping", "plan"},
+			wants: []string{
+				"linux-nixer mapping plan",
+				"--verified-by TEXT",
+				"without editing source files",
 			},
 		},
 	}
@@ -1026,6 +1053,91 @@ func TestRunPolicyExamplesWritesLoadableProfiles(t *testing.T) {
 		}
 		if p.SchemaVersion != policypkg.SchemaVersion {
 			t.Fatalf("example %s schemaVersion=%q", file, p.SchemaVersion)
+		}
+	}
+}
+
+func TestRunFixtureGenerateWritesDeterministicProfiles(t *testing.T) {
+	for _, profile := range []string{"workstation", "server", "developer"} {
+		t.Run(profile, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "root")
+			var stdout bytes.Buffer
+			if err := run(context.Background(), []string{"fixture", "generate", "--profile", profile, "--out", out}, strings.NewReader(""), &stdout, &stdout); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stdout.String(), "wrote "+profile+" fixture") {
+				t.Fatalf("stdout missing fixture summary:\n%s", stdout.String())
+			}
+			for _, rel := range []string{"etc/os-release", "etc/passwd", "var/lib/dpkg/status"} {
+				if _, err := os.Stat(filepath.Join(out, rel)); err != nil {
+					t.Fatalf("fixture %s missing %s: %v", profile, rel, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRunFixtureGenerateRejectsUnknownProfile(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"fixture", "generate", "--profile", "tiny", "--out", t.TempDir()}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected unknown fixture profile to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown fixture profile") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunMappingPlanRequiresVerificationAndWritesPlan(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"mapping", "plan", "--manager", "apt", "--name", "curl", "--nix-name", "curl"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected missing --verified-by to fail")
+	}
+	if !strings.Contains(err.Error(), "--verified-by") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"mapping", "plan", "--manager", "apt", "--name", "Curl", "--nix-name", "curl", "--verified-by", "nix search nixpkgs curl"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Mapping Update Plan", "mapping key: curl", `"curl": "curl"`, "verified by: nix search nixpkgs curl"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("mapping plan missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestRunBaselineCatalogPlanValidatesInputsAndWritesPlan(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"baseline", "catalog-plan", "--distro", "ubuntu", "--release", "24.04", "--image", "ubuntu:24.04", "--digest", "sha256:" + strings.Repeat("a", 64), "--verified-by", "docker pull"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected unqualified image to fail")
+	}
+	if !strings.Contains(err.Error(), "fully-qualified") {
+		t.Fatalf("unexpected image validation error: %v", err)
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"baseline", "catalog-plan", "--distro", "ubuntu", "--release", "24.04", "--image", "docker.io/library/ubuntu:24.04", "--digest", "sha256:nothex", "--verified-by", "docker pull"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected invalid digest to fail")
+	}
+	if !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("unexpected digest validation error: %v", err)
+	}
+
+	stdout.Reset()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	err = run(context.Background(), []string{"baseline", "catalog-plan", "--distro", "ubuntu", "--release", "24.04", "--image", "docker.io/library/ubuntu:24.04", "--digest", digest, "--verified-by", "docker inspect"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Baseline Catalog Update Plan", "docker.io/library/ubuntu:24.04", digest, "linux-nixer baseline check --fail-on-drift"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("catalog plan missing %q:\n%s", want, stdout.String())
 		}
 	}
 }

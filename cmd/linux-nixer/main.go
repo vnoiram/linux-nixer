@@ -103,6 +103,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runBaseline(ctx, args[1:], stdin, stdout)
 	case "policy":
 		return runPolicy(args[1:], stdout)
+	case "fixture":
+		return runFixture(args[1:], stdout)
+	case "mapping":
+		return runMapping(args[1:], stdout)
 	case "plugin":
 		return runPlugin(ctx, args[1:], stdout)
 	case "guide":
@@ -143,10 +147,13 @@ Usage:
   linux-nixer baseline list [--json]
   linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
   linux-nixer baseline refresh-plan [--json]
+  linux-nixer baseline catalog-plan --distro ubuntu --release 24.04 --image docker.io/library/ubuntu:24.04 --digest sha256:... --verified-by NOTE [--out PATH]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer policy diff --from workstation --to server [--json]
   linux-nixer policy lint --policy linux-nixer-policy.json [--json]
   linux-nixer policy examples --out policy-examples
+  linux-nixer fixture generate --profile workstation --out ./fixture-root
+  linux-nixer mapping plan --manager apt --name curl --nix-name curl --verified-by NOTE [--out PATH]
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
   linux-nixer plugin scaffold --type shell --out ./my-scanner
   linux-nixer guide
@@ -201,6 +208,10 @@ func commandHelp(w io.Writer, topic []string) error {
 			fmt.Fprint(w, baselineRefreshPlanHelp)
 			return nil
 		}
+		if topic[1] == "catalog-plan" {
+			fmt.Fprint(w, baselineCatalogPlanHelp)
+			return nil
+		}
 		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
 	case "policy":
 		if len(topic) == 1 || topic[1] == "init" {
@@ -220,6 +231,18 @@ func commandHelp(w io.Writer, topic []string) error {
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "policy "+topic[1])
+	case "fixture":
+		if len(topic) == 1 || topic[1] == "generate" {
+			fmt.Fprint(w, fixtureGenerateHelp)
+			return nil
+		}
+		return fmt.Errorf("unknown help topic %q", "fixture "+topic[1])
+	case "mapping":
+		if len(topic) == 1 || topic[1] == "plan" {
+			fmt.Fprint(w, mappingPlanHelp)
+			return nil
+		}
+		return fmt.Errorf("unknown help topic %q", "mapping "+topic[1])
 	case "plugin":
 		if len(topic) == 1 || topic[1] == "check" {
 			fmt.Fprint(w, pluginCheckHelp)
@@ -639,6 +662,21 @@ Flags:
 This does not pull images or rewrite manifests. It is a local assistant for the catalog maintenance workflow: review drift with "baseline check", then refresh each manifest deliberately with the printed "baseline fetch" command.
 `
 
+const baselineCatalogPlanHelp = `linux-nixer baseline catalog-plan
+Write a reviewed maintenance plan for adding or refreshing one baseline catalog entry without editing source files.
+
+Usage:
+  linux-nixer baseline catalog-plan --distro ubuntu --release 24.04 --image docker.io/library/ubuntu:24.04 --digest sha256:... --verified-by NOTE [--out PATH]
+
+Flags:
+  --distro NAME       Distro key to add or refresh.
+  --release VALUE     Release key to add or refresh.
+  --image REF         Fully-qualified Docker Hub Official Image tag: docker.io/library/name:tag.
+  --digest DIGEST     Verified sha256 digest for the image.
+  --verified-by TEXT  Human verification note or command. Required.
+  --out PATH          Write markdown plan to PATH instead of stdout.
+`
+
 const baselineImportHelp = `linux-nixer baseline import
 Build a baseline manifest from an already-downloaded flat rootfs tar, without Docker/Podman or network access.
 
@@ -734,6 +772,31 @@ Artifacts:
 
 Flags:
   --out DIR Write example policy JSON files under DIR.
+`
+
+const fixtureGenerateHelp = `linux-nixer fixture generate
+Generate a deterministic representative rootfs fixture for scanner integration tests.
+
+Usage:
+  linux-nixer fixture generate --profile workstation --out ./fixture-root
+
+Flags:
+  --profile NAME  Fixture profile: workstation, server, or developer.
+  --out DIR       Directory to create or populate.
+`
+
+const mappingPlanHelp = `linux-nixer mapping plan
+Write a reviewed maintenance plan for adding one package mapping without editing source files.
+
+Usage:
+  linux-nixer mapping plan --manager apt --name curl --nix-name curl --verified-by NOTE [--out PATH]
+
+Flags:
+  --manager NAME      Package manager key used by scanners.
+  --name PACKAGE      Scanned package name.
+  --nix-name ATTR     Verified nixpkgs attribute path.
+  --verified-by TEXT  Human verification note or command. Required.
+  --out PATH          Write markdown plan to PATH instead of stdout.
 `
 
 func runScan(ctx context.Context, args []string, stdout io.Writer) error {
@@ -1733,7 +1796,7 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check, baseline refresh-plan; run `linux-nixer help baseline fetch` for common baseline setup")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check, baseline refresh-plan, baseline catalog-plan; run `linux-nixer help baseline fetch` for common baseline setup")
 	}
 	switch args[0] {
 	case "create":
@@ -1748,8 +1811,10 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return runBaselineCheck(ctx, args[1:], stdout)
 	case "refresh-plan":
 		return runBaselineRefreshPlan(args[1:], stdout)
+	case "catalog-plan":
+		return runBaselineCatalogPlan(args[1:], stdout)
 	default:
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check, baseline refresh-plan; run `linux-nixer baseline list` to see supported fetch targets")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check, baseline refresh-plan, baseline catalog-plan; run `linux-nixer baseline list` to see supported fetch targets")
 	}
 }
 
@@ -1873,6 +1938,81 @@ func baselineRefreshPlan() []baselineRefreshPlanEntry {
 		})
 	}
 	return out
+}
+
+func runBaselineCatalogPlan(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, baselineCatalogPlanHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("baseline catalog-plan", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	distro := fs.String("distro", "", "distro key")
+	release := fs.String("release", "", "release key")
+	image := fs.String("image", "", "fully-qualified Docker Hub Official Image tag")
+	digest := fs.String("digest", "", "verified sha256 digest")
+	verifiedBy := fs.String("verified-by", "", "human verification note")
+	out := fs.String("out", "", "output markdown path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *distro == "" || *release == "" || *image == "" || *digest == "" || *verifiedBy == "" {
+		return errors.New("baseline catalog-plan requires --distro, --release, --image, --digest, and --verified-by")
+	}
+	if !strings.HasPrefix(*image, "docker.io/library/") || !strings.Contains(strings.TrimPrefix(*image, "docker.io/library/"), ":") {
+		return fmt.Errorf("baseline catalog-plan requires --image to be a fully-qualified Docker Hub Official Image tag, got %q", *image)
+	}
+	if !validSHA256Digest(*digest) {
+		return fmt.Errorf("baseline catalog-plan requires --digest sha256:<64 lowercase hex characters>")
+	}
+	plan := formatBaselineCatalogPlan(*distro, *release, *image, *digest, *verifiedBy)
+	if *out != "" {
+		if err := writeText(*out, plan); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote baseline catalog plan: %s\n", *out)
+		return nil
+	}
+	fmt.Fprint(stdout, plan)
+	return nil
+}
+
+func validSHA256Digest(digest string) bool {
+	if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+		return false
+	}
+	for _, r := range strings.TrimPrefix(digest, "sha256:") {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func formatBaselineCatalogPlan(distro, release, image, digest, verifiedBy string) string {
+	shortImage := strings.TrimPrefix(image, "docker.io/library/")
+	return fmt.Sprintf(`# Baseline Catalog Update Plan
+
+- distro: %s
+- release: %s
+- image: %s
+- digest: %s
+- verified by: %s
+
+## Source Changes
+
+Add or refresh this entry in `+"`internal/baseline/catalog.go`"+`:
+
+`+"```go"+`
+"%s": {image: "%s", digest: "%s"},
+`+"```"+`
+
+## Verification
+
+- Re-run `+"`linux-nixer baseline check --fail-on-drift`"+`.
+- Refresh the bundled manifest with `+"`linux-nixer baseline fetch --distro %s --release %s --out baselines/%s-%s.json`"+`.
+- Keep the pull reference fully qualified: `+"`%s@%s`"+`.
+`, distro, release, image, digest, verifiedBy, release, shortImage, digest, distro, release, distro, release, image, digest)
 }
 
 func runBaselineCreate(ctx context.Context, args []string, stdout io.Writer) error {
@@ -2178,6 +2318,159 @@ func runPolicyExamples(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "wrote policy example: %s\n", path)
 	}
 	return nil
+}
+
+func runFixture(args []string, stdout io.Writer) error {
+	if len(args) == 1 && hasHelp(args) {
+		fmt.Fprint(stdout, fixtureGenerateHelp)
+		return nil
+	}
+	if len(args) == 0 {
+		return errors.New("fixture supports: fixture generate")
+	}
+	switch args[0] {
+	case "generate":
+		return runFixtureGenerate(args[1:], stdout)
+	default:
+		return errors.New("fixture supports: fixture generate")
+	}
+}
+
+func runFixtureGenerate(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, fixtureGenerateHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("fixture generate", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	profile := fs.String("profile", "", "fixture profile: workstation, server, or developer")
+	out := fs.String("out", "", "output fixture root")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *profile == "" || *out == "" {
+		return errors.New("fixture generate requires --profile and --out")
+	}
+	files, err := fixtureFiles(*profile)
+	if err != nil {
+		return err
+	}
+	for rel, content := range files {
+		if err := writeFixtureFile(*out, rel, content); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintf(stdout, "wrote %s fixture: %s (%d files)\n", strings.ToLower(*profile), *out, len(files))
+	return nil
+}
+
+func fixtureFiles(profile string) (map[string]string, error) {
+	common := map[string]string{
+		"/etc/os-release":        "ID=ubuntu\nVERSION_ID=\"24.04\"\nPRETTY_NAME=\"Ubuntu 24.04 LTS\"\n",
+		"/etc/passwd":            "root:x:0:0:root:/root:/bin/bash\nalice:x:1000:1000:Alice:/home/alice:/bin/bash\n",
+		"/etc/group":             "root:x:0:\nalice:x:1000:\nsudo:x:27:alice\n",
+		"/var/lib/dpkg/status":   "Package: curl\nStatus: install ok installed\nVersion: 8.0\n\nPackage: git\nStatus: install ok installed\nVersion: 2.44\n\n",
+		"/home/alice/.gitconfig": "[user]\n\tname = Fixture User\n",
+	}
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "workstation":
+		common["/home/alice/.config/autostart/notes.desktop"] = "[Desktop Entry]\nType=Application\nName=Notes\nExec=notes\n"
+		common["/home/alice/.zshrc"] = "export EDITOR=vim\n"
+	case "server":
+		common["/etc/systemd/system/demo.service"] = "[Service]\nExecStart=/usr/local/bin/demo\n[Install]\nWantedBy=multi-user.target\n"
+		common["/usr/local/bin/demo"] = "#!/bin/sh\necho demo\n"
+		common["/var/lib/postgresql/.keep"] = "fixture state marker\n"
+	case "developer":
+		common["/home/alice/project/package.json"] = `{"name":"fixture","dependencies":{"prettier":"3.0.0"}}` + "\n"
+		common["/home/alice/project/go.mod"] = "module example.com/fixture\n"
+		common["/home/alice/project/.env.example"] = "TOKEN=dummy-fixture-token\n"
+	default:
+		return nil, fmt.Errorf("unknown fixture profile %q: expected workstation, server, or developer", profile)
+	}
+	return common, nil
+}
+
+func writeFixtureFile(root, rel, content string) error {
+	path := filepath.Join(root, strings.TrimPrefix(rel, "/"))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if strings.HasPrefix(rel, "/usr/local/bin/") {
+		mode = 0o755
+	}
+	return os.WriteFile(path, []byte(content), mode)
+}
+
+func runMapping(args []string, stdout io.Writer) error {
+	if len(args) == 1 && hasHelp(args) {
+		fmt.Fprint(stdout, mappingPlanHelp)
+		return nil
+	}
+	if len(args) == 0 {
+		return errors.New("mapping supports: mapping plan")
+	}
+	switch args[0] {
+	case "plan":
+		return runMappingPlan(args[1:], stdout)
+	default:
+		return errors.New("mapping supports: mapping plan")
+	}
+}
+
+func runMappingPlan(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, mappingPlanHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("mapping plan", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	manager := fs.String("manager", "", "package manager key")
+	name := fs.String("name", "", "scanned package name")
+	nixName := fs.String("nix-name", "", "verified nixpkgs attr")
+	verifiedBy := fs.String("verified-by", "", "human verification note")
+	out := fs.String("out", "", "output markdown path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *manager == "" || *name == "" || *nixName == "" || *verifiedBy == "" {
+		return errors.New("mapping plan requires --manager, --name, --nix-name, and --verified-by")
+	}
+	plan := formatMappingPlan(*manager, *name, *nixName, *verifiedBy)
+	if *out != "" {
+		if err := writeText(*out, plan); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "wrote mapping plan: %s\n", *out)
+		return nil
+	}
+	fmt.Fprint(stdout, plan)
+	return nil
+}
+
+func formatMappingPlan(manager, name, nixName, verifiedBy string) string {
+	key := strings.ToLower(strings.TrimSpace(name))
+	return fmt.Sprintf(`# Mapping Update Plan
+
+- manager: %s
+- scanned name: %s
+- mapping key: %s
+- nixpkgs attr: %s
+- verified by: %s
+
+## Source Changes
+
+Add this entry to the %s table in `+"`internal/mapping/mapping.go`"+`:
+
+`+"```go"+`
+"%s": "%s",
+`+"```"+`
+
+## Tests
+
+- Add a lookup case for `+"`mapping.Candidates(%q, %q)`"+`.
+- Run `+"`go test ./internal/mapping`"+`.
+`, manager, name, key, nixName, verifiedBy, manager, key, nixName, manager, name)
 }
 
 // loadPolicyFromFlags resolves a Policy from either a --preset name (a
