@@ -76,6 +76,48 @@ func TestRunReviewWritesPolicyExplanation(t *testing.T) {
 	}
 }
 
+func TestRunReviewPolicyExplanationShowsImportedAndProtectedReasons(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "scan.json")
+	outPath := filepath.Join(dir, "reviewed.json")
+	decisionsPath := filepath.Join(dir, "decisions.json")
+	explainPath := filepath.Join(dir, "explain.md")
+	report := model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{
+			{Manager: "apt", Name: "custom-tool"},
+		},
+		FilesystemDiff: []model.FileFinding{
+			{Path: "/home/alice/.ssh/id_ed25519", Category: "secret", SecretRisk: true},
+		},
+	}
+	writeScan(t, scanPath, report)
+	writeJSONFile(t, decisionsPath, map[string]any{
+		"schemaVersion": "linux-nixer.decisions.v1",
+		"entries": []map[string]string{
+			{"domain": "package", "key": "apt:custom-tool", "decision": "excluded"},
+		},
+	})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"review", "--scan", scanPath, "--out", outPath, "--import-decisions", decisionsPath, "--explain-policy", explainPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(explainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"`apt:custom-tool`: excluded - imported decision \"excluded\" matched before policy rules",
+		"`/home/alice/.ssh/id_ed25519`: migration-note - protected secret-like finding forced to migration-note",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("policy explanation missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRunReviewWritesDecisionsReport(t *testing.T) {
 	dir := t.TempDir()
 	scanPath := filepath.Join(dir, "scan.json")
@@ -536,9 +578,24 @@ func TestRunCLIErrorHints(t *testing.T) {
 			want: "linux-nixer validate --scan reviewed.json --strict",
 		},
 		{
+			name: "validate decisions missing policy",
+			args: []string{"validate", "--decisions", "decisions.json"},
+			want: "linux-nixer validate --decisions decisions.json --policy linux-nixer-policy.json",
+		},
+		{
+			name: "summary missing scan",
+			args: []string{"summary"},
+			want: "linux-nixer summary --scan reviewed.json",
+		},
+		{
 			name: "doctor missing project",
 			args: []string{"doctor"},
 			want: "linux-nixer doctor --project nix-config",
+		},
+		{
+			name: "unknown review filter",
+			args: []string{"review", "--scan", "scan.json", "--out", "reviewed.json", "--interactive", "--filter", "mystery"},
+			want: "use pending, unmapped, protected",
 		},
 	}
 	for _, tt := range tests {
@@ -564,6 +621,7 @@ func TestRunValidateWritesDecisionConflictReport(t *testing.T) {
 		"schemaVersion": "linux-nixer.decisions.v1",
 		"entries": []map[string]string{
 			{"domain": "service", "key": "systemd:sshd.service", "decision": "excluded"},
+			{"domain": "item", "key": "missing-kind-prefix", "decision": "confirmed"},
 		},
 	})
 	writeJSONFile(t, policyPath, map[string]any{
@@ -580,8 +638,13 @@ func TestRunValidateWritesDecisionConflictReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "decision \"excluded\" conflicts with current policy") {
-		t.Fatalf("unexpected conflicts report:\n%s", got)
+	for _, want := range []string{
+		"decision \"excluded\" conflicts with current policy",
+		"key \"missing-kind-prefix\" does not match the expected kind:path format",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("conflicts report missing %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -1120,6 +1183,17 @@ func TestRunPolicyDiffWritesTextAndJSON(t *testing.T) {
 	}
 
 	stdout.Reset()
+	err = run(context.Background(), []string{"policy", "diff", "--from", "developer-machine", "--to", "minimal-audit"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"autoSafe: true -> false", "confirmKinds removed=dev-project,git-source,language-project,shell-config,direnv"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("policy diff removal text missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
 	err = run(context.Background(), []string{"policy", "diff", "--from", "server", "--to", "minimal-audit", "--json"}, strings.NewReader(""), &stdout, &stdout)
 	if err != nil {
 		t.Fatal(err)
@@ -1146,11 +1220,20 @@ func TestRunPolicyDiffRequiresPresets(t *testing.T) {
 
 func TestRunPolicyLintWritesTextAndJSON(t *testing.T) {
 	dir := t.TempDir()
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"policy", "lint"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected missing --policy to fail")
+	}
+	if !strings.Contains(err.Error(), "linux-nixer policy lint --policy linux-nixer-policy.json") {
+		t.Fatalf("policy lint missing flag error lacks hint: %v", err)
+	}
+
 	cleanPath := filepath.Join(dir, "clean-policy.json")
 	if err := os.WriteFile(cleanPath, []byte(`{"schemaVersion":"linux-nixer.policy.v1","confirmKinds":["service"]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	var stdout bytes.Buffer
+	stdout.Reset()
 	if err := run(context.Background(), []string{"policy", "lint", "--policy", cleanPath}, strings.NewReader(""), &stdout, &stdout); err != nil {
 		t.Fatal(err)
 	}
@@ -1163,7 +1246,18 @@ func TestRunPolicyLintWritesTextAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout.Reset()
-	err := run(context.Background(), []string{"policy", "lint", "--policy", badPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
+	err = run(context.Background(), []string{"policy", "lint", "--policy", badPath}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected contradictory policy lint text to fail")
+	}
+	for _, want := range []string{"policy lint failed", "contradictory decision", "duplicate value", "unknown kind"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("policy lint text missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"policy", "lint", "--policy", badPath, "--json"}, strings.NewReader(""), &stdout, &stdout)
 	if err == nil {
 		t.Fatal("expected contradictory policy lint to fail")
 	}

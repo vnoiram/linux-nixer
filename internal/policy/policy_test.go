@@ -207,15 +207,17 @@ func TestFormatDecisionConflictsMarkdown(t *testing.T) {
 		SchemaVersion: review.DecisionsSchemaVersion,
 		Entries: []review.DecisionEntry{
 			{Domain: "service", Key: "systemd:sshd.service", Decision: model.DecisionExcluded},
+			{Domain: "item", Key: "missing-kind-prefix", Decision: model.DecisionConfirmed},
 		},
 	}, Policy{ConfirmKinds: []string{"service"}})
 
 	got := FormatDecisionConflictsMarkdown(result)
 	for _, want := range []string{
 		"# Decision conflict report",
-		"- Checked decisions: 1",
+		"- Checked decisions: 2",
 		"## Warnings",
 		"`service:systemd:sshd.service`: decision \"excluded\" conflicts with current policy",
+		"`item:missing-kind-prefix`: key \"missing-kind-prefix\" does not match the expected kind:path format",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("conflict report missing %q:\n%s", want, got)

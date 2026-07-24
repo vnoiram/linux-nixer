@@ -114,6 +114,36 @@ func TestExplainFormatsDecisionReasons(t *testing.T) {
 	}
 }
 
+func TestExplainImportedDecisionTakesPrecedenceInReason(t *testing.T) {
+	report := model.ScanReport{
+		Packages: []model.Package{
+			{Manager: "apt", Name: "custom-tool", Decision: model.DecisionExcluded},
+		},
+	}
+
+	got := FormatExplainMarkdown(Explain(report, ExplainOptions{
+		ReviewOptions: Options{AutoSafe: true, ConfirmManagers: []string{"apt"}},
+		Imported: DecisionSet{
+			SchemaVersion: DecisionsSchemaVersion,
+			Entries: []DecisionEntry{
+				{Domain: "package", Key: "apt:custom-tool", Decision: model.DecisionExcluded},
+			},
+		},
+	}))
+
+	for _, want := range []string{
+		"`apt:custom-tool`: excluded",
+		"imported decision \"excluded\" matched before policy rules",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("imported explanation missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "confirmed by manager rule") {
+		t.Fatalf("imported explanation should outrank policy reason:\n%s", got)
+	}
+}
+
 func TestFormatDecisionsMarkdownGroupsExportedDecisions(t *testing.T) {
 	got := FormatDecisionsMarkdown(DecisionSet{
 		SchemaVersion: DecisionsSchemaVersion,
