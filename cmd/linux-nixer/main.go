@@ -59,6 +59,17 @@ type captureReviewMeta struct {
 	ExportDecisions string `json:"exportDecisions,omitempty"`
 }
 
+type baselineRefreshPlanEntry struct {
+	Distro       string `json:"distro"`
+	Release      string `json:"release"`
+	Image        string `json:"image"`
+	Digest       string `json:"digest"`
+	PullRef      string `json:"pullRef"`
+	Bundled      bool   `json:"bundled"`
+	FetchCommand string `json:"fetchCommand"`
+	CheckCommand string `json:"checkCommand"`
+}
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -124,18 +135,20 @@ Usage:
   linux-nixer review --scan scan.json --out reviewed.json [--policy policy.json] [--auto-safe] [--interactive] [--confirm-kind KIND] [--exclude-kind KIND]
   linux-nixer summary --scan reviewed.json [--json] [--fail-on-pending]
   linux-nixer validate --scan reviewed.json [--json] [--strict]
-  linux-nixer generate --scan reviewed.json --out ./nix-config
+  linux-nixer generate --scan reviewed.json --out ./nix-config [--module-layout split|single]
   linux-nixer doctor --project ./nix-config [--vm] [--boot] [--timeout 15s] [--host generated]
   linux-nixer baseline create --distro ubuntu --release 24.04 --root /path/to/rootfs --out baseline.json
   linux-nixer baseline fetch --distro ubuntu --release 24.04 [--backend docker|podman] [--offline] [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline import --distro ubuntu --release 24.04 --tar PATH [--out baselines/ubuntu-24.04.json]
   linux-nixer baseline list [--json]
   linux-nixer baseline check [--backend docker|podman] [--json] [--fail-on-drift]
+  linux-nixer baseline refresh-plan [--json]
   linux-nixer policy init --out linux-nixer-policy.json [--preset workstation|server|developer-machine|minimal-audit]
   linux-nixer policy diff --from workstation --to server [--json]
   linux-nixer policy lint --policy linux-nixer-policy.json [--json]
   linux-nixer policy examples --out policy-examples
   linux-nixer plugin check --plugin ./my-scanner [--timeout 30s] [--json]
+  linux-nixer plugin scaffold --type shell --out ./my-scanner
   linux-nixer guide
   linux-nixer help <command>
   linux-nixer version [--full]`)
@@ -184,6 +197,10 @@ func commandHelp(w io.Writer, topic []string) error {
 			fmt.Fprint(w, baselineCheckHelp)
 			return nil
 		}
+		if topic[1] == "refresh-plan" {
+			fmt.Fprint(w, baselineRefreshPlanHelp)
+			return nil
+		}
 		return fmt.Errorf("unknown help topic %q", "baseline "+topic[1])
 	case "policy":
 		if len(topic) == 1 || topic[1] == "init" {
@@ -206,6 +223,10 @@ func commandHelp(w io.Writer, topic []string) error {
 	case "plugin":
 		if len(topic) == 1 || topic[1] == "check" {
 			fmt.Fprint(w, pluginCheckHelp)
+			return nil
+		}
+		if topic[1] == "scaffold" {
+			fmt.Fprint(w, pluginScaffoldHelp)
 			return nil
 		}
 		return fmt.Errorf("unknown help topic %q", "plugin "+topic[1])
@@ -465,20 +486,40 @@ Flags:
 The plugin is run exactly once, the same way scan/capture would run it (see "Plugin scanners" in DESIGN_AND_ROADMAP.md), and its output is validated with the same structural checks as "linux-nixer validate".
 `
 
+const pluginScaffoldHelp = `linux-nixer plugin scaffold
+Create a minimal scanner plugin project that emits valid linux-nixer scan JSON and can be checked before customization.
+
+Usage:
+  linux-nixer plugin scaffold --type shell --out ./my-scanner [--name my-scanner]
+
+Examples:
+  linux-nixer plugin scaffold --type shell --out ./my-scanner
+  linux-nixer plugin scaffold --type python --out ./my-python-scanner
+  linux-nixer plugin scaffold --type go --out ./my-go-scanner --name my-go-scanner
+  linux-nixer plugin check --plugin ./my-scanner/my-scanner
+
+Flags:
+  --type NAME    Template type: shell, python, or go.
+  --out DIR      Directory to create or populate.
+  --name NAME    Executable/plugin name. Defaults to the --out directory name.
+`
+
 const generateHelp = `linux-nixer generate
 Render a conservative NixOS + Home Manager flake from reviewed scan JSON.
 
 Usage:
-  linux-nixer generate --scan reviewed.json --out ./nix-config [--format-nix]
+  linux-nixer generate --scan reviewed.json --out ./nix-config [--module-layout split|single] [--format-nix]
 
 Examples:
   linux-nixer generate --scan reviewed.json --out nix-config
+  linux-nixer generate --scan reviewed.json --out nix-config --module-layout single
   linux-nixer generate --scan reviewed.json --out nix-config --format-nix
 
 Flags:
-  --scan PATH     Read reviewed scan JSON.
-  --out DIR       Write generated flake project to DIR.
-  --format-nix    Format generated .nix files with nixfmt or alejandra when available.
+  --scan PATH          Read reviewed scan JSON.
+  --out DIR            Write generated flake project to DIR.
+  --module-layout NAME Generated module layout: split or single. Defaults to split.
+  --format-nix         Format generated .nix files with nixfmt or alejandra when available.
 `
 
 const doctorHelp = `linux-nixer doctor
@@ -578,6 +619,22 @@ Flags:
   --fail-on-drift    Exit non-zero if any entry has drifted from its pinned digest or could not be checked (network/backend failure). Default is report-only, exit 0.
 
 Purely informational — this never modifies the catalog. A drifted entry (its tag now resolves to a different digest than the one pinned in internal/baseline/catalog.go) means the image was rebuilt upstream since the catalog was last verified; bumping the pinned digest is a deliberate, reviewed catalog change, not something this command does automatically. See DESIGN_AND_ROADMAP.md's "Baseline catalog maintenance" section.
+`
+
+const baselineRefreshPlanHelp = `linux-nixer baseline refresh-plan
+Print the reviewed commands and pinned pull references needed to refresh bundled baseline manifests.
+
+Usage:
+  linux-nixer baseline refresh-plan [--json]
+
+Examples:
+  linux-nixer baseline refresh-plan
+  linux-nixer baseline refresh-plan --json
+
+Flags:
+  --json             Write machine-readable JSON refresh entries.
+
+This does not pull images or rewrite manifests. It is a local assistant for the catalog maintenance workflow: review drift with "baseline check", then refresh each manifest deliberately with the printed "baseline fetch" command.
 `
 
 const baselineImportHelp = `linux-nixer baseline import
@@ -1246,10 +1303,17 @@ func runPlugin(ctx context.Context, args []string, stdout io.Writer) error {
 		fmt.Fprint(stdout, pluginCheckHelp)
 		return nil
 	}
-	if len(args) == 0 || args[0] != "check" {
-		return errors.New("plugin supports only: plugin check")
+	if len(args) == 0 {
+		return errors.New("plugin supports: plugin check, plugin scaffold")
 	}
-	return runPluginCheck(ctx, args[1:], stdout)
+	switch args[0] {
+	case "check":
+		return runPluginCheck(ctx, args[1:], stdout)
+	case "scaffold":
+		return runPluginScaffold(args[1:], stdout)
+	default:
+		return errors.New("plugin supports: plugin check, plugin scaffold")
+	}
 }
 
 func runPluginCheck(ctx context.Context, args []string, stdout io.Writer) error {
@@ -1323,6 +1387,167 @@ func formatPluginCheckText(pluginPath string, result validate.Result) string {
 	return b.String()
 }
 
+func runPluginScaffold(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, pluginScaffoldHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("plugin scaffold", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	pluginType := fs.String("type", "", "template type: shell, python, or go")
+	out := fs.String("out", "", "output plugin directory")
+	name := fs.String("name", "", "plugin executable name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pluginType == "" || *out == "" {
+		return errors.New("plugin scaffold requires --type and --out; try `linux-nixer plugin scaffold --type shell --out ./my-scanner`")
+	}
+	kind := strings.ToLower(strings.TrimSpace(*pluginType))
+	if kind != "shell" && kind != "python" && kind != "go" {
+		return fmt.Errorf("invalid --type %q: expected shell, python, or go", *pluginType)
+	}
+	pluginName := *name
+	if pluginName == "" {
+		pluginName = filepath.Base(filepath.Clean(*out))
+	}
+	if !validPluginScaffoldName(pluginName) {
+		return fmt.Errorf("invalid --name %q: use letters, digits, dot, underscore, or hyphen only", pluginName)
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		return err
+	}
+
+	var executable string
+	switch kind {
+	case "shell":
+		executable = filepath.Join(*out, pluginName)
+		if err := writeNewFile(executable, []byte(shellPluginTemplate()), 0o755); err != nil {
+			return err
+		}
+	case "python":
+		executable = filepath.Join(*out, pluginName)
+		if err := writeNewFile(executable, []byte(pythonPluginTemplate()), 0o755); err != nil {
+			return err
+		}
+	case "go":
+		executable = filepath.Join(*out, pluginName)
+		if err := writeNewFile(filepath.Join(*out, "go.mod"), []byte(goPluginModTemplate(pluginName)), 0o644); err != nil {
+			return err
+		}
+		if err := writeNewFile(filepath.Join(*out, "main.go"), []byte(goPluginMainTemplate()), 0o644); err != nil {
+			return err
+		}
+		if err := writeNewFile(executable, []byte(goPluginWrapperTemplate()), 0o755); err != nil {
+			return err
+		}
+	}
+	readme := pluginScaffoldReadme(pluginName)
+	if err := writeNewFile(filepath.Join(*out, "README.md"), []byte(readme), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "wrote plugin scaffold: %s\ncheck with: linux-nixer plugin check --plugin %s\n", *out, executable)
+	return nil
+}
+
+func validPluginScaffoldName(name string) bool {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func writeNewFile(path string, data []byte, mode os.FileMode) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%s already exists", path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.WriteFile(path, data, mode)
+}
+
+func shellPluginTemplate() string {
+	return `#!/bin/sh
+cat >/dev/null
+cat <<'JSON'
+{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","name":"example","path":"/opt/example","decision":"candidate","reason":"found by sample plugin"}]}
+JSON
+`
+}
+
+func pythonPluginTemplate() string {
+	return `#!/usr/bin/env python3
+import json
+import sys
+
+sys.stdin.read()
+json.dump({
+    "schemaVersion": "linux-nixer.scan.v1",
+    "items": [{
+        "kind": "custom-finding",
+        "name": "example",
+        "path": "/opt/example",
+        "decision": "candidate",
+        "reason": "found by sample plugin",
+    }],
+}, sys.stdout)
+sys.stdout.write("\n")
+`
+}
+
+func goPluginModTemplate(name string) string {
+	return fmt.Sprintf("module %s\n\ngo 1.22\n", name)
+}
+
+func goPluginMainTemplate() string {
+	return `package main
+
+import (
+	"encoding/json"
+	"os"
+)
+
+func main() {
+	_, _ = os.Stdin.Read(make([]byte, 0))
+	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"schemaVersion": "linux-nixer.scan.v1",
+		"items": []map[string]string{{
+			"kind":     "custom-finding",
+			"name":     "example",
+			"path":     "/opt/example",
+			"decision": "candidate",
+			"reason":   "found by sample plugin",
+		}},
+	})
+}
+`
+}
+
+func goPluginWrapperTemplate() string {
+	return `#!/bin/sh
+set -eu
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec go run "$dir" "$@"
+`
+}
+
+func pluginScaffoldReadme(name string) string {
+	return fmt.Sprintf(`# linux-nixer scanner plugin
+
+Check the generated plugin before editing it:
+
+    linux-nixer plugin check --plugin ./%s
+
+The plugin reads a scan request from stdin and writes linux-nixer scan JSON to stdout.
+`, name)
+}
+
 func runGenerate(args []string, stdout io.Writer) error {
 	if hasHelp(args) {
 		fmt.Fprint(stdout, generateHelp)
@@ -1332,6 +1557,7 @@ func runGenerate(args []string, stdout io.Writer) error {
 	fs.SetOutput(stdout)
 	scanPath := fs.String("scan", "", "input reviewed scan JSON")
 	out := fs.String("out", "", "output flake directory")
+	moduleLayout := fs.String("module-layout", "split", "module layout: split or single")
 	formatNix := fs.Bool("format-nix", false, "format generated .nix files with nixfmt or alejandra when available")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1347,7 +1573,11 @@ func runGenerate(args []string, stdout io.Writer) error {
 	if !result.OK {
 		return fmt.Errorf("generate requires valid reviewed scan JSON: validation failed with %d errors", len(result.Errors))
 	}
-	if err := render.Project(*out, report); err != nil {
+	layout := strings.ToLower(strings.TrimSpace(*moduleLayout))
+	if layout != "split" && layout != "single" {
+		return fmt.Errorf("invalid --module-layout %q: expected split or single", *moduleLayout)
+	}
+	if err := render.ProjectWithOptions(*out, report, render.Options{ModuleLayout: layout}); err != nil {
 		return err
 	}
 	if *formatNix {
@@ -1438,7 +1668,7 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return nil
 	}
 	if len(args) == 0 {
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check; run `linux-nixer help baseline fetch` for common baseline setup")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check, baseline refresh-plan; run `linux-nixer help baseline fetch` for common baseline setup")
 	}
 	switch args[0] {
 	case "create":
@@ -1451,8 +1681,10 @@ func runBaseline(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return runBaselineList(args[1:], stdout)
 	case "check":
 		return runBaselineCheck(ctx, args[1:], stdout)
+	case "refresh-plan":
+		return runBaselineRefreshPlan(args[1:], stdout)
 	default:
-		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check; run `linux-nixer baseline list` to see supported fetch targets")
+		return errors.New("baseline supports: baseline create, baseline fetch, baseline import, baseline list, baseline check, baseline refresh-plan; run `linux-nixer baseline list` to see supported fetch targets")
 	}
 }
 
@@ -1523,6 +1755,59 @@ func runBaselineList(args []string, stdout io.Writer) error {
 		fmt.Fprintf(stdout, "%s %s (image: %s, digest: %s)\n", entry.Distro, entry.Release, entry.Image, entry.Digest)
 	}
 	return nil
+}
+
+func runBaselineRefreshPlan(args []string, stdout io.Writer) error {
+	if hasHelp(args) {
+		fmt.Fprint(stdout, baselineRefreshPlanHelp)
+		return nil
+	}
+	fs := flag.NewFlagSet("baseline refresh-plan", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	jsonOutput := fs.Bool("json", false, "write machine-readable JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	entries := baselineRefreshPlan()
+	if *jsonOutput {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(entries)
+	}
+	for _, entry := range entries {
+		bundled := "no"
+		if entry.Bundled {
+			bundled = "yes"
+		}
+		fmt.Fprintf(stdout, "%s %s\n", entry.Distro, entry.Release)
+		fmt.Fprintf(stdout, "  pull: %s\n", entry.PullRef)
+		fmt.Fprintf(stdout, "  bundled: %s\n", bundled)
+		fmt.Fprintf(stdout, "  check: %s\n", entry.CheckCommand)
+		fmt.Fprintf(stdout, "  refresh: %s\n", entry.FetchCommand)
+	}
+	return nil
+}
+
+func baselineRefreshPlan() []baselineRefreshPlanEntry {
+	var out []baselineRefreshPlanEntry
+	for _, entry := range baseline.CatalogEntries() {
+		pullRef, _ := baseline.CatalogQualifiedImageRef(entry.Distro, entry.Release)
+		_, bundled, err := baseline.BundledManifest(entry.Distro, entry.Release)
+		if err != nil {
+			bundled = false
+		}
+		out = append(out, baselineRefreshPlanEntry{
+			Distro:       entry.Distro,
+			Release:      entry.Release,
+			Image:        entry.Image,
+			Digest:       entry.Digest,
+			PullRef:      pullRef,
+			Bundled:      bundled,
+			CheckCommand: "linux-nixer baseline check --fail-on-drift",
+			FetchCommand: fmt.Sprintf("linux-nixer baseline fetch --distro %s --release %s --out %s", entry.Distro, entry.Release, filepath.Join("baselines", entry.Distro+"-"+entry.Release+".json")),
+		})
+	}
+	return out
 }
 
 func runBaselineCreate(ctx context.Context, args []string, stdout io.Writer) error {

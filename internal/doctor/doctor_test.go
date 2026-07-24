@@ -76,6 +76,31 @@ func TestCheckProjectFilesCoversEveryRenderedFile(t *testing.T) {
 	}
 }
 
+func TestCheckProjectFilesCoversSingleModuleLayout(t *testing.T) {
+	dir := t.TempDir()
+	if err := render.ProjectWithOptions(dir, model.ScanReport{}, render.Options{ModuleLayout: "single"}); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := CheckProjectFiles(dir)
+	checked := map[string]bool{}
+	for _, check := range checks {
+		rel := strings.TrimPrefix(check.Name, "file:")
+		checked[rel] = true
+		if !check.OK {
+			t.Fatalf("check %+v should pass against single module render output", check)
+		}
+	}
+	if !checked["modules/migration.nix"] {
+		t.Fatalf("single module layout should check modules/migration.nix: %+v", checked)
+	}
+	for _, rel := range []string{"modules/services.nix", "modules/filesystem-findings.nix", "modules/containers.nix"} {
+		if checked[rel] {
+			t.Fatalf("single module layout should not require %s", rel)
+		}
+	}
+}
+
 func TestCheckProjectFileDiffReportsMissingAndExtraFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := render.Project(dir, model.ScanReport{}); err != nil {

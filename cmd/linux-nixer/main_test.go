@@ -321,6 +321,15 @@ func TestRunCommandHelpTopics(t *testing.T) {
 			},
 		},
 		{
+			name: "baseline refresh-plan help",
+			args: []string{"help", "baseline", "refresh-plan"},
+			wants: []string{
+				"linux-nixer baseline refresh-plan",
+				"--json",
+				"catalog maintenance workflow",
+			},
+		},
+		{
 			name: "review help",
 			args: []string{"review", "-h"},
 			wants: []string{
@@ -347,6 +356,7 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"linux-nixer generate",
 				"--scan PATH",
 				"--out DIR",
+				"--module-layout NAME",
 				"--format-nix",
 			},
 		},
@@ -358,6 +368,15 @@ func TestRunCommandHelpTopics(t *testing.T) {
 				"--vm",
 				"--boot",
 				"--boot-readiness",
+			},
+		},
+		{
+			name: "plugin scaffold help",
+			args: []string{"help", "plugin", "scaffold"},
+			wants: []string{
+				"linux-nixer plugin scaffold",
+				"--type NAME",
+				"linux-nixer plugin check",
 			},
 		},
 	}
@@ -485,6 +504,53 @@ func TestRunGenerateFormatNixWarnsWhenFormatterMissing(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "warning: --format-nix requested") {
 		t.Fatalf("stdout missing formatter warning: %s", stdout.String())
+	}
+}
+
+func TestRunGenerateSingleModuleLayout(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	out := filepath.Join(dir, "nix-config")
+	writeScan(t, scanPath, model.ScanReport{
+		SchemaVersion: model.SchemaVersion,
+		Packages: []model.Package{{
+			Manager:  "apt",
+			Name:     "curl",
+			NixNames: []string{"curl"},
+			Decision: model.DecisionConfirmed,
+		}},
+	})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"generate", "--scan", scanPath, "--out", out, "--module-layout", "single"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(out, "hosts/generated/configuration.nix"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfg), "../../modules/migration.nix") || strings.Contains(string(cfg), "../../modules/services.nix") {
+		t.Fatalf("unexpected single layout configuration:\n%s", cfg)
+	}
+	if _, err := os.Stat(filepath.Join(out, "modules/migration.nix")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunGenerateRejectsUnknownModuleLayout(t *testing.T) {
+	dir := t.TempDir()
+	scanPath := filepath.Join(dir, "reviewed.json")
+	out := filepath.Join(dir, "nix-config")
+	writeScan(t, scanPath, model.ScanReport{SchemaVersion: model.SchemaVersion})
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"generate", "--scan", scanPath, "--out", out, "--module-layout", "compact"}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected invalid module layout to fail")
+	}
+	if !strings.Contains(err.Error(), "module-layout") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -637,6 +703,44 @@ func TestRunPluginCheckSucceedsForValidPlugin(t *testing.T) {
 	}
 	if !got.OK || got.Checked != 1 {
 		t.Fatalf("unexpected plugin check json: %+v", got)
+	}
+}
+
+func TestRunPluginScaffoldShellCreatesCheckablePlugin(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "my-scanner")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "scaffold", "--type", "shell", "--out", out}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginPath := filepath.Join(out, "my-scanner")
+	if _, err := os.Stat(pluginPath); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "plugin check --plugin") {
+		t.Fatalf("scaffold output missing check command: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("generated plugin should pass check: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "plugin OK") {
+		t.Fatalf("expected generated plugin to pass, got: %s", stdout.String())
+	}
+}
+
+func TestRunPluginScaffoldRejectsInvalidType(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "scaffold", "--type", "ruby", "--out", t.TempDir()}, strings.NewReader(""), &stdout, &stdout)
+	if err == nil {
+		t.Fatal("expected invalid scaffold type to fail")
+	}
+	if !strings.Contains(err.Error(), "expected shell, python, or go") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -913,8 +1017,8 @@ func TestRunBaselineUnknownSubcommandFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown baseline subcommand")
 	}
-	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") || !strings.Contains(err.Error(), "baseline list") || !strings.Contains(err.Error(), "baseline check") {
-		t.Fatalf("error should mention all five subcommands: %v", err)
+	if !strings.Contains(err.Error(), "baseline create") || !strings.Contains(err.Error(), "baseline fetch") || !strings.Contains(err.Error(), "baseline import") || !strings.Contains(err.Error(), "baseline list") || !strings.Contains(err.Error(), "baseline check") || !strings.Contains(err.Error(), "baseline refresh-plan") {
+		t.Fatalf("error should mention all baseline subcommands: %v", err)
 	}
 }
 
@@ -969,6 +1073,48 @@ func TestRunBaselineListJSONOutput(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected an ubuntu 24.04 entry in JSON output: %s", stdout.String())
+	}
+}
+
+func TestRunBaselineRefreshPlanPrintsPinnedCommands(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"baseline", "refresh-plan"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatalf("baseline refresh-plan failed: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"ubuntu 24.04",
+		"pull: docker.io/library/ubuntu:24.04@sha256:",
+		"bundled: yes",
+		"check: linux-nixer baseline check --fail-on-drift",
+		"refresh: linux-nixer baseline fetch --distro ubuntu --release 24.04 --out baselines/ubuntu-24.04.json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("refresh plan missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunBaselineRefreshPlanJSONOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"baseline", "refresh-plan", "--json"}, strings.NewReader(""), &stdout, &stdout); err != nil {
+		t.Fatalf("baseline refresh-plan --json failed: %v", err)
+	}
+	var entries []baselineRefreshPlanEntry
+	if err := json.Unmarshal(stdout.Bytes(), &entries); err != nil {
+		t.Fatalf("baseline refresh-plan --json did not produce valid JSON: %v\noutput: %s", err, stdout.String())
+	}
+	var found bool
+	for _, entry := range entries {
+		if entry.Distro == "ubuntu" && entry.Release == "24.04" {
+			found = true
+			if !strings.HasPrefix(entry.PullRef, "docker.io/library/ubuntu:24.04@sha256:") || !entry.Bundled || entry.FetchCommand == "" || entry.CheckCommand == "" {
+				t.Fatalf("unexpected ubuntu refresh plan entry: %+v", entry)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected ubuntu 24.04 refresh plan entry: %s", stdout.String())
 	}
 }
 

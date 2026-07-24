@@ -85,6 +85,16 @@ func CatalogDigest(distro, release string) (string, bool) {
 	return entry.digest, ok
 }
 
+// CatalogQualifiedImageRef returns the exact pinned Docker Hub Official
+// Image reference used by Fetch for a distro/release pair.
+func CatalogQualifiedImageRef(distro, release string) (string, bool) {
+	entry, ok := lookupCatalogEntry(distro, release)
+	if !ok {
+		return "", false
+	}
+	return qualifiedImageRef(entry.image) + "@" + entry.digest, true
+}
+
 func lookupCatalogEntry(distro, release string) (catalogEntry, bool) {
 	distro = strings.ToLower(strings.TrimSpace(distro))
 	release = strings.TrimSpace(release)

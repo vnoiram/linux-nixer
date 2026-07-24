@@ -100,9 +100,44 @@ var expectedProjectFiles = []string{
 	"reports/hardware.md",
 }
 
+var expectedSingleModuleProjectFiles = []string{
+	"flake.nix",
+	"hosts/generated/configuration.nix",
+	"users/home.nix",
+	"modules/migration.nix",
+	"reports/package-sources.md",
+	"reports/filesystem.md",
+	"reports/users.md",
+	"reports/containers.md",
+	"reports/git-sources.md",
+	"reports/languages.md",
+	"reports/index.md",
+	"reports/migration-dashboard.md",
+	"reports/unmapped-packages.md",
+	"reports/service-render-eligibility.md",
+	"reports/baseline-provenance.md",
+	"reports/dev-projects.md",
+	"reports/user-config.md",
+	"reports/desktop.md",
+	"reports/migration-report.md",
+	"reports/migration-checklist.md",
+	"reports/migration-annotations.nix",
+	"reports/system-config.md",
+	"reports/devops-config.md",
+	"reports/backup-sync.md",
+	"reports/hardware.md",
+}
+
+func expectedFilesForProject(project string) []string {
+	if _, err := os.Stat(filepath.Join(project, "modules/migration.nix")); err == nil {
+		return expectedSingleModuleProjectFiles
+	}
+	return expectedProjectFiles
+}
+
 func CheckProjectFiles(project string) []Check {
 	var checks []Check
-	for _, rel := range expectedProjectFiles {
+	for _, rel := range expectedFilesForProject(project) {
 		_, err := os.Stat(filepath.Join(project, rel))
 		checks = append(checks, Check{Name: "file:" + rel, OK: err == nil, Message: errorMessage(err)})
 	}
@@ -110,9 +145,10 @@ func CheckProjectFiles(project string) []Check {
 }
 
 func CheckProjectFileDiff(project string) ProjectFileDiff {
-	diff := ProjectFileDiff{Expected: append([]string{}, expectedProjectFiles...)}
+	expectedFiles := expectedFilesForProject(project)
+	diff := ProjectFileDiff{Expected: append([]string{}, expectedFiles...)}
 	expected := map[string]bool{}
-	for _, rel := range expectedProjectFiles {
+	for _, rel := range expectedFiles {
 		expected[rel] = true
 		if _, err := os.Stat(filepath.Join(project, rel)); err != nil {
 			diff.Missing = append(diff.Missing, rel)

@@ -51,6 +51,18 @@ func TestBundledManifestKnownLookups(t *testing.T) {
 	}
 }
 
+func TestEveryCatalogEntryHasBundledManifest(t *testing.T) {
+	for _, entry := range CatalogEntries() {
+		manifest, ok, err := BundledManifest(entry.Distro, entry.Release)
+		if err != nil {
+			t.Fatalf("BundledManifest(%q, %q) error: %v", entry.Distro, entry.Release, err)
+		}
+		if !ok || manifest == nil {
+			t.Fatalf("catalog entry %s:%s has no bundled manifest", entry.Distro, entry.Release)
+		}
+	}
+}
+
 func TestBundledManifestUnknownStaysUnknown(t *testing.T) {
 	cases := []struct{ distro, release string }{
 		{"ubuntu", "16.04"},

@@ -21,6 +21,9 @@ func Resolve(id, cwd string) Resolution {
 	}
 	name, ok := NormalizeID(id)
 	if !ok {
+		name, ok = NormalizeCustomName(id)
+	}
+	if !ok {
 		return Resolution{}
 	}
 	for _, candidate := range baselineCandidates(name, cwd) {
@@ -42,6 +45,23 @@ func NormalizeID(id string) (string, bool) {
 		return "", false
 	}
 	return distro + "-" + release + ".json", true
+}
+
+func NormalizeCustomName(name string) (string, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\:`) || strings.Contains(name, "..") {
+		return "", false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return "", false
+	}
+	if !strings.HasSuffix(name, ".json") {
+		name += ".json"
+	}
+	return name, true
 }
 
 type candidate struct {
