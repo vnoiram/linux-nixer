@@ -706,6 +706,61 @@ func TestRunPluginCheckSucceedsForValidPlugin(t *testing.T) {
 	}
 }
 
+func TestRunPluginCheckPrintsCapabilities(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "caps-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = capabilities ]; then\n" +
+		`  printf '%s\n' '{"schemaVersion":"linux-nixer.plugin-capabilities.v1","name":"caps-plugin","version":"1.0.0","domains":["custom-finding"],"runtimeNeeds":["shell"]}'` + "\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"cat >/dev/null\n" +
+		`printf '%s\n' '{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","path":"/opt/thing","reason":"found by plugin"}]}'` + "\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath, "--capabilities"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("expected success, got %v:\n%s", err, stdout.String())
+	}
+	for _, want := range []string{"plugin OK", "Capabilities:", "name: caps-plugin", "domains: custom-finding", "runtime needs: shell"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("plugin check capabilities output missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	err = run(context.Background(), []string{"plugin", "check", "--plugin", pluginPath, "--capabilities", "--json"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("expected JSON success, got %v:\n%s", err, stdout.String())
+	}
+	var got struct {
+		OK           bool `json:"ok"`
+		Capabilities struct {
+			Name string `json:"name"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("invalid capabilities JSON: %v\n%s", err, stdout.String())
+	}
+	if !got.OK || got.Capabilities.Name != "caps-plugin" {
+		t.Fatalf("unexpected capabilities JSON: %+v", got)
+	}
+}
+
+func TestExampleShellPluginPassesCheck(t *testing.T) {
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"plugin", "check", "--plugin", filepath.Join("..", "..", "examples", "plugins", "shell", "sample-scanner"), "--capabilities"}, strings.NewReader(""), &stdout, &stdout)
+	if err != nil {
+		t.Fatalf("example shell plugin should pass check: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "sample-shell-scanner") {
+		t.Fatalf("example shell plugin output missing capabilities:\n%s", stdout.String())
+	}
+}
+
 func TestRunPluginScaffoldShellCreatesCheckablePlugin(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "my-scanner")

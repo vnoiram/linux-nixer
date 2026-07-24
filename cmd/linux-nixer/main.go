@@ -471,17 +471,19 @@ const pluginCheckHelp = `linux-nixer plugin check
 Invoke a scanner plugin once with a synthetic request and validate its JSON output before pointing a real scan/capture at it.
 
 Usage:
-  linux-nixer plugin check --plugin PATH [--timeout 30s] [--json]
+  linux-nixer plugin check --plugin PATH [--timeout 30s] [--json] [--capabilities]
 
 Examples:
   linux-nixer plugin check --plugin ./my-scanner
   linux-nixer plugin check --plugin ./my-scanner --timeout 5s
   linux-nixer plugin check --plugin ./my-scanner --json
+  linux-nixer plugin check --plugin ./my-scanner --capabilities
 
 Flags:
-  --plugin PATH   Path to the plugin executable to check.
-  --timeout VALUE Timeout for the plugin invocation. Defaults to 30s.
-  --json          Write machine-readable JSON validation result.
+  --plugin PATH    Path to the plugin executable to check.
+  --timeout VALUE  Timeout for the plugin invocation. Defaults to 30s.
+  --json           Write machine-readable JSON validation result.
+  --capabilities   Also query optional plugin capability metadata.
 
 The plugin is run exactly once, the same way scan/capture would run it (see "Plugin scanners" in DESIGN_AND_ROADMAP.md), and its output is validated with the same structural checks as "linux-nixer validate".
 `
@@ -1326,6 +1328,7 @@ func runPluginCheck(ctx context.Context, args []string, stdout io.Writer) error 
 	pluginPath := fs.String("plugin", "", "path to the plugin executable to check")
 	timeout := fs.Duration("timeout", 30*time.Second, "timeout for the plugin invocation")
 	jsonOutput := fs.Bool("json", false, "write machine-readable JSON validation result")
+	includeCapabilities := fs.Bool("capabilities", false, "also query optional plugin capability metadata")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -1339,14 +1342,22 @@ func runPluginCheck(ctx context.Context, args []string, stdout io.Writer) error 
 			OK:     false,
 			Errors: []validate.Issue{{Path: *pluginPath, Message: err.Error()}},
 		}
-		if writeErr := writePluginCheckResult(stdout, *pluginPath, result, *jsonOutput); writeErr != nil {
+		if writeErr := writePluginCheckResult(stdout, *pluginPath, result, nil, *jsonOutput); writeErr != nil {
 			return writeErr
 		}
 		return fmt.Errorf("plugin check failed: %v", err)
 	}
 
 	result := validate.ScanReport(report)
-	if err := writePluginCheckResult(stdout, *pluginPath, result, *jsonOutput); err != nil {
+	var caps *scanner.PluginCapabilities
+	if *includeCapabilities {
+		if got, ok, err := scanner.CheckPluginCapabilities(ctx, *pluginPath, *timeout); err != nil {
+			return err
+		} else if ok {
+			caps = &got
+		}
+	}
+	if err := writePluginCheckResult(stdout, *pluginPath, result, caps, *jsonOutput); err != nil {
 		return err
 	}
 	if !result.OK {
@@ -1355,17 +1366,26 @@ func runPluginCheck(ctx context.Context, args []string, stdout io.Writer) error 
 	return nil
 }
 
-func writePluginCheckResult(stdout io.Writer, pluginPath string, result validate.Result, jsonOutput bool) error {
+func writePluginCheckResult(stdout io.Writer, pluginPath string, result validate.Result, caps *scanner.PluginCapabilities, jsonOutput bool) error {
 	if jsonOutput {
+		if caps != nil {
+			out := struct {
+				validate.Result
+				Capabilities *scanner.PluginCapabilities `json:"capabilities,omitempty"`
+			}{Result: result, Capabilities: caps}
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(result)
 	}
-	fmt.Fprint(stdout, formatPluginCheckText(pluginPath, result))
+	fmt.Fprint(stdout, formatPluginCheckText(pluginPath, result, caps))
 	return nil
 }
 
-func formatPluginCheckText(pluginPath string, result validate.Result) string {
+func formatPluginCheckText(pluginPath string, result validate.Result, caps *scanner.PluginCapabilities) string {
 	var b strings.Builder
 	if result.OK {
 		fmt.Fprintf(&b, "plugin OK: %s (checked %d findings)\n", pluginPath, result.Checked)
@@ -1382,6 +1402,24 @@ func formatPluginCheckText(pluginPath string, result validate.Result) string {
 		b.WriteString("\nWarnings:\n")
 		for _, issue := range result.Warnings {
 			fmt.Fprintf(&b, "- %s: %s\n", issue.Path, issue.Message)
+		}
+	}
+	if caps != nil {
+		b.WriteString("\nCapabilities:\n")
+		if caps.Name != "" {
+			fmt.Fprintf(&b, "- name: %s\n", caps.Name)
+		}
+		if caps.Version != "" {
+			fmt.Fprintf(&b, "- version: %s\n", caps.Version)
+		}
+		if caps.Author != "" {
+			fmt.Fprintf(&b, "- author: %s\n", caps.Author)
+		}
+		if len(caps.Domains) > 0 {
+			fmt.Fprintf(&b, "- domains: %s\n", strings.Join(caps.Domains, ", "))
+		}
+		if len(caps.RuntimeNeeds) > 0 {
+			fmt.Fprintf(&b, "- runtime needs: %s\n", strings.Join(caps.RuntimeNeeds, ", "))
 		}
 	}
 	return b.String()
@@ -1474,6 +1512,12 @@ func writeNewFile(path string, data []byte, mode os.FileMode) error {
 
 func shellPluginTemplate() string {
 	return `#!/bin/sh
+if [ "${1:-}" = "capabilities" ]; then
+  cat <<'JSON'
+{"schemaVersion":"linux-nixer.plugin-capabilities.v1","name":"sample-shell-scanner","version":"0.1.0","domains":["custom-finding"],"runtimeNeeds":["shell"]}
+JSON
+  exit 0
+fi
 cat >/dev/null
 cat <<'JSON'
 {"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","name":"example","path":"/opt/example","decision":"candidate","reason":"found by sample plugin"}]}
@@ -1485,6 +1529,17 @@ func pythonPluginTemplate() string {
 	return `#!/usr/bin/env python3
 import json
 import sys
+
+if len(sys.argv) > 1 and sys.argv[1] == "capabilities":
+    json.dump({
+        "schemaVersion": "linux-nixer.plugin-capabilities.v1",
+        "name": "sample-python-scanner",
+        "version": "0.1.0",
+        "domains": ["custom-finding"],
+        "runtimeNeeds": ["python3"],
+    }, sys.stdout)
+    sys.stdout.write("\n")
+    raise SystemExit(0)
 
 sys.stdin.read()
 json.dump({
@@ -1514,6 +1569,16 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "capabilities" {
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+			"schemaVersion": "linux-nixer.plugin-capabilities.v1",
+			"name":          "sample-go-scanner",
+			"version":       "0.1.0",
+			"domains":       []string{"custom-finding"},
+			"runtimeNeeds":  []string{"go"},
+		})
+		return
+	}
 	_, _ = os.Stdin.Read(make([]byte, 0))
 	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"schemaVersion": "linux-nixer.scan.v1",

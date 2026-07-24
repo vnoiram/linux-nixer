@@ -2,11 +2,8 @@ package scanner
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +55,7 @@ func (FilesystemDiffScanner) Scan(ctx context.Context, opts Options, report *mod
 			if err != nil || !info.Mode().IsRegular() {
 				return nil
 			}
-			finding := classifyFile(path, disp, info)
+			finding := classifyFile(opts.Root, path, disp, info)
 			if baselineLoaded {
 				changes := baselineChanges(finding, baselineEntries[disp])
 				if len(changes) == 0 {
@@ -155,14 +152,14 @@ func baselineChanges(finding model.FileFinding, base baselineFile) []string {
 	return changes
 }
 
-func classifyFile(abs, disp string, info os.FileInfo) model.FileFinding {
+func classifyFile(root, abs, disp string, info os.FileInfo) model.FileFinding {
 	f := model.FileFinding{Path: disp, Type: "file", Mode: info.Mode().String(), Size: info.Size(), Decision: model.DecisionCandidate}
 	if info.Size() <= 10*1024*1024 {
-		if sum, err := sha256File(abs); err == nil {
+		if sum, err := safeSHA256File(root, abs); err == nil {
 			f.SHA256 = sum
 		}
 	}
-	head := readHead(abs, 256)
+	head := safeReadHead(root, abs, 256)
 	switch {
 	case strings.HasPrefix(string(head), "\x7fELF"):
 		f.Category = "executable"
@@ -227,29 +224,6 @@ func filesystemLocationHint(path string) string {
 	default:
 		return ""
 	}
-}
-
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func readHead(path string, max int64) []byte {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	b, _ := io.ReadAll(io.LimitReader(f, max))
-	return b
 }
 
 func shouldExclude(path string, excludes []string) bool {

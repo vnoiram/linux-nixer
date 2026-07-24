@@ -108,7 +108,7 @@ func scanSecretContentHints(opts Options, report *model.ScanReport) {
 			if err != nil || !info.Mode().IsRegular() || info.Size() > 1024*1024 {
 				return nil
 			}
-			if looksSecret(disp, readHead(path, 4096)) {
+			if looksSecret(disp, safeReadHead(opts.Root, path, 4096)) {
 				addSecretFinding(opts, report, path, "secret-like content; raw value omitted")
 			}
 			return nil
@@ -168,7 +168,7 @@ func addSecretFinding(opts Options, report *model.ScanReport, path, reason strin
 		SecretRisk: true,
 	}
 	if info.Size() <= 10*1024*1024 {
-		if sum, err := sha256File(resolved); err == nil {
+		if sum, err := safeSHA256File(opts.Root, resolved); err == nil {
 			finding.SHA256 = sum
 		}
 	}

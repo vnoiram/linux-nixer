@@ -26,6 +26,15 @@ type PluginRequest struct {
 	Excludes      []string `json:"excludes,omitempty"`
 }
 
+type PluginCapabilities struct {
+	SchemaVersion string   `json:"schemaVersion,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Version       string   `json:"version,omitempty"`
+	Author        string   `json:"author,omitempty"`
+	Domains       []string `json:"domains,omitempty"`
+	RuntimeNeeds  []string `json:"runtimeNeeds,omitempty"`
+}
+
 // PluginRunner executes a plugin and returns its parsed result. Injectable
 // for hermetic tests, matching this package's existing CommandRunner
 // pattern (Options.Runner) used throughout for the same reason.
@@ -98,6 +107,19 @@ func CheckPlugin(ctx context.Context, path string, timeout time.Duration) (model
 	return runPluginProcess(runCtx, path, req)
 }
 
+func CheckPluginCapabilities(ctx context.Context, path string, timeout time.Duration) (PluginCapabilities, bool, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	caps, err := runPluginCapabilities(runCtx, path)
+	if err != nil {
+		return PluginCapabilities{}, false, nil
+	}
+	return caps, true, nil
+}
+
 func mergePluginReport(dst *model.ScanReport, src model.ScanReport) {
 	dst.Packages = append(dst.Packages, src.Packages...)
 	dst.Services = append(dst.Services, src.Services...)
@@ -130,12 +152,67 @@ func runPluginProcess(ctx context.Context, path string, req PluginRequest) (mode
 	if err := cmd.Run(); err != nil {
 		return model.ScanReport{}, fmt.Errorf("%w: %s", err, stderr.String())
 	}
+	return parsePluginOutput(stdout.Bytes())
+}
+
+func runPluginCapabilities(ctx context.Context, path string) (PluginCapabilities, error) {
+	cmd := exec.CommandContext(ctx, path, "capabilities")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Run(); err != nil {
+		return PluginCapabilities{}, fmt.Errorf("%w: %s", err, stderr.String())
+	}
+	var caps PluginCapabilities
+	if err := json.Unmarshal(stdout.Bytes(), &caps); err != nil {
+		return PluginCapabilities{}, fmt.Errorf("invalid JSON capabilities: %w", err)
+	}
+	return caps, nil
+}
+
+func parsePluginOutput(output []byte) (model.ScanReport, error) {
 	var report model.ScanReport
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		return model.ScanReport{}, fmt.Errorf("invalid JSON output: %w", err)
+	if err := json.Unmarshal(output, &report); err == nil {
+		if err := validatePluginReportSchema(report); err != nil {
+			return model.ScanReport{}, err
+		}
+		return report, nil
 	}
+
+	var merged model.ScanReport
+	var sawReport bool
+	for lineNo, line := range bytes.Split(output, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var part model.ScanReport
+		if err := json.Unmarshal(line, &part); err != nil {
+			return model.ScanReport{}, fmt.Errorf("invalid JSON output line %d: %w", lineNo+1, err)
+		}
+		if err := validatePluginReportSchema(part); err != nil {
+			return model.ScanReport{}, err
+		}
+		sawReport = true
+		mergePluginReport(&merged, part)
+		if merged.SchemaVersion == "" {
+			merged.SchemaVersion = part.SchemaVersion
+		}
+	}
+	if !sawReport {
+		return model.ScanReport{}, fmt.Errorf("invalid JSON output: empty plugin output")
+	}
+	return merged, nil
+}
+
+func validatePluginReportSchema(report model.ScanReport) error {
 	if report.SchemaVersion != "" && report.SchemaVersion != model.SchemaVersion {
-		return model.ScanReport{}, fmt.Errorf("unsupported schemaVersion %q, want %q", report.SchemaVersion, model.SchemaVersion)
+		return fmt.Errorf("unsupported schemaVersion %q, want %q", report.SchemaVersion, model.SchemaVersion)
 	}
-	return report, nil
+	return nil
 }

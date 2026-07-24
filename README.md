@@ -12,7 +12,7 @@ See [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for design assumptions, safet
 
 This is an early implementation scaffold. It includes:
 
-- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`/`fetch`/`import`/`list`/`check`, `policy init`, `plugin check`
+- Go CLI commands: `scan`, `capture`, `review`, `summary`, `validate`, `generate`, `doctor`, `baseline create`/`fetch`/`import`/`list`/`check`, `policy init`, `plugin check`, `plugin scaffold`
 - Registry-based scanners for host/user metadata, groups, apt, language tooling, Git sources, containers, secrets, system config files, DevOps/project config, user shell settings, desktop settings, hardware/peripheral settings, and filesystem findings
 - Dedicated package ecosystem scanners and safe detail summaries for snap, flatpak, AppImage, and Homebrew on Linux
 - Baseline manifest creation for rootfs comparisons
@@ -73,12 +73,19 @@ After capture, review `nix-config/reports/migration-checklist.md` for manual pac
 bin/linux-nixer scan --plugin ./my-scanner --out scan.json
 ```
 
-Plugins always run as the current user, never with `--sudo` elevation, and are bounded by a 30s timeout, overridable with `--plugin-timeout DURATION`. See "Plugin scanners" in [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for the full protocol and a minimal example. A policy file's `plugins` list sets default plugin paths, merged with `--plugin` the same way as other policy list options.
+Plugins always run as the current user, never with `--sudo` elevation, and are bounded by a 30s timeout, overridable with `--plugin-timeout DURATION`. See "Plugin scanners" in [DESIGN_AND_ROADMAP.md](DESIGN_AND_ROADMAP.md) for the full protocol and minimal examples. A policy file's `plugins` list sets default plugin paths, merged with `--plugin` the same way as other policy list options.
+
+Plugins can write either one scan JSON document or newline-delimited scan JSON fragments; fragments are merged in order. They may also support an optional `capabilities` subcommand for metadata such as name, version, domains, and runtime needs. See [examples/plugins](examples/plugins) or generate a starting point:
+
+```sh
+bin/linux-nixer plugin scaffold --type shell --out ./my-scanner
+```
 
 Before pointing a real scan at a new plugin, check its protocol compliance directly:
 
 ```sh
 bin/linux-nixer plugin check --plugin ./my-scanner
+bin/linux-nixer plugin check --plugin ./examples/plugins/shell/sample-scanner --capabilities
 ```
 
 This runs the plugin once with a synthetic request and validates its output with the same structural checks as `validate`, so a broken plugin (invalid JSON, wrong schema version, an item missing `kind`, etc.) is caught with a clear message instead of surfacing mid-scan.

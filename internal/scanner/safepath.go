@@ -15,6 +15,9 @@
 package scanner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,4 +85,43 @@ func safeReadFile(root, path string) ([]byte, bool) {
 		return nil, false
 	}
 	return data, true
+}
+
+func safeReadHead(root, path string, max int64) []byte {
+	resolved, ok := safeRealPath(root, path)
+	if !ok {
+		return nil
+	}
+	return readHead(resolved, max)
+}
+
+func safeSHA256File(root, path string) (string, error) {
+	resolved, ok := safeRealPath(root, path)
+	if !ok {
+		return "", os.ErrPermission
+	}
+	return sha256File(resolved)
+}
+
+func sha256File(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func readHead(path string, max int64) []byte {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(io.LimitReader(f, max))
+	return b
 }

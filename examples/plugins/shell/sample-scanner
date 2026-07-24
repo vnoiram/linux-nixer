@@ -1,0 +1,12 @@
+#!/bin/sh
+if [ "${1:-}" = "capabilities" ]; then
+  cat <<'JSON'
+{"schemaVersion":"linux-nixer.plugin-capabilities.v1","name":"sample-shell-scanner","version":"0.1.0","author":"linux-nixer","domains":["custom-finding"],"runtimeNeeds":["shell"]}
+JSON
+  exit 0
+fi
+cat >/dev/null
+cat <<'JSON'
+{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","name":"shell-sample","path":"/opt/shell-sample","decision":"candidate","reason":"found by shell sample plugin"}]}
+JSON
+

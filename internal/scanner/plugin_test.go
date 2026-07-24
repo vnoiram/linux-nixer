@@ -133,6 +133,66 @@ func TestCheckPluginReturnsReportOnSuccess(t *testing.T) {
 	}
 }
 
+func TestCheckPluginMergesNDJSONOutput(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "ndjson-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		`printf '%s\n' '{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-a","path":"/opt/a","reason":"a"}]}'` + "\n" +
+		`printf '%s\n' '{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-b","path":"/opt/b","reason":"b"}]}'` + "\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := CheckPlugin(context.Background(), pluginPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Items) != 2 || report.Items[0].Kind != "custom-a" || report.Items[1].Kind != "custom-b" {
+		t.Fatalf("unexpected merged NDJSON report: %+v", report)
+	}
+}
+
+func TestCheckPluginRejectsMalformedNDJSONLine(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "bad-ndjson-plugin.sh")
+	script := "#!/bin/sh\ncat >/dev/null\nprintf '%s\n' '{bad json}'\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := CheckPlugin(context.Background(), pluginPath, 0)
+	if err == nil {
+		t.Fatal("expected malformed NDJSON to fail")
+	}
+	if !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("error should name malformed line: %v", err)
+	}
+}
+
+func TestCheckPluginCapabilities(t *testing.T) {
+	dir := t.TempDir()
+	pluginPath := filepath.Join(dir, "caps-plugin.sh")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = capabilities ]; then\n" +
+		`  printf '%s\n' '{"schemaVersion":"linux-nixer.plugin-capabilities.v1","name":"caps","version":"1.0.0","domains":["custom-finding"],"runtimeNeeds":["shell"]}'` + "\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"cat >/dev/null\n" +
+		`printf '%s\n' '{"schemaVersion":"linux-nixer.scan.v1","items":[{"kind":"custom-finding","path":"/opt/thing","reason":"found"}]}'` + "\n"
+	if err := os.WriteFile(pluginPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	caps, ok, err := CheckPluginCapabilities(context.Background(), pluginPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || caps.Name != "caps" || caps.Version != "1.0.0" || len(caps.Domains) != 1 || caps.Domains[0] != "custom-finding" {
+		t.Fatalf("unexpected capabilities: ok=%v caps=%+v", ok, caps)
+	}
+}
+
 func TestCheckPluginRespectsTimeout(t *testing.T) {
 	dir := t.TempDir()
 	pluginPath := filepath.Join(dir, "slow-check-plugin.sh")

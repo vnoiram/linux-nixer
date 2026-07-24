@@ -25,6 +25,12 @@ func TestSafeRealPathRejectsEscapingSymlink(t *testing.T) {
 	if _, ok := safeStat(root, linkPath); ok {
 		t.Fatalf("expected safeStat to refuse stating through an escaping symlink")
 	}
+	if head := safeReadHead(root, linkPath, 64); len(head) > 0 {
+		t.Fatalf("expected safeReadHead to refuse reading through an escaping symlink, got: %s", head)
+	}
+	if sum, err := safeSHA256File(root, linkPath); err == nil || sum != "" {
+		t.Fatalf("expected safeSHA256File to refuse hashing through an escaping symlink, got %q err=%v", sum, err)
+	}
 }
 
 func TestSafeRealPathAllowsInRootSymlink(t *testing.T) {
@@ -39,6 +45,12 @@ func TestSafeRealPathAllowsInRootSymlink(t *testing.T) {
 	}
 	if string(data) != "NAME=Ubuntu\n" {
 		t.Fatalf("unexpected content: %q", data)
+	}
+	if head := safeReadHead(root, linkPath, 4); string(head) != "NAME" {
+		t.Fatalf("unexpected head: %q", head)
+	}
+	if sum, err := safeSHA256File(root, linkPath); err != nil || sum == "" {
+		t.Fatalf("expected safeSHA256File to hash in-root symlink, sum=%q err=%v", sum, err)
 	}
 }
 
