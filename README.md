@@ -1,5 +1,7 @@
 # linux-nixer
 
+日本語版はこちら: [README.ja.md](README.ja.md)
+
 `linux-nixer` scans Debian/Ubuntu-like Linux environments and generates an editable NixOS + Home Manager flake.
 
 The project is intentionally conservative: it detects a wide range of system state, but only turns high-confidence items into Nix automatically. Risky items such as secrets, keys, large stateful data, browser profiles, and cloud credentials are reported as migration notes instead of being embedded into generated Nix files.
