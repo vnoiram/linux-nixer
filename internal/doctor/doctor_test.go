@@ -159,6 +159,35 @@ func TestRunVMSuggestsBootScriptWhenBuildSucceeds(t *testing.T) {
 	}
 }
 
+func TestRunPassesRelativeProjectAsLocalFlakeRef(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "linux-nixer-output", "nix-config")
+	writeGeneratedProjectAt(t, project, "generated")
+	t.Chdir(root)
+	var calls []string
+
+	result := Run(context.Background(), Options{
+		Project: "linux-nixer-output/nix-config",
+		VM:      true,
+		Host:    "generated",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			calls = append(calls, name+" "+strings.Join(args, " "))
+			return []byte("ok"), nil
+		},
+	})
+
+	assertCheck(t, result, "nix flake check", true)
+	assertCheck(t, result, "vm build:generated", true)
+	for _, want := range []string{
+		"nix flake check ./linux-nixer-output/nix-config",
+		"nix build ./linux-nixer-output/nix-config#nixosConfigurations.generated.config.system.build.vm",
+	} {
+		if !slicesContain(calls, want) {
+			t.Fatalf("runner calls missing %q: %v", want, calls)
+		}
+	}
+}
+
 func TestRunBootFailsWhenScriptMissing(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
@@ -406,6 +435,12 @@ func TestDiagnoseNixOutputRecognizesCommonFailures(t *testing.T) {
 func writeGeneratedProject(t *testing.T, host string) string {
 	t.Helper()
 	project := t.TempDir()
+	writeGeneratedProjectAt(t, project, host)
+	return project
+}
+
+func writeGeneratedProjectAt(t *testing.T, project, host string) {
+	t.Helper()
 	files := []string{
 		"hosts/generated/configuration.nix",
 		"users/home.nix",
@@ -449,7 +484,6 @@ func writeGeneratedProject(t *testing.T, host string) string {
 	if err := os.WriteFile(filepath.Join(project, "flake.nix"), []byte(flake), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return project
 }
 
 func mkdirVMResult(t *testing.T, host string) {

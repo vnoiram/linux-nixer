@@ -216,7 +216,8 @@ func Run(ctx context.Context, opts Options) Result {
 			return result
 		}
 	}
-	if out, err := runner(ctx, "nix", "flake", "check", opts.Project); err != nil {
+	flakeRef := localFlakeRef(opts.Project)
+	if out, err := runner(ctx, "nix", "flake", "check", flakeRef); err != nil {
 		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: diagnosticMessage(string(out))})
 		result.OK = false
 	} else {
@@ -246,7 +247,7 @@ func Run(ctx context.Context, opts Options) Result {
 			result.Checks = append(result.Checks, Check{Name: "vm", OK: false, Message: "could not detect host; pass --host"})
 			result.OK = false
 		} else {
-			attr := opts.Project + "#nixosConfigurations." + host + ".config.system.build.vm"
+			attr := flakeRef + "#nixosConfigurations." + host + ".config.system.build.vm"
 			if out, err := runner(ctx, "nix", "build", attr); err != nil {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: false, Message: diagnosticMessage(string(out))})
 				result.OK = false
@@ -283,6 +284,13 @@ func Run(ctx context.Context, opts Options) Result {
 		}
 	}
 	return result
+}
+
+func localFlakeRef(project string) string {
+	if project == "" || filepath.IsAbs(project) || strings.HasPrefix(project, "./") || strings.HasPrefix(project, "../") {
+		return project
+	}
+	return "./" + project
 }
 
 func diagnosticMessage(output string) string {

@@ -45,8 +45,10 @@ jobs:
       - uses: DeterminateSystems/determinate-nix-action@v3
       - name: Build linux-nixer
         run: scripts/timed-step.sh build-linux-nixer nix-timing.tsv -- go build -o bin/linux-nixer ./cmd/linux-nixer
-      - name: Capture this runner (scan, auto-safe review, generate)
-        run: scripts/timed-step.sh capture nix-timing.tsv -- bin/linux-nixer capture --out linux-nixer-output
+      - name: Generate CI fixture root
+        run: scripts/timed-step.sh fixture nix-timing.tsv -- bin/linux-nixer fixture generate --profile developer --out ci-fixture-root
+      - name: Capture CI fixture (scan, auto-safe review, generate)
+        run: scripts/timed-step.sh capture nix-timing.tsv -- bin/linux-nixer capture --root ci-fixture-root --out linux-nixer-output
       # Standard GitHub-hosted runners have no /dev/kvm (no nested
       # virtualization), but this project never sets
       # virtualisation.qemu.forceAccel, so the generated VM script uses
@@ -61,4 +63,5 @@ jobs:
       - name: Doctor (nix flake check + VM build + boot)
         run: scripts/timed-step.sh doctor-vm-boot nix-timing.tsv -- bin/linux-nixer doctor --project linux-nixer-output/nix-config --vm --boot --timeout 5m --host generated
       - name: Nix verification timing summary
+        if: always()
         run: scripts/ci-timing-report.sh nix-timing.tsv | tee -a "$GITHUB_STEP_SUMMARY"
