@@ -272,8 +272,8 @@ func Run(ctx context.Context, opts Options) Result {
 				result.OK = false
 			} else {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: true})
-				script := vmScriptPath(vmOutput, host)
-				if _, err := os.Stat(script); err != nil {
+				script, err := findVMScript(vmOutput, host)
+				if err != nil {
 					result.Checks = append(result.Checks, Check{Name: "vm script:" + host, OK: false, Message: err.Error()})
 					result.OK = false
 				} else {
@@ -459,6 +459,27 @@ func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, er
 
 func vmScriptPath(resultPath, host string) string {
 	return filepath.Join(resultPath, "bin", "run-"+host+"-vm")
+}
+
+func findVMScript(resultPath, host string) (string, error) {
+	script := vmScriptPath(resultPath, host)
+	if _, err := os.Stat(script); err == nil {
+		return script, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	matches, err := filepath.Glob(filepath.Join(resultPath, "bin", "run-*-vm"))
+	if err != nil {
+		return "", err
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("stat %s: no such file or directory", script)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("multiple VM scripts found in %s: %s", filepath.Join(resultPath, "bin"), strings.Join(matches, ", "))
+	}
 }
 
 func errorMessage(err error) string {

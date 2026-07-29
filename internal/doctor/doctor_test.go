@@ -255,6 +255,35 @@ func TestRunBootUsesRunner(t *testing.T) {
 	assertCheck(t, result, "vm boot:demo", true)
 }
 
+func TestRunBootUsesDetectedVMScriptWhenOutputNameDiffersFromHost(t *testing.T) {
+	t.Chdir(t.TempDir())
+	project := writeGeneratedProject(t, "generated")
+	var bootScript string
+
+	result := Run(context.Background(), Options{
+		Project: project,
+		Boot:    true,
+		Host:    "generated",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "nixos")
+				return []byte("ok"), nil
+			}
+			if strings.Contains(name, "run-nixos-vm") {
+				bootScript = name
+				return []byte("boot ok"), nil
+			}
+			return []byte("ok"), nil
+		},
+	})
+
+	assertCheck(t, result, "vm script:generated", true)
+	assertCheck(t, result, "vm boot:generated", true)
+	if bootScript == "" {
+		t.Fatal("boot runner was not called with detected VM script")
+	}
+}
+
 func TestRunBootReadinessDoesNotBuildOrStartVM(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
