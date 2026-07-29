@@ -143,18 +143,17 @@ func TestCheckProjectFileDiffReportsMissingStaleAndExtraFiles(t *testing.T) {
 func TestRunVMSuggestsBootScriptWhenBuildSucceeds(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
-	mkdirVMResult(t, "demo")
 
 	result := Run(context.Background(), Options{
 		Project: project,
 		VM:      true,
 		Host:    "demo",
-		Runner:  successRunner,
+		Runner:  vmBuildSuccessRunner(t, "demo"),
 	})
 
 	assertCheck(t, result, "vm build:demo", true)
 	assertCheck(t, result, "vm script:demo", true)
-	if len(result.Suggestions) == 0 || !strings.Contains(result.Suggestions[0], "result/bin/run-demo-vm") {
+	if len(result.Suggestions) == 0 || !strings.Contains(result.Suggestions[0], "run-demo-vm") {
 		t.Fatalf("missing boot suggestion: %+v", result.Suggestions)
 	}
 }
@@ -165,6 +164,7 @@ func TestRunPassesGeneratedProjectCopyAsFlakeRef(t *testing.T) {
 	writeGeneratedProjectAt(t, project, "generated")
 	t.Chdir(root)
 	var flakeCheckRef string
+	var vmOutput string
 	var buildAttr string
 
 	result := Run(context.Background(), Options{
@@ -175,8 +175,10 @@ func TestRunPassesGeneratedProjectCopyAsFlakeRef(t *testing.T) {
 			if name == "nix" && len(args) >= 3 && args[0] == "flake" && args[1] == "check" {
 				flakeCheckRef = args[2]
 			}
-			if name == "nix" && len(args) >= 2 && args[0] == "build" {
-				buildAttr = args[1]
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				vmOutput = args[2]
+				buildAttr = args[3]
+				writeVMBuildOutput(t, vmOutput, "generated")
 			}
 			return []byte("ok"), nil
 		},
@@ -197,8 +199,14 @@ func TestRunPassesGeneratedProjectCopyAsFlakeRef(t *testing.T) {
 	if buildAttr != flakeCheckRef+wantSuffix {
 		t.Fatalf("build attr=%q, want %q", buildAttr, flakeCheckRef+wantSuffix)
 	}
+	if vmOutput == "" || !filepath.IsAbs(vmOutput) {
+		t.Fatalf("vm output should be an absolute temp path, got %q", vmOutput)
+	}
 	if _, err := os.Stat(flakeCheckRef); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("temp flake copy should be cleaned up after Run, stat err=%v", err)
+	}
+	if _, err := os.Stat(vmOutput); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("temp VM output should be cleaned up after Run, stat err=%v", err)
 	}
 }
 
@@ -222,7 +230,6 @@ func TestRunBootFailsWhenScriptMissing(t *testing.T) {
 func TestRunBootUsesRunner(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
-	mkdirVMResult(t, "demo")
 	var booted bool
 
 	result := Run(context.Background(), Options{
@@ -230,6 +237,10 @@ func TestRunBootUsesRunner(t *testing.T) {
 		Boot:    true,
 		Host:    "demo",
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+				return []byte("ok"), nil
+			}
 			if strings.Contains(name, "run-demo-vm") {
 				booted = true
 				return []byte("boot ok"), nil
@@ -284,13 +295,16 @@ func TestRunBootReadinessDoesNotBuildOrStartVM(t *testing.T) {
 func TestRunBootFailureAndTimeout(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
-	mkdirVMResult(t, "demo")
 
 	failed := Run(context.Background(), Options{
 		Project: project,
 		Boot:    true,
 		Host:    "demo",
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+				return []byte("ok"), nil
+			}
 			if strings.Contains(name, "run-demo-vm") {
 				return []byte("boom"), errors.New("failed")
 			}
@@ -305,6 +319,10 @@ func TestRunBootFailureAndTimeout(t *testing.T) {
 		Host:    "demo",
 		Timeout: time.Nanosecond,
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+				return []byte("ok"), nil
+			}
 			if strings.Contains(name, "run-demo-vm") {
 				<-ctx.Done()
 				return nil, ctx.Err()
@@ -318,7 +336,6 @@ func TestRunBootFailureAndTimeout(t *testing.T) {
 func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
 	t.Chdir(t.TempDir())
 	project := writeGeneratedProject(t, "demo")
-	mkdirVMResult(t, "demo")
 
 	timeoutButPanicked := Run(context.Background(), Options{
 		Project: project,
@@ -326,6 +343,10 @@ func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
 		Host:    "demo",
 		Timeout: time.Nanosecond,
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+				return []byte("ok"), nil
+			}
 			if strings.Contains(name, "run-demo-vm") {
 				<-ctx.Done()
 				return []byte("Kernel panic - not syncing: Attempted to kill init!"), ctx.Err()
@@ -343,6 +364,10 @@ func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
 		Boot:    true,
 		Host:    "demo",
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+				return []byte("ok"), nil
+			}
 			if strings.Contains(name, "run-demo-vm") {
 				return []byte("You are in emergency mode."), nil
 			}
@@ -370,6 +395,58 @@ func TestRunAddsNixDiagnosticsToFlakeCheckFailure(t *testing.T) {
 		if !strings.Contains(check.Message, want) {
 			t.Fatalf("flake diagnostic missing %q: %+v", want, check)
 		}
+	}
+}
+
+func TestRunAllowsBootabilityFlakeCheckAssertionsWhenVMBuildSucceeds(t *testing.T) {
+	project := writeGeneratedProject(t, "demo")
+	result := Run(context.Background(), Options{
+		Project: project,
+		VM:      true,
+		Host:    "demo",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 3 && args[0] == "flake" && args[1] == "check" {
+				return []byte(`error:
+       Failed assertions:
+       - The 'fileSystems' option does not specify your root file system.
+       - You must set the option 'boot.loader.grub.devices' or 'boot.loader.grub.mirroredBoots' to make the system bootable.
+`), errors.New("failed")
+			}
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+			}
+			return []byte("ok"), nil
+		},
+	})
+
+	assertCheck(t, result, "nix flake check", true)
+	assertCheck(t, result, "vm build:demo", true)
+	assertCheck(t, result, "vm script:demo", true)
+	if !result.OK {
+		t.Fatalf("bootability-only flake check assertions should not fail VM doctor: %+v", result.Checks)
+	}
+}
+
+func TestRunStillFailsOtherFlakeCheckErrorsUnderVM(t *testing.T) {
+	project := writeGeneratedProject(t, "demo")
+	result := Run(context.Background(), Options{
+		Project: project,
+		VM:      true,
+		Host:    "demo",
+		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "nix" && len(args) >= 3 && args[0] == "flake" && args[1] == "check" {
+				return []byte("error: syntax error, unexpected ';' at /tmp/configuration.nix:10:3"), errors.New("failed")
+			}
+			if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+				writeVMBuildOutput(t, args[2], "demo")
+			}
+			return []byte("ok"), nil
+		},
+	})
+
+	assertCheck(t, result, "nix flake check", false)
+	if result.OK {
+		t.Fatal("non-bootability flake check errors should still fail VM doctor")
 	}
 }
 
@@ -459,6 +536,8 @@ func writeGeneratedProjectAt(t *testing.T, project, host string) {
 		"hosts/generated/configuration.nix",
 		"users/home.nix",
 		"modules/containers.nix",
+		"modules/services.nix",
+		"modules/filesystem-findings.nix",
 		"reports/package-sources.md",
 		"reports/filesystem.md",
 		"reports/users.md",
@@ -500,9 +579,19 @@ func writeGeneratedProjectAt(t *testing.T, project, host string) {
 	}
 }
 
-func mkdirVMResult(t *testing.T, host string) {
+func vmBuildSuccessRunner(t *testing.T, host string) Runner {
 	t.Helper()
-	path := filepath.Join("result", "bin", "run-"+host+"-vm")
+	return func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "nix" && len(args) >= 4 && args[0] == "build" && args[1] == "-o" {
+			writeVMBuildOutput(t, args[2], host)
+		}
+		return []byte("ok"), nil
+	}
+}
+
+func writeVMBuildOutput(t *testing.T, outputPath, host string) {
+	t.Helper()
+	path := filepath.Join(outputPath, "bin", "run-"+host+"-vm")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}

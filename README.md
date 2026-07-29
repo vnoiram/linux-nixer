@@ -36,7 +36,7 @@ This is an early implementation scaffold. It includes:
 - Read-only `scan --sudo` fallback for selected host files
 - Unit and fixture-style tests, including seeded arbitrary-directory executable detection
 - GitHub Actions CI and tag-based release workflow
-- A CI job installs a real Nix toolchain and validates a generated flake against it (`nix flake check`, a real VM derivation build, and a real VM boot attempt) on every push/PR
+- A CI job installs a real Nix toolchain and validates generated Nix output with a real VM derivation build and boot attempt on every push/PR
 - `scan`/`capture --plugin PATH` to run external scanner plugins (any executable, JSON on stdin/stdout) alongside the built-in scanners
 - `baseline fetch --offline` uses a pre-built manifest bundled into the binary for common releases, no Docker/Podman or network access needed
 

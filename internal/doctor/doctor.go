@@ -226,8 +226,12 @@ func Run(ctx context.Context, opts Options) Result {
 	}
 	defer cleanup()
 	if out, err := runner(ctx, "nix", "flake", "check", flakeRef); err != nil {
-		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: diagnosticMessage(string(out))})
-		result.OK = false
+		if opts.VM && nixFlakeCheckBootabilityAssertions(string(out)) {
+			result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: true, Message: "full NixOS flake check hit bootability assertions for migration scaffolding; continuing with VM derivation build"})
+		} else {
+			result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: diagnosticMessage(string(out))})
+			result.OK = false
+		}
 	} else {
 		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: true})
 	}
@@ -240,7 +244,7 @@ func Run(ctx context.Context, opts Options) Result {
 			result.Checks = append(result.Checks, Check{Name: "vm boot readiness", OK: false, Message: "could not detect host; pass --host"})
 			result.OK = false
 		} else {
-			script := vmScriptPath(host)
+			script := vmScriptPath("result", host)
 			message := "host=" + host + " timeout=" + opts.Timeout.String() + " script=" + script + " command=" + script + "; readiness only, VM was not started"
 			result.Checks = append(result.Checks, Check{Name: "vm boot readiness:" + host, OK: true, Message: message})
 			result.Suggestions = append(result.Suggestions, "Before running `doctor --boot`, expect a VM build, local qemu/KVM acceleration availability differences, and a timeout-based smoke check rather than a full login validation.")
@@ -255,13 +259,20 @@ func Run(ctx context.Context, opts Options) Result {
 			result.Checks = append(result.Checks, Check{Name: "vm", OK: false, Message: "could not detect host; pass --host"})
 			result.OK = false
 		} else {
+			vmOutput, vmCleanup, err := tempVMOutputPath()
+			if err != nil {
+				result.Checks = append(result.Checks, Check{Name: "vm output", OK: false, Message: err.Error()})
+				result.OK = false
+				return result
+			}
+			defer vmCleanup()
 			attr := flakeRef + "#nixosConfigurations." + host + ".config.system.build.vm"
-			if out, err := runner(ctx, "nix", "build", attr); err != nil {
+			if out, err := runner(ctx, "nix", "build", "-o", vmOutput, attr); err != nil {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: false, Message: diagnosticMessage(string(out))})
 				result.OK = false
 			} else {
 				result.Checks = append(result.Checks, Check{Name: "vm build:" + host, OK: true})
-				script := vmScriptPath(host)
+				script := vmScriptPath(vmOutput, host)
 				if _, err := os.Stat(script); err != nil {
 					result.Checks = append(result.Checks, Check{Name: "vm script:" + host, OK: false, Message: err.Error()})
 					result.OK = false
@@ -292,6 +303,16 @@ func Run(ctx context.Context, opts Options) Result {
 		}
 	}
 	return result
+}
+
+func tempVMOutputPath() (string, func(), error) {
+	tmp, err := os.MkdirTemp("", "linux-nixer-doctor-vm-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	return filepath.Join(tmp, "result"), func() {
+		_ = os.RemoveAll(tmp)
+	}, nil
 }
 
 func nixSafeFlakeRef(project string) (string, func(), error) {
@@ -343,6 +364,14 @@ func copyTree(src, dst string) error {
 		}
 		return os.WriteFile(target, data, info.Mode().Perm())
 	})
+}
+
+func nixFlakeCheckBootabilityAssertions(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "failed assertions") &&
+		strings.Contains(lower, "filesystems") &&
+		strings.Contains(lower, "root file system") &&
+		strings.Contains(lower, "boot.loader.grub.devices")
 }
 
 func diagnosticMessage(output string) string {
@@ -428,8 +457,8 @@ func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, er
 	return cmd.CombinedOutput()
 }
 
-func vmScriptPath(host string) string {
-	return filepath.Join("result", "bin", "run-"+host+"-vm")
+func vmScriptPath(resultPath, host string) string {
+	return filepath.Join(resultPath, "bin", "run-"+host+"-vm")
 }
 
 func errorMessage(err error) string {
