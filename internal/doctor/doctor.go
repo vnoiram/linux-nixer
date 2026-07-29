@@ -2,6 +2,8 @@ package doctor
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,7 +218,13 @@ func Run(ctx context.Context, opts Options) Result {
 			return result
 		}
 	}
-	flakeRef := localFlakeRef(opts.Project)
+	flakeRef, cleanup, err := nixSafeFlakeRef(opts.Project)
+	if err != nil {
+		result.Checks = append(result.Checks, Check{Name: "nix flake copy", OK: false, Message: err.Error()})
+		result.OK = false
+		return result
+	}
+	defer cleanup()
 	if out, err := runner(ctx, "nix", "flake", "check", flakeRef); err != nil {
 		result.Checks = append(result.Checks, Check{Name: "nix flake check", OK: false, Message: diagnosticMessage(string(out))})
 		result.OK = false
@@ -286,11 +294,55 @@ func Run(ctx context.Context, opts Options) Result {
 	return result
 }
 
-func localFlakeRef(project string) string {
-	if project == "" || filepath.IsAbs(project) || strings.HasPrefix(project, "./") || strings.HasPrefix(project, "../") {
-		return project
+func nixSafeFlakeRef(project string) (string, func(), error) {
+	tmp, err := os.MkdirTemp("", "linux-nixer-doctor-flake-*")
+	if err != nil {
+		return "", func() {}, err
 	}
-	return "./" + project
+	cleanup := func() {
+		_ = os.RemoveAll(tmp)
+	}
+	dst := filepath.Join(tmp, "nix-config")
+	if err := copyTree(project, dst); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return dst, cleanup, nil
+}
+
+func copyTree(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("copy generated flake: stat %s: %w", src, err)
+	}
+	if !srcInfo.IsDir() {
+		return fmt.Errorf("copy generated flake: %s is not a directory", src)
+	}
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		if info.Mode()&os.ModeType != 0 {
+			return fmt.Errorf("copy generated flake: unsupported non-regular file %s", path)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
+	})
 }
 
 func diagnosticMessage(output string) string {

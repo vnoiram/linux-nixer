@@ -159,32 +159,46 @@ func TestRunVMSuggestsBootScriptWhenBuildSucceeds(t *testing.T) {
 	}
 }
 
-func TestRunPassesRelativeProjectAsLocalFlakeRef(t *testing.T) {
+func TestRunPassesGeneratedProjectCopyAsFlakeRef(t *testing.T) {
 	root := t.TempDir()
 	project := filepath.Join(root, "linux-nixer-output", "nix-config")
 	writeGeneratedProjectAt(t, project, "generated")
 	t.Chdir(root)
-	var calls []string
+	var flakeCheckRef string
+	var buildAttr string
 
 	result := Run(context.Background(), Options{
 		Project: "linux-nixer-output/nix-config",
 		VM:      true,
 		Host:    "generated",
 		Runner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			calls = append(calls, name+" "+strings.Join(args, " "))
+			if name == "nix" && len(args) >= 3 && args[0] == "flake" && args[1] == "check" {
+				flakeCheckRef = args[2]
+			}
+			if name == "nix" && len(args) >= 2 && args[0] == "build" {
+				buildAttr = args[1]
+			}
 			return []byte("ok"), nil
 		},
 	})
 
 	assertCheck(t, result, "nix flake check", true)
 	assertCheck(t, result, "vm build:generated", true)
-	for _, want := range []string{
-		"nix flake check ./linux-nixer-output/nix-config",
-		"nix build ./linux-nixer-output/nix-config#nixosConfigurations.generated.config.system.build.vm",
-	} {
-		if !slicesContain(calls, want) {
-			t.Fatalf("runner calls missing %q: %v", want, calls)
-		}
+	if flakeCheckRef == "" || buildAttr == "" {
+		t.Fatalf("missing nix calls: flakeCheckRef=%q buildAttr=%q", flakeCheckRef, buildAttr)
+	}
+	if !filepath.IsAbs(flakeCheckRef) {
+		t.Fatalf("flake ref should be an absolute temp path, got %q", flakeCheckRef)
+	}
+	if strings.Contains(flakeCheckRef, "linux-nixer-output") || strings.HasPrefix(flakeCheckRef, root) {
+		t.Fatalf("flake ref should point at a temp copy outside the repo root, got %q", flakeCheckRef)
+	}
+	wantSuffix := "#nixosConfigurations.generated.config.system.build.vm"
+	if buildAttr != flakeCheckRef+wantSuffix {
+		t.Fatalf("build attr=%q, want %q", buildAttr, flakeCheckRef+wantSuffix)
+	}
+	if _, err := os.Stat(flakeCheckRef); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("temp flake copy should be cleaned up after Run, stat err=%v", err)
 	}
 }
 
