@@ -241,7 +241,7 @@ func TestRunBootUsesRunner(t *testing.T) {
 				writeVMBuildOutput(t, args[2], "demo")
 				return []byte("ok"), nil
 			}
-			if strings.Contains(name, "run-demo-vm") {
+			if isBootCommand(name, args, "run-demo-vm") {
 				booted = true
 				return []byte("boot ok"), nil
 			}
@@ -269,8 +269,8 @@ func TestRunBootUsesDetectedVMScriptWhenOutputNameDiffersFromHost(t *testing.T) 
 				writeVMBuildOutput(t, args[2], "nixos")
 				return []byte("ok"), nil
 			}
-			if strings.Contains(name, "run-nixos-vm") {
-				bootScript = name
+			if isBootCommand(name, args, "run-nixos-vm") {
+				bootScript = args[len(args)-1]
 				return []byte("boot ok"), nil
 			}
 			return []byte("ok"), nil
@@ -281,6 +281,15 @@ func TestRunBootUsesDetectedVMScriptWhenOutputNameDiffersFromHost(t *testing.T) 
 	assertCheck(t, result, "vm boot:generated", true)
 	if bootScript == "" {
 		t.Fatal("boot runner was not called with detected VM script")
+	}
+}
+
+func TestBootCommandRunsVMHeadless(t *testing.T) {
+	t.Setenv("QEMU_OPTS", "-m 1024")
+	name, args := bootCommand("/tmp/result/bin/run-demo-vm")
+	wantArgs := []string{"QEMU_OPTS=-m 1024 -nographic", "/tmp/result/bin/run-demo-vm"}
+	if name != "env" || strings.Join(args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("bootCommand=%s %v, want env %v", name, args, wantArgs)
 	}
 }
 
@@ -334,7 +343,7 @@ func TestRunBootFailureAndTimeout(t *testing.T) {
 				writeVMBuildOutput(t, args[2], "demo")
 				return []byte("ok"), nil
 			}
-			if strings.Contains(name, "run-demo-vm") {
+			if isBootCommand(name, args, "run-demo-vm") {
 				return []byte("boom"), errors.New("failed")
 			}
 			return []byte("ok"), nil
@@ -352,7 +361,7 @@ func TestRunBootFailureAndTimeout(t *testing.T) {
 				writeVMBuildOutput(t, args[2], "demo")
 				return []byte("ok"), nil
 			}
-			if strings.Contains(name, "run-demo-vm") {
+			if isBootCommand(name, args, "run-demo-vm") {
 				<-ctx.Done()
 				return nil, ctx.Err()
 			}
@@ -376,7 +385,7 @@ func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
 				writeVMBuildOutput(t, args[2], "demo")
 				return []byte("ok"), nil
 			}
-			if strings.Contains(name, "run-demo-vm") {
+			if isBootCommand(name, args, "run-demo-vm") {
 				<-ctx.Done()
 				return []byte("Kernel panic - not syncing: Attempted to kill init!"), ctx.Err()
 			}
@@ -397,7 +406,7 @@ func TestRunBootDetectsFailureSignatureDespiteTimeoutOrCleanExit(t *testing.T) {
 				writeVMBuildOutput(t, args[2], "demo")
 				return []byte("ok"), nil
 			}
-			if strings.Contains(name, "run-demo-vm") {
+			if isBootCommand(name, args, "run-demo-vm") {
 				return []byte("You are in emergency mode."), nil
 			}
 			return []byte("ok"), nil
@@ -627,6 +636,16 @@ func writeVMBuildOutput(t *testing.T, outputPath, host string) {
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func isBootCommand(name string, args []string, scriptName string) bool {
+	if name != "env" || len(args) < 2 {
+		return false
+	}
+	if !strings.HasPrefix(args[0], "QEMU_OPTS=") || !strings.Contains(args[0], "-nographic") {
+		return false
+	}
+	return strings.Contains(args[len(args)-1], scriptName)
 }
 
 func successRunner(ctx context.Context, name string, args ...string) ([]byte, error) {

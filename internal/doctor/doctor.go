@@ -280,7 +280,8 @@ func Run(ctx context.Context, opts Options) Result {
 					result.Checks = append(result.Checks, Check{Name: "vm script:" + host, OK: true, Message: script})
 					if opts.Boot {
 						bootCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
-						out, err := runner(bootCtx, script)
+						bootName, bootArgs := bootCommand(script)
+						out, err := runner(bootCtx, bootName, bootArgs...)
 						cancel()
 						if sig := bootFailureSignature(string(out)); sig != "" {
 							result.Checks = append(result.Checks, Check{Name: "vm boot:" + host, OK: false, Message: "boot output contains a failure signature (" + sig + "): " + string(out)})
@@ -480,6 +481,11 @@ func findVMScript(resultPath, host string) (string, error) {
 	default:
 		return "", fmt.Errorf("multiple VM scripts found in %s: %s", filepath.Join(resultPath, "bin"), strings.Join(matches, ", "))
 	}
+}
+
+func bootCommand(script string) (string, []string) {
+	qemuOpts := strings.TrimSpace(os.Getenv("QEMU_OPTS") + " -nographic")
+	return "env", []string{"QEMU_OPTS=" + qemuOpts, script}
 }
 
 func errorMessage(err error) string {
