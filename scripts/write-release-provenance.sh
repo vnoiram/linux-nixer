@@ -6,5 +6,4 @@ if [ "$#" -ne 4 ]; then
   exit 2
 fi
 
-GOOS= GOARCH= go run ./scripts/write_release_provenance_tool.go "$1" "$2" "$3" "$4"
-
+GOOS='' GOARCH='' go run ./scripts/write_release_provenance_tool.go "$1" "$2" "$3" "$4"

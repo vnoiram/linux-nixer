@@ -37,7 +37,7 @@ for arch in amd64 arm64; do
   tar -C dist -czf "dist/linux-nixer-${tag}-linux-${arch}.tar.gz" linux-nixer
   rm "dist/linux-nixer"
 done
-(cd dist && sha256sum *.tar.gz > checksums.txt)
+(cd dist && sha256sum -- *.tar.gz > checksums.txt)
 
 echo "==> write release provenance"
 go_version="$(go version)"
